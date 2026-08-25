@@ -1,0 +1,24 @@
+# 密钥与环境变量（严禁提交）
+.env
+.env.*
+!.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+dist/
+build/
+
+# 日志与数据
+*.log
+articles/
+
+# 编辑器与系统文件
+.idea/
+.vscode/
+.zcode/
+.DS_Store
+Thumbs.db
