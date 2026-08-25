@@ -6,10 +6,13 @@ AI 文章生成与多平台自动发布工具：基于大语言模型生成文�
 
 本仓库由两个互补的发布子系统组成，覆盖不同平台的最佳接入方式：
 
-| 子系统 | 技术栈 | 接入方式 | 支持平台 |
+| 模块 | 技术栈 | 接入方式 | 支持平台 |
 |---|---|---|---|
+| [`generator/`](generator/) | Python + LLM | 多源财经快讯 + OpenAI 兼容模型 | 早报（A股/港美股）与分析文章生成，直接产出待发文章 + 口播稿 |
 | [`autopub/`](autopub/) | Python + Playwright | 浏览器持久化配置（人工首登保会话） | 雪球、知乎专栏、东方财富财富号、老虎社区（同花顺/微博为占位） |
 | [`adapters-kit/`](adapters-kit/) | Node.js + Playwright | API 优先 + storageState 认证 | 搜狐号、今日头条（头条号）、网易号、什么值得买 |
+
+生成 → 发布链路：`generator` 产出的文章直接落入 `autopub/articles/` 待发目录，`autopub` 负责多平台发布。
 
 ### autopub/ — 浏览器自动化发布（Python）
 
@@ -52,6 +55,7 @@ node examples/publish.js <sohu|toutiao|wangyi|zdm> <accountId> <storageState.jso
 ## 功能规划
 
 - [x] 多平台自动发布（8 平台，两个子系统）
-- [ ] AI 文章生成模块（多模型接入：智谱 GLM / DeepSeek / OpenAI 等可切换）
-- [ ] 生成 → 发布流水线打通
+- [x] AI 文章生成模块（早报 + 分析文章，多模型可切换，复用 autopub 模型配置）
+- [x] 生成 → 发布链路（generator 产出直接进入 autopub 待发目录）
+- [ ] 定时自动早报（交易日早间）
 - [ ] 发布结果统一对账与数据看板

@@ -17,6 +17,9 @@ build/
 logs/
 /articles/
 
+# 生成模块的过程产物与口播稿
+/generator/output/
+
 # Node
 node_modules/
 
