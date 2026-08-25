@@ -1,0 +1,5 @@
+node_modules/
+.env
+*.zip
+storage-state*.json
+account-state*.json

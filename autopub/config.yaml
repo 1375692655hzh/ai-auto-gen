@@ -1,0 +1,53 @@
+# auto-publisher 配置
+# 改开关 / 阈值都在这里,不动代码
+
+# 待发文章所在的固定文件夹(绝对路径或相对本项目)
+articles_dir: articles
+
+# ===== 模型 API(团队各自填自己的)=====
+# 仅在发知乎/东财、需要把"传不上的图表"转成文字时用到;不发这两个平台可不填。
+# 推荐在网页「模型 API 设置」里填,密钥会存到 secret.local.json(不随分享外泄)。
+# 也可直接在这里填(注意别把带 key 的 config.yaml 发出去)。
+model:
+  # openai_compatible = 任何 OpenAI 兼容接口(OpenAI / DeepSeek / 通义千问 / Kimi / 智谱 / Ollama)
+  # claude_cli        = 走本机 claude 命令行(仅作者本人用)
+  provider: openai_compatible
+  base_url: ""          # 留空则按 provider 取默认;自定义/中转填完整地址,如 https://api.deepseek.com/v1
+  model: ""             # 模型名,如 deepseek-chat / gpt-4o-mini / qwen-plus
+  api_key: ""           # 建议留空,改在网页里填(写这里会进分享包,注意安全)
+
+# 全局节流
+throttle:
+  min_interval_seconds: 60      # 篇间最小间隔
+  max_consecutive_failures: 3   # 连续失败几次就停
+
+# 各平台设置(enabled=false 的不发)
+platforms:
+  laohu:
+    enabled: true
+    max_daily: 10
+    # card=遇 $股票$ 走联想插入真卡片;strip=转纯文本;keep=原样打字面
+    stock_tags: card
+    append_hot: 3          # 文末追加热议榜前 N 只股票卡片(0=不加)
+  eastmoney:
+    enabled: true
+    max_daily: 10
+    stock_tags: strip
+  tonghuashun:
+    enabled: false
+    max_daily: 10
+    stock_tags: strip
+  weibo:
+    enabled: false
+    max_daily: 8
+    stock_tags: strip
+  xueqiu:
+    enabled: true
+    max_daily: 15
+    stock_tags: keep
+    append_hot: 3          # 文末加雪球美股热榜前N个 cashtag(雪球长文限插3个)
+  zhihu:
+    enabled: true
+    max_daily: 5
+    stock_tags: strip
+    fill_chart_gaps: true     # 图片传不上→把依赖图表的位置用文字说明替代(保格式), 知乎专用

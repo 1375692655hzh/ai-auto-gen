@@ -1,0 +1,229 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>auto-publisher 控制台</title>
+<style>
+  :root { --bg:#f5f6f8; --card:#fff; --line:#e3e6ea; --brand:#2563eb; --ok:#16a34a; --bad:#dc2626; --mut:#6b7280; }
+  * { box-sizing:border-box; }
+  body { margin:0; font-family:-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;
+         background:var(--bg); color:#111; line-height:1.6; }
+  .wrap { max-width:880px; margin:0 auto; padding:24px 16px 60px; }
+  h1 { font-size:22px; margin:0 0 4px; }
+  .sub { color:var(--mut); font-size:13px; margin-bottom:20px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:12px;
+          padding:18px 20px; margin-bottom:16px; }
+  .step { font-size:12px; color:var(--brand); font-weight:600; letter-spacing:.5px; }
+  h2 { font-size:16px; margin:2px 0 14px; }
+  label { display:block; font-size:13px; color:#374151; margin:10px 0 4px; }
+  input[type=text], input[type=password], select {
+    width:100%; padding:8px 10px; border:1px solid var(--line); border-radius:8px; font-size:14px; }
+  .row { display:flex; gap:12px; flex-wrap:wrap; }
+  .row > div { flex:1; min-width:180px; }
+  button { background:var(--brand); color:#fff; border:0; border-radius:8px;
+           padding:9px 16px; font-size:14px; cursor:pointer; }
+  button.ghost { background:#fff; color:var(--brand); border:1px solid var(--brand); }
+  button.danger { background:#fff; color:var(--bad); border:1px solid #f0caca; padding:4px 10px; font-size:12px; }
+  button:disabled { opacity:.5; cursor:not-allowed; }
+  .pill { display:inline-block; font-size:12px; padding:2px 8px; border-radius:999px; }
+  .pill.ok { background:#dcfce7; color:var(--ok); }
+  .pill.bad { background:#fee2e2; color:var(--bad); }
+  .hint { font-size:12px; color:var(--mut); margin-top:6px; }
+  .drop { border:2px dashed var(--line); border-radius:10px; padding:22px; text-align:center;
+          color:var(--mut); cursor:pointer; transition:.15s; }
+  .drop.hot { border-color:var(--brand); background:#eff6ff; color:var(--brand); }
+  .alist { list-style:none; padding:0; margin:12px 0 0; }
+  .alist li { display:flex; justify-content:space-between; align-items:center;
+              padding:8px 10px; border:1px solid var(--line); border-radius:8px; margin-bottom:6px; font-size:13px; }
+  .plat { display:flex; gap:10px; flex-wrap:wrap; }
+  .plat label { display:flex; align-items:center; gap:8px; border:1px solid var(--line);
+                border-radius:10px; padding:10px 14px; margin:0; cursor:pointer; font-size:14px; }
+  .plat input { width:16px; height:16px; }
+  .plat .n { font-size:11px; color:var(--mut); }
+  pre#log { background:#0b1021; color:#cbd5e1; padding:14px; border-radius:10px;
+            font-size:12px; max-height:340px; overflow:auto; white-space:pre-wrap; margin:12px 0 0; }
+  .msg { font-size:13px; margin-top:8px; min-height:18px; }
+  .msg.ok { color:var(--ok); } .msg.bad { color:var(--bad); }
+  .warn { background:#fffbeb; border:1px solid #fde68a; color:#92400e; font-size:13px;
+          padding:10px 14px; border-radius:8px; margin-bottom:16px; }
+  a { color:var(--brand); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>📤 auto-publisher 控制台</h1>
+  <div class="sub">本地一键多平台发文 · 仅在本机运行 · 首次使用请先看
+    <a href="#" onclick="alert('见项目根目录的 使用指南.md');return false;">使用指南.md</a></div>
+
+  <div class="warn">⚠️ 首次发某个平台时,会弹出 Chrome 窗口要求你<b>手动登录该平台账号</b>(只需一次,之后记住)。
+    遇到验证码/滑块也在那个窗口里手动完成,程序会自动继续。</div>
+
+  <!-- Step 1 模型 API -->
+  <div class="card">
+    <div class="step">STEP 1 · 可选</div>
+    <h2>模型 API 设置 <span id="modelPill" class="pill bad">未配置</span></h2>
+    <div class="hint">只有发<b>知乎 / 东方财富</b>且文章里有传不上的图表时才需要(把图表转成文字)。
+      不发这两个平台可跳过。密钥保存在本机 secret.local.json,不会随分享外泄。</div>
+    <div class="row">
+      <div>
+        <label>服务商 provider</label>
+        <select id="provider"></select>
+      </div>
+      <div>
+        <label>模型名 model</label>
+        <input type="text" id="model" placeholder="如 deepseek-chat / gpt-4o-mini / qwen-plus">
+      </div>
+    </div>
+    <label>base_url(留空按服务商默认)</label>
+    <input type="text" id="base_url" placeholder="如 https://api.deepseek.com/v1">
+    <label>API Key</label>
+    <input type="password" id="api_key" placeholder="粘贴你的 API key">
+    <div style="margin-top:14px; display:flex; gap:10px;">
+      <button onclick="saveModel()">保存</button>
+      <button class="ghost" onclick="testModel()">测试连接</button>
+    </div>
+    <div id="modelMsg" class="msg"></div>
+  </div>
+
+  <!-- Step 2 上传文章 -->
+  <div class="card">
+    <div class="step">STEP 2</div>
+    <h2>上传要发布的文章</h2>
+    <div class="hint">支持 <b>.docx</b> 和 <b>.md</b>。每个文件 = 一篇;第一行/首段 = 标题,其余 = 正文。</div>
+    <div id="drop" class="drop">点此选择文件,或把文件拖到这里</div>
+    <input type="file" id="fileInput" multiple accept=".md,.docx" style="display:none">
+    <ul id="alist" class="alist"></ul>
+    <div id="uploadMsg" class="msg"></div>
+  </div>
+
+  <!-- Step 3 选平台 -->
+  <div class="card">
+    <div class="step">STEP 3</div>
+    <h2>选择要发布的平台</h2>
+    <div id="plat" class="plat"></div>
+  </div>
+
+  <!-- Step 4 发布 -->
+  <div class="card">
+    <div class="step">STEP 4</div>
+    <h2>开始发布</h2>
+    <div class="hint">会按勾选的平台依次发 articles/ 里所有未发过的文章;已发过的自动跳过。</div>
+    <div style="margin-top:12px; display:flex; gap:10px; align-items:center;">
+      <button id="runBtn" onclick="runPublish()">🚀 开始发布</button>
+      <button class="ghost" id="stopBtn" onclick="stopPublish()" style="display:none">停止</button>
+      <span id="runState" class="msg"></span>
+    </div>
+    <pre id="log" style="display:none"></pre>
+  </div>
+</div>
+
+<script>
+let DATA = {};
+
+async function refresh() {
+  DATA = await (await fetch('/api/status')).json();
+  // 模型状态
+  const m = DATA.model;
+  const pill = document.getElementById('modelPill');
+  if (m.configured) { pill.className='pill ok'; pill.textContent = '已配置 · ' + (m.model||m.provider); }
+  else { pill.className='pill bad'; pill.textContent='未配置'; }
+  // provider 下拉(只首次填充)
+  const sel = document.getElementById('provider');
+  if (!sel.options.length) {
+    DATA.providers.forEach(p => { const o=document.createElement('option'); o.value=p; o.textContent=p; sel.appendChild(o); });
+    sel.value = m.provider || 'openai_compatible';
+    if (m.base_url) document.getElementById('base_url').value = m.base_url;
+    if (m.model) document.getElementById('model').value = m.model;
+  }
+  // 平台(只首次填充)
+  const platBox = document.getElementById('plat');
+  if (!platBox.children.length) {
+    DATA.platforms.forEach(p => {
+      const l=document.createElement('label');
+      l.innerHTML = `<input type="checkbox" value="${p.key}" checked>
+        <span>${p.name}<br><span class="n">${p.note}</span></span>`;
+      platBox.appendChild(l);
+    });
+  }
+  // 文章列表
+  const ul = document.getElementById('alist');
+  ul.innerHTML = '';
+  if (!DATA.articles.length) ul.innerHTML = '<li style="color:#6b7280;border:0">(暂无文章)</li>';
+  DATA.articles.forEach(a => {
+    const li=document.createElement('li');
+    li.innerHTML = `<span>📄 ${a.name} <span style="color:#9ca3af">${a.size_kb}KB</span></span>
+      <button class="danger" onclick="del('${a.name.replace(/'/g,"\\'")}')">删除</button>`;
+    ul.appendChild(li);
+  });
+  // 运行态
+  const running = DATA.running;
+  document.getElementById('runBtn').disabled = running;
+  document.getElementById('stopBtn').style.display = running ? 'inline-block' : 'none';
+}
+
+async function saveModel() {
+  const body = {
+    provider: document.getElementById('provider').value,
+    model: document.getElementById('model').value,
+    base_url: document.getElementById('base_url').value,
+    api_key: document.getElementById('api_key').value,
+  };
+  await fetch('/api/model/save', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+  msg('modelMsg','已保存 ✅','ok'); refresh();
+}
+async function testModel() {
+  msg('modelMsg','测试中…','');
+  const r = await (await fetch('/api/model/test',{method:'POST'})).json();
+  msg('modelMsg', r.message, r.ok?'ok':'bad');
+}
+
+// 上传
+const drop = document.getElementById('drop'), fileInput = document.getElementById('fileInput');
+drop.onclick = () => fileInput.click();
+fileInput.onchange = () => upload(fileInput.files);
+['dragover','dragenter'].forEach(e=>drop.addEventListener(e,ev=>{ev.preventDefault();drop.classList.add('hot');}));
+['dragleave','drop'].forEach(e=>drop.addEventListener(e,ev=>{ev.preventDefault();drop.classList.remove('hot');}));
+drop.addEventListener('drop', ev => upload(ev.dataTransfer.files));
+
+async function upload(files) {
+  if (!files.length) return;
+  const fd = new FormData();
+  for (const f of files) fd.append('files', f);
+  msg('uploadMsg','上传中…','');
+  const r = await (await fetch('/api/upload',{method:'POST',body:fd})).json();
+  let t = `已上传 ${r.saved.length} 个`;
+  if (r.skipped.length) t += `;跳过(仅支持 md/docx):${r.skipped.join(', ')}`;
+  msg('uploadMsg', t, 'ok'); refresh();
+}
+async function del(name) {
+  if (!confirm('删除 '+name+'?')) return;
+  await fetch('/api/delete',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name})});
+  refresh();
+}
+
+// 发布
+async function runPublish() {
+  const platforms = [...document.querySelectorAll('#plat input:checked')].map(c=>c.value);
+  const r = await (await fetch('/api/run',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({platforms})})).json();
+  if (!r.ok) { msg('runState', r.message, 'bad'); return; }
+  msg('runState', r.message, 'ok');
+  document.getElementById('log').style.display='block';
+  pollLog();
+}
+async function stopPublish(){ await fetch('/api/run/stop',{method:'POST'}); }
+async function pollLog() {
+  const r = await (await fetch('/api/run/log')).json();
+  const log = document.getElementById('log');
+  log.textContent = r.log; log.scrollTop = log.scrollHeight;
+  refresh();
+  if (r.running) setTimeout(pollLog, 1500);
+  else msg('runState','发布任务已结束(看上方日志/各平台结果)','ok');
+}
+
+function msg(id,t,cls){ const e=document.getElementById(id); e.textContent=t; e.className='msg '+(cls||''); }
+refresh();
+</script>
+</body>
+</html>

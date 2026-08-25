@@ -14,7 +14,11 @@ build/
 
 # 日志与数据
 *.log
-articles/
+logs/
+/articles/
+
+# Node
+node_modules/
 
 # 编辑器与系统文件
 .idea/

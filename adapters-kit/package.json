@@ -1,0 +1,19 @@
+{
+  "name": "publishing-adapters-kit-sanitized",
+  "version": "1.0.0",
+  "private": true,
+  "description": "四个平台发文适配器脱敏学习包",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "test": "node --test",
+    "check:sanitized": "node scripts/check-sanitization.js",
+    "check": "npm run check:sanitized && npm test"
+  },
+  "dependencies": {
+    "cloakbrowser": "0.5.7",
+    "playwright": "1.61.1"
+  }
+}

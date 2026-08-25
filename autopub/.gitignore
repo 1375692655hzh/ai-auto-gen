@@ -1,0 +1,19 @@
+# 个人密钥(网页填写后生成,切勿分享)
+secret.local.json
+
+# 个人数据
+state.json
+title_overrides.json
+articles/*
+!articles/.gitkeep
+articles/_tables/*
+!articles/_tables/.gitkeep
+
+# 运行产物
+logs/
+__pycache__/
+*.pyc
+.DS_Store
+
+# 浏览器登录态(本就在用户主目录,不应进仓库)
+.*_chrome_profile/

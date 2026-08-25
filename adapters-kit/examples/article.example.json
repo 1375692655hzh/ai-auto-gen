@@ -1,0 +1,19 @@
+{
+  "title": "示例标题，请替换为自有内容",
+  "html": "<p>示例正文</p>",
+  "text": "示例正文",
+  "images": [
+    {
+      "path": "/absolute/path/to/body-image.jpg",
+      "contentType": "image/jpeg"
+    }
+  ],
+  "topicImage": {
+    "path": "/absolute/path/to/cover.jpg",
+    "longPath": "/absolute/path/to/long-cover.jpg",
+    "squarePath": "/absolute/path/to/square-cover.jpg"
+  },
+  "tags": [
+    "示例标签"
+  ]
+}
