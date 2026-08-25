@@ -16,6 +16,13 @@ sources:
   eastmoney_fast:       # 东方财富财经快讯
     enabled: true
     page_size: 50
+  # ↓ 同行早报文章:吸收结构与选题,再叠加最新快讯,价值高于纯快讯堆砌
+  eastmoney_zaozhidao:  # 东财搜索同行早报(新华财经/证券时报《早知道》系列)
+    enabled: true
+    keywords: ["早知道"]
+  wscn_breakfast:       # 华尔街见闻早餐系列
+    enabled: true
+    count: 2
 
 # 早报
 morning:

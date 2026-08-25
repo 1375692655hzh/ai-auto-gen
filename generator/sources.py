@@ -7,6 +7,7 @@
 import re
 import time
 import html
+import datetime
 
 import requests
 
@@ -64,6 +65,155 @@ FETCHERS = {
     "sina_7x24": fetch_sina_724,
     "eastmoney_fast": fetch_eastmoney_fast,
 }
+
+
+# ---------- 同行早报文章(参考价值高于纯快讯) ----------
+
+def _em_search_articles(keyword: str, page_size: int = 5) -> list:
+    """东方财富站内搜索:拿同行早报文章(新华财经《财经早知道》等),content 即正文摘要。"""
+    import json as _json
+    param = _json.dumps({
+        "uid": "", "keyword": keyword, "type": ["cmsArticleWebOld"],
+        "client": "web", "clientType": "web", "clientVersion": "curr",
+        "param": {"cmsArticleWebOld": {"searchScope": "default", "sort": "default",
+                                       "pageIndex": 1, "pageSize": page_size,
+                                       "preTag": "", "postTag": ""}},
+    }, ensure_ascii=False, separators=(",", ":"))
+    r = requests.get(
+        "https://search-api-web.eastmoney.com/search/jsonp",
+        params={"cb": "cb", "param": param},
+        headers={"User-Agent": UA, "Referer": "https://so.eastmoney.com/"},
+        timeout=15,
+    )
+    r.raise_for_status()
+    body = re.sub(r"^cb\(|\)$", "", r.text.strip())
+    arts = (((_json.loads(body).get("result") or {}).get("cmsArticleWebOld")) or [])
+    return [{
+        "time": (a.get("date") or "")[:16],
+        "title": _strip_html(a.get("title", "")),
+        "text": _strip_html(a.get("content", "")),
+        "media": a.get("mediaName", ""),
+        "url": a.get("url", ""),
+    } for a in arts if a.get("title") and a.get("date", "").startswith(str(datetime.date.today().year))]
+
+
+def _fetch_em_article_body(url: str, cap: int = 12000) -> str:
+    """抓东财文章页全文:定位 id=ContentBody,截到常见结束标记,去 HTML。"""
+    url = url.replace("http://", "https://")
+    r = requests.get(url, headers={"User-Agent": UA}, timeout=15)
+    r.raise_for_status()
+    h = r.text
+    i = h.find('id="ContentBody"')
+    if i < 0:
+        return ""
+    seg = h[i:i + cap]
+    for end in ("免责声明", "责编", "返回东方财富首页", 'class="res-edit"'):
+        j = seg.find(end)
+        if j > 0:
+            seg = seg[:j]
+    return _strip_html(seg)[:4000]
+
+
+def fetch_eastmoney_zaozhidao(keywords: list | None = None) -> list:
+    """按关键词搜同行早报文章,只保留近 36 小时内的,正文补抓全文。"""
+    if not keywords:
+        keywords = ["早知道", "财经早知道"]
+    cutoff = datetime.datetime.now() - datetime.timedelta(hours=36)
+    out, seen = [], set()
+    for kw in keywords:
+        try:
+            arts = _em_search_articles(kw)
+        except Exception:
+            continue  # 单个关键词失败不影响其他
+        for a in arts:
+            key = a["title"][:20]
+            if key in seen:
+                continue
+            seen.add(key)
+            try:
+                when = datetime.datetime.strptime(a["time"], "%Y-%m-%d %H:%M")
+            except ValueError:
+                continue
+            if when < cutoff:
+                continue
+            a["source"] = f"东财·{a.get('media') or kw}"
+            # 摘要太短,补抓全文;抓不到就退回摘要
+            if a["url"] and len(a["text"]) < 400:
+                try:
+                    full = _fetch_em_article_body(a["url"])
+                    if len(full) > len(a["text"]):
+                        a["text"] = full
+                except Exception:
+                    pass
+            out.append(a)
+    return out
+
+
+def fetch_wscn_breakfast(limit: int = 2) -> list:
+    """华尔街见闻「早餐」系列文章(A股早餐/全球早餐)。"""
+    import datetime as _dt
+    r = requests.get(
+        "https://api-one-wscn.awtmt.com/apiv1/search/article",
+        params={"query": "早餐", "limit": limit * 3, "cursor": ""},
+        headers={"User-Agent": UA},
+        timeout=15,
+    )
+    r.raise_for_status()
+    out = []
+    cutoff = _dt.datetime.now() - _dt.timedelta(hours=36)
+    for it in (r.json().get("data") or {}).get("items") or []:
+        title = _strip_html(it.get("title", ""))
+        if not title or ("早餐" not in title and "早报" not in title):
+            continue
+        if it.get("is_paid"):
+            continue
+        ts = it.get("display_time") or 0
+        if ts and _dt.datetime.fromtimestamp(ts) < cutoff:
+            continue
+        out.append({
+            "time": _dt.datetime.fromtimestamp(ts).strftime("%Y-%m-%d %H:%M") if ts else "",
+            "title": title,
+            "text": _strip_html(it.get("content", "")),
+            "media": "华尔街见闻",
+            "url": (it.get("uri") or "").split("?")[0],
+            "source": "华尔街见闻",
+        })
+        if len(out) >= limit:
+            break
+    return out
+
+
+REF_FETCHERS = {
+    "eastmoney_zaozhidao": lambda conf: fetch_eastmoney_zaozhidao(conf.get("keywords")),
+    "wscn_breakfast": lambda conf: fetch_wscn_breakfast(int(conf.get("count", 2))),
+}
+
+
+def gather_refs(cfg: dict | None = None) -> tuple:
+    """抓同行早报文章,按时间倒序。返回 (文章列表, 挂掉的来源)。"""
+    if cfg is None:
+        from common import load_cfg
+        cfg = load_cfg().get("sources", {})
+    refs, failed = [], []
+    for key, fn in REF_FETCHERS.items():
+        conf = cfg.get(key) or {}
+        if not conf.get("enabled", False):
+            continue
+        try:
+            got = fn(conf)
+            refs.extend(got) if got else failed.append(f"{key}(空结果)")
+        except Exception as e:
+            failed.append(f"{key}({type(e).__name__}: {str(e)[:60]})")
+    refs.sort(key=lambda x: x["time"], reverse=True)
+    return refs, failed
+
+
+def render_refs(refs: list) -> str:
+    """同行早报渲染成给模型看的参考材料。"""
+    parts = []
+    for r in refs:
+        parts.append(f"《{r['title']}》({r['media']} {r['time']})\n{r['text']}")
+    return "\n\n".join(parts)
 
 
 def gather(cfg: dict | None = None, limit: int = 0) -> tuple:

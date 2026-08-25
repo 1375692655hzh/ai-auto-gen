@@ -24,7 +24,9 @@ MARKETS = {
 
 SYS_ARTICLE = (
     "你是资深财经编辑,为散户投资者写盘前早报。文风:客观、信息密度高、不喊单。"
-    "输出纯 Markdown,第一行是一级标题。不要编造快讯里没有的事实,不确定的信息宁可不写。"
+    "输出纯 Markdown,第一行是一级标题。不要编造材料里没有的事实,不确定的信息宁可不写。"
+    "会给你同行早报文章和最新快讯两类材料:同行早报用来吸收选题与结构(哪些信息值得上早报),"
+    "最新快讯用来补充更新;严禁照抄同行原文句子,表述必须自己重写。"
 )
 
 SYS_SCRIPT = (
@@ -33,20 +35,25 @@ SYS_SCRIPT = (
 )
 
 
-def build_market(market: str, items: list, quiet: bool = False) -> dict:
+def build_market(market: str, items: list, refs: list | None = None, quiet: bool = False) -> dict:
     m = MARKETS[market]
     cfg = load_cfg().get("morning", {})
     secs = int(cfg.get("script_seconds", 90))
     words = round(secs / 60 * 260)
     feed = sources.render_items(items)
+    ref_block = ""
+    if refs:
+        ref_block = ("\n\n以下是同行早报文章(参考其选题与结构,表述必须重写,不可照抄):\n\n"
+                     + sources.render_refs(refs))
 
     article = llm_complete(
-        f"今天是 {today()},现在 {now_str()}。以下是最新的财经快讯素材:\n\n{feed}\n\n"
-        f"请从中只筛选「{m['pick']}」的条目,排除「{m['exclude']}」,写一篇{m['name']}文章。\n"
+        f"今天是 {today()},现在 {now_str()}。以下是最新的财经快讯素材:\n\n{feed}{ref_block}\n\n"
+        f"请综合以上材料,只围绕「{m['pick']}」写一篇{m['name']}文章,排除「{m['exclude']}」。\n"
         f"要求:{cfg.get('article_hint', '800-1200字,分板块,每条要闻带时间')}。\n"
         "结构建议:第一行一级标题(含「今日A股早报」或「今日港美股早报」字样和日期);"
         "然后按主题分二级标题板块(如 宏观与政策 / 行业与公司 / 今日关注),"
         "每条要闻用列表项并保留原始时间;结尾一小段「今日看点」收束。"
+        "同行早报里有而快讯没有的信息可以采用(标注来源媒体),快讯里的最新进展优先。"
         "信息少的板块可以合并,不要为了凑板块注水。",
         system=SYS_ARTICLE,
     )
@@ -71,17 +78,20 @@ def run(markets: str = "both") -> list:
     cfg = load_cfg()
     max_items = int(cfg.get("morning", {}).get("max_items", 60))
     items, failed = sources.gather(limit=max_items)
+    refs, ref_failed = sources.gather_refs()
+    failed += ref_failed
     if failed:
         print(f"⚠ 部分信息源不可用: {', '.join(failed)}")
-    if not items:
-        sys.exit("没有抓到任何快讯素材,请检查网络或信息源配置")
-    print(f"已抓取 {len(items)} 条快讯(取最新 {max_items} 条)")
+    if not items and not refs:
+        sys.exit("快讯和同行早报都没抓到,请检查网络或信息源配置")
+    print(f"已抓取 {len(items)} 条快讯 + {len(refs)} 篇同行早报"
+          + (f"({', '.join(r['title'][:20] for r in refs[:3])})" if refs else ""))
 
     todo = list(MARKETS) if markets == "both" else [markets]
     results = []
     for mk in todo:
         print(f"\n===== 生成 {MARKETS[mk]['name']} =====")
-        r = build_market(mk, items)
+        r = build_market(mk, items, refs)
         print(f"文章: {r['article']}")
         print(f"口播: {r['script']}")
         results.append(r)

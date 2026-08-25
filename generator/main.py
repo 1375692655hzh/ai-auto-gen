@@ -45,11 +45,17 @@ def main():
     elif args.cmd == "fetch":
         import sources
         items, failed = sources.gather()
+        refs, ref_failed = sources.gather_refs()
+        failed += ref_failed
         if failed:
             print(f"⚠ 不可用的来源: {', '.join(failed)}")
-        print(f"共抓到 {len(items)} 条,展示最新 {args.limit} 条:\n")
+        print(f"快讯 {len(items)} 条,展示最新 {args.limit} 条:\n")
         for it in items[: args.limit]:
             print(f"[{it['time']}]({it['source']}) {it['text'][:100]}")
+        if refs:
+            print(f"\n同行早报 {len(refs)} 篇:\n")
+            for r in refs:
+                print(f"[{r['time']}]《{r['title'][:40]}》({r['media']}) 正文{len(r['text'])}字")
     elif args.cmd == "llm-status":
         st = common.llm_status()
         print(f"已配置: {'是' if st['configured'] else '否'}")
