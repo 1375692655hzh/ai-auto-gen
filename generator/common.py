@@ -81,7 +81,16 @@ def llm_complete(prompt: str, system: str = "", max_tokens: int = 4000,
     out = llm._complete_raw(prompt, system, max_tokens, temperature, timeout)
     if not out:
         raise RuntimeError("模型返回为空,请检查模型名与账户额度")
-    return out.strip()
+    return strip_thinking(out).strip()
+
+
+def strip_thinking(text: str) -> str:
+    """剥掉推理模型(如 MiniMax-M3/DeepSeek-R1)混在正文里的 <think> 思考过程。"""
+    text = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL)
+    # 未闭合的 think 块(截断时):从头删到 </think> 或保留结尾正文
+    if "<think>" in text and "</think>" not in text:
+        text = text.split("<think>", 1)[0]
+    return text.strip()
 
 
 def llm_status() -> dict:
