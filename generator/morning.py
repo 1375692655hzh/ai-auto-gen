@@ -62,7 +62,7 @@ def build_market(market: str, items: list, refs: list | None = None, quiet: bool
         f"以下是今天{m['name']}的成稿:\n\n{article}\n\n"
         f"请把它改写成约 {words} 字(对应约 {secs} 秒)的口播稿。",
         system=SYS_SCRIPT,
-        max_tokens=1500,
+        max_tokens=4000,  # 推理模型的思考也占 token,留足正文空间
     )
 
     stem = f"{m['name']}-{today()}"
