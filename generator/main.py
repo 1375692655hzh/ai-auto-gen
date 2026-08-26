@@ -29,6 +29,10 @@ def main():
     p_a.add_argument("--topic", default=None, help="直接指定主题(跳过自动选题)")
     p_a.add_argument("--yes", action="store_true", help="全自动,不逐步确认")
 
+    p_d = sub.add_parser("daily", help="AI财经日报(逐条详情+AI分析+口播稿)")
+    p_d.add_argument("--items", type=int, default=0, help="条数(默认取 config,15)")
+    p_d.add_argument("--no-voice", action="store_true", help="不生成口播稿")
+
     p_f = sub.add_parser("fetch", help="抓取信息源并展示(不调用模型)")
     p_f.add_argument("--limit", type=int, default=10)
 
@@ -42,6 +46,9 @@ def main():
     elif args.cmd == "analysis":
         import analysis
         analysis.run(topic=args.topic, auto=args.yes)
+    elif args.cmd == "daily":
+        import daily
+        daily.run(want=args.items, with_voice=not args.no_voice)
     elif args.cmd == "fetch":
         import sources
         items, failed = sources.gather()

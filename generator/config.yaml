@@ -31,6 +31,10 @@ morning:
   article_hint: 800-1200字,分板块,每条要闻带时间
   script_seconds: 90    # 口播稿时长(秒),约每分钟260字
 
+# AI财经日报(逐条详情模式)
+daily:
+  items: 15           # 每日条数
+
 # 分析文章
 analysis:
   max_items: 80         # 锁定信息时最多送多少条快讯做相关性筛选

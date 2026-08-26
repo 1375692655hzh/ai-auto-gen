@@ -75,13 +75,26 @@ def llm_require_config():
 
 
 def llm_complete(prompt: str, system: str = "", max_tokens: int = 4000,
-                 temperature: float = 0.4, timeout: int = 300) -> str:
-    """生成流程专用:未配置/失败要明确报错,不能像 chart_gap 那样静默降级。"""
+                 temperature: float = 0.4, timeout: int = 300, retries: int = 3) -> str:
+    """生成流程专用:未配置/失败要明确报错;网络类失败自动重试(限流/抖动兜底)。"""
+    import time
     llm = llm_require_config()
-    out = llm._complete_raw(prompt, system, max_tokens, temperature, timeout)
-    if not out:
-        raise RuntimeError("模型返回为空,请检查模型名与账户额度")
-    return strip_thinking(out).strip()
+    last_err = None
+    for attempt in range(retries):
+        try:
+            out = llm._complete_raw(prompt, system, max_tokens, temperature, timeout)
+            if not out:
+                raise RuntimeError("模型返回为空,请检查模型名与账户额度")
+            return strip_thinking(out).strip()
+        except RuntimeError:
+            raise  # 业务性错误(配置/额度)不重试
+        except Exception as e:  # 网络超时/连接类,退避后重试
+            last_err = e
+            if attempt < retries - 1:
+                wait = 15 * (attempt + 1)
+                print(f"  ⚠ LLM 调用失败({type(e).__name__}),{wait}s 后重试({attempt + 2}/{retries})")
+                time.sleep(wait)
+    raise last_err
 
 
 def strip_thinking(text: str) -> str:
