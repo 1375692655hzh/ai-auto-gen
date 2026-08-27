@@ -96,8 +96,18 @@ def rank_items(items: list, want: int) -> list:
 # ---------- 第 3 步:证据收集(二次抓取 + 同行早报背景) ----------
 
 def collect_evidence(item: dict, refs: list) -> dict:
-    """为单条快讯收集扩写证据:东财同题新闻正文 + 同行早报相关段落。"""
-    ev = {"raw": item["text"], "news_body": "", "peer": "", "urls": []}
+    """为单条快讯收集扩写证据:豆包搜索(最新网络信息) + 东财同题新闻正文 + 同行早报相关段落。"""
+    import search as search_mod
+    ev = {"raw": item["text"], "web": "", "news_body": "", "peer": "", "urls": []}
+    # ① 豆包搜索:当天最新网络报道(摘要 500-1000 字,最适合供详情与解读)
+    try:
+        hits = search_mod.search_safe(search_mod.make_query(item), count=3)
+        if hits:
+            ev["web"] = "\n".join(f"[{h['time']} {h['site']}] {h['text']}" for h in hits)[:4000]
+            ev["urls"].append({"name": hits[0]["site"] or "网络报道", "url": hits[0]["url"]})
+    except Exception:
+        pass
+    # ② 东财同题新闻正文
     kw = re.sub(r"[【】\[\]()（）:：,，.。]", " ", item["text"][:24]).split()
     keyword = "".join(kw)[:16] if kw else item["text"][:16]
     try:
@@ -109,7 +119,7 @@ def collect_evidence(item: dict, refs: list) -> dict:
                 ev["urls"].append({"name": arts[0].get("mediaName", "东财报道"), "url": arts[0]["url"]})
     except Exception:
         pass
-    # 同行早报段落召回:与快讯共享≥2个长片段的段落
+    # ③ 同行早报段落召回:与快讯共享≥2个长片段的段落
     best, best_hits = "", 0
     for r in refs:
         for para in re.split(r"[。；\n]", r.get("text", "")):
@@ -120,7 +130,6 @@ def collect_evidence(item: dict, refs: list) -> dict:
             if hits > best_hits:
                 best, best_hits = para, hits
     if best_hits >= 2:
-        ev["peer"] = best * 1  # 单段
         ev["peer"] = best
     return ev
 
@@ -130,7 +139,8 @@ def collect_evidence(item: dict, refs: list) -> dict:
 SYS_EXPAND = (
     "你是财经编辑。严格遵守:详情中所有数字、时间、公司名、金额必须逐字来自给定材料,"
     "禁止编造或推算材料外的数字;材料不足就少写,不凑段数。"
-    "分析句只描述事件影响(利好/利空/中性+板块+情绪/预期逻辑),禁止给出任何买卖建议。"
+    "解读句基于材料给出一句话判断(利好/利空/中性+板块+情绪/预期逻辑),"
+    "优先利用【网络搜索】材料里最新的信息与背景,禁止给出任何买卖建议。"
     "只输出 JSON,不加解释。"
 )
 
@@ -138,6 +148,7 @@ SYS_EXPAND = (
 def expand_item(item: dict, ev: dict) -> dict:
     concept_list = "、".join(CONCEPT_POOL)
     material = (f"【快讯原文】[{item['time']}] {ev['raw']}\n"
+                f"【网络搜索(最新报道)】{ev['web'] or '(无)'}\n"
                 f"【同题新闻正文】{ev['news_body'] or '(无)'}\n"
                 f"【同行早报相关段落】{ev['peer'] or '(无)'}")
     raw = llm_complete(
@@ -145,9 +156,9 @@ def expand_item(item: dict, ev: dict) -> dict:
         "基于以上材料为这条财经消息产出结构化内容,输出 JSON 对象:\n"
         '{"title": "一行式标题(≤22字)", "summary": "一句话摘要(≤40字)",\n'
         ' "detail_paragraphs": ["3-5段详情,每段40-120字:第一段发生了什么(含关键数字),'
-        "后面讲背景/规模/后续安排,只能重组材料内事实\"],\n"
+        "后面讲背景/最新进展/后续安排(优先用网络搜索材料里的最新信息),只能重组材料内事实\"],\n"
         ' "sectors": ["从候选里选0-3个"], "concepts": ["从候选里选0-3个"],\n'
-        ' "direction": "利好|利空|中性", "impact": "一句话影响结果(≤40字,如:利好固态电池产业链短期情绪)"}\n'
+        ' "direction": "利好|利空|中性", "impact": "一句话解读(≤40字,如:利好固态电池产业链短期情绪)"}\n'
         f"候选板块/概念(只能从中选,没有合适的给空数组):{concept_list}",
         system=SYS_EXPAND, max_tokens=3000,
     )
@@ -161,7 +172,7 @@ def expand_item(item: dict, ev: dict) -> dict:
 
 def numbers_verified(paragraphs: list, ev: dict) -> bool:
     """数字防幻觉校验:详情中每个数字都必须出现在证据材料里。"""
-    evidence = ev["raw"] + ev["news_body"] + ev["peer"]
+    evidence = ev["raw"] + ev["web"] + ev["news_body"] + ev["peer"]
     ev_nums = set(re.findall(r"\d+(?:\.\d+)?", evidence.replace(",", "").replace("，", "")))
     for p in paragraphs:
         for num in re.findall(r"\d+(?:\.\d+)?", p.replace(",", "").replace("，", "")):
@@ -225,7 +236,7 @@ def build_md(entries: list, refs: list) -> str:
             if t and t not in seen_tags:
                 seen_tags.append(t)
         tags = "/".join(seen_tags) or "综合"
-        L.append(f"**📌 关联:{tags} · {e.get('direction', '中性')} —— {e.get('impact', '')}**")
+        L.append(f"**📌 AI解读|关联:{tags} · {e.get('direction', '中性')} —— {e.get('impact', '')}**")
         if e.get("urls"):
             L.append("\n" + " · ".join(f"[{u['name']}]({u['url']})" for u in e["urls"]))
         L.append("\n---\n")

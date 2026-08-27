@@ -26,6 +26,19 @@ def _rich(text: str, bold=False):
     return [{"t": text, **({"b": True} if bold else {})}]
 
 
+def _first_sentences(paragraph: str, limit: int = 80) -> str:
+    """取段落前 1-2 句并截到 limit 字内(句号/分号边界优先)。"""
+    text = paragraph.strip()
+    if len(text) <= limit:
+        return text
+    cut = text[:limit]
+    for sep in ("。", "；", ";", "，"):
+        i = cut.rfind(sep)
+        if i > limit // 2:
+            return cut[:i + (1 if sep != "，" else 0)]
+    return cut.rstrip("，,、") + "……"
+
+
 def build_story(entries: list) -> dict:
     scenes = []
     n = len(entries)
@@ -45,17 +58,29 @@ def build_story(entries: list) -> dict:
     })
     for i, e in enumerate(entries, 1):
         a = e.get("analysis") or {}
-        chips = (a.get("sectors", []) + a.get("concepts", []))[:5]
+        tags = (a.get("sectors", []) + a.get("concepts", []))[:4]
+        # 详情细节 → rows 模板(每段压成一句,画面中间不再是空的)
+        labels = ["事件", "详情", "进展", "背景", "影响"]
+        accents = ["blue", "green", "amber", "purple", "red"]
+        rows = []
+        for j, p in enumerate(e.get("detail_paragraphs", [])[:4]):
+            body = _first_sentences(p, limit=80)
+            if body:
+                rows.append({"accent": accents[j % len(accents)],
+                             "label": _rich(labels[j % len(labels)], True),
+                             "body": _rich(body)})
         scenes.append({
             "id": f"news-{i:02d}",
-            "template": "event",
+            "template": "rows",
             "narration": e.get("voiceover") or e.get("summary", ""),
             "caption": e["title"],
             "data": {
                 "kicker": f"{i:02d} · {e.get('category', '财经')}",
                 "headline": _rich(e["title"], True),
-                **({"chips": chips} if chips else {}),
-                **({"quote": {"source": f"{a.get('direction', '中性')} · AI 分析", "text": _rich(a.get("impact", ""))}}
+                "rows": rows or [{"accent": "blue", "label": _rich("要点", True),
+                                  "body": _rich(e.get("summary", ""))}],
+                **({"footnote": [{"t": f"AI解读|关联:{'/'.join(tags)} · {a.get('direction', '中性')} —— {a.get('impact', '')}",
+                                  "b": True}]}
                    if a.get("impact") else {}),
             },
         })
