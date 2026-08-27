@@ -38,6 +38,19 @@ def main():
     p_v.add_argument("--estimate", action="store_true", help="无声预览(不出正式片)")
     p_v.add_argument("--no-render", action="store_true", help="只生成 story.json 不渲染")
 
+    p_w = sub.add_parser("run", help="运行内容工作流(如 AI财经早报)")
+    p_w.add_argument("workflow", help="工作流名,如 morning-paper;列表用 workflows 子命令")
+    p_w.add_argument("--date", default=None)
+    p_w.add_argument("--auto", action="store_true", help="跳过审核点")
+    p_w.add_argument("--from", dest="from_step", default=None, help="从指定步骤重跑")
+    p_w.add_argument("--fresh", action="store_true", help="清空当日存档重跑")
+    p_w.add_argument("--only", default=None, help="只跑指定步骤")
+    p_w.add_argument("--items", type=int, default=0, help="条数(覆盖 config)")
+    p_w.add_argument("--with-video", action="store_true", help="assemble 后接视频成片")
+    p_w.add_argument("--no-voice", action="store_true", help="不生成口播稿")
+
+    sub.add_parser("workflows", help="列出所有已注册工作流")
+
     p_f = sub.add_parser("fetch", help="抓取信息源并展示(不调用模型)")
     p_f.add_argument("--limit", type=int, default=10)
 
@@ -57,6 +70,19 @@ def main():
     elif args.cmd == "video":
         import video
         video.run(date=args.date, estimate=args.estimate, no_render=args.no_render)
+    elif args.cmd == "run":
+        import workflows as wf
+        cls = wf.get_workflow(args.workflow)
+        extra = {}
+        if args.workflow == "morning-paper":
+            extra = dict(items=args.items, with_video=args.with_video, no_voice=args.no_voice)
+        w = cls(date=args.date, **extra)
+        w.run(auto=args.auto, from_step=args.from_step, fresh=args.fresh, only=args.only)
+        print("\n" + w.summary())
+    elif args.cmd == "workflows":
+        import workflows as wf
+        for name, cls in wf.WORKFLOWS.items():
+            print(f"  {name:16} {cls.title} —— {cls.description}")
     elif args.cmd == "fetch":
         import sources
         items, failed = sources.gather()

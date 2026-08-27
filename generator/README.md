@@ -23,6 +23,22 @@
 
 ## 使用
 
+### 工作流(推荐入口)
+
+内容生产以"工作流"为单位组织,每步产物自动存档、断点续跑(重跑不重复花钱),支持审核暂停点:
+
+```bash
+python generator/main.py workflows                          # 列出已注册工作流
+python generator/main.py run morning-paper                  # AI财经早报:assemble 后暂停审核
+python generator/main.py run morning-paper --auto           # 全自动
+python generator/main.py run morning-paper --from expand    # 从指定步骤重跑
+python generator/main.py run morning-paper --with-video     # 出稿后接视频成片
+```
+
+**新增工作流**:在 `workflows/` 下继承 `WorkflowBase`,实现 `steps()`(每步返回可 JSON 化的 dict),在 `workflows/__init__.py` 注册即可获得存档/续跑/审核点/统计全套能力。存档位于 `output/workflows/<工作流名>/<日期>/`。
+
+### 单命令(工作流的快捷方式)
+
 ```bash
 # 看看信息源能抓到什么(不需要模型)
 python generator/main.py fetch --limit 10
