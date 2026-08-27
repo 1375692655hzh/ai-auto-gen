@@ -235,17 +235,160 @@ def fetch_global_markets() -> list:
 
 # ---------- gangtise 公众号早报(镜像,尽力而为) ----------
 
+_SOGOU_UA = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+               "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"}
+
+
+def _today_title_patterns() -> list:
+    """gangtise 命名规律: 'Gangtise投研日报 | 8月27日星期四' / '... | 2026-08-27'。"""
+    import datetime
+    d = datetime.date.today()
+    weekdays = "一二三四五六日"
+    m, day = d.month, d.day
+    return [f"{m}月{day}日", d.strftime("%Y-%m-%d"), d.strftime("%Y.%m.%d"),
+            f"{m}.{day}", f"{m}月{day}号"][:3] + [f"{m}月{day}日星期{weekdays[d.weekday()]}"]
+
+
+def _sogou_weixin_links(session, query: str, limit: int = 6) -> list:
+    """搜狗微信搜索,返回代理链接列表;被反爬拦截时返回 []。"""
+    import urllib.parse
+    r = session.get("https://weixin.sogou.com/weixin",
+                    params={"type": 2, "query": query}, timeout=15)
+    if r.status_code != 200 or "antispider" in r.url or len(r.text) < 10000:
+        return []
+    hrefs = []
+    for m in re.finditer(r'href="(/link\?url=[^"]+)"', r.text):
+        h = "https://weixin.sogou.com" + m.group(1).replace("&amp;", "&")
+        if h not in hrefs:
+            hrefs.append(h)
+    return hrefs[:limit]
+
+
+def _sogou_proxy_target(session, proxy_url: str) -> str | None:
+    """代理页是 JS 拼接跳转,提取真实 mp.weixin URL。"""
+    r = session.get(proxy_url, timeout=15)
+    parts = re.findall(r"url \+= '([^']*)'", r.text)
+    return "".join(parts) or None
+
+
+def _mp_article(session, url: str) -> tuple:
+    """抓公众号文章页,返回 (标题, 正文)。"""
+    import html as H
+    r = session.get(url, timeout=20)
+    if r.status_code != 200:
+        return "", ""
+    t = re.search(r'<h1[^>]*id="activity-name"[^>]*>(.*?)</h1>', r.text, re.S)
+    title = H.unescape(re.sub(r"<[^>]+>|\s+", "", t.group(1))).strip() if t else ""
+    body = re.search(r'<div[^>]*id="js_content"[^>]*>(.*?)</div>\s*(?:<script|<div[^>]*id="js_tags)', r.text, re.S)
+    text = ""
+    if body:
+        text = re.sub(r"<[^>]+>", "\n", body.group(1))
+        text = re.sub(r"\n{2,}", "\n", H.unescape(text)).strip()
+    return title, text
+
+
+def _mp_token_cookie() -> tuple:
+    """微信公众平台 cookie(用你自己公众号后台的登录 cookie)。
+    配置在 autopub/secret.local.json 的 wechat_mp_cookie 字段;返回 (token, cookie)。"""
+    import json as _json
+    from pathlib import Path as _P
+    sec = _P(__file__).resolve().parents[1] / "autopub" / "secret.local.json"
+    if not sec.exists():
+        return "", ""
+    try:
+        data = _json.loads(sec.read_text(encoding="utf-8"))
+        cookie = data.get("wechat_mp_cookie", "")
+        m = re.search(r"token=(\d+)", cookie) or re.search(r"(?:^|;\s*)token=(\d+)", cookie)
+        return (m.group(1) if m else ""), cookie
+    except Exception:
+        return "", ""
+
+
+def fetch_gangtise_mp() -> dict | None:
+    """经微信公众平台 searchbiz/appmsg 接口搜 'Gangtise投研' 的最新文章。
+    需要自己的公众号后台 cookie(secret.local.json: wechat_mp_cookie, 含 token=xxx)。
+    无 cookie 或接口风控时返回 None。"""
+    token, cookie = _mp_token_cookie()
+    if not cookie:
+        return None
+    s = requests.Session()
+    s.headers.update({"User-Agent": _SOGOU_UA["User-Agent"], "Cookie": cookie,
+                      "Referer": "https://mp.weixin.qq.com/"})
+    try:
+        # 1) 搜公众号拿 fakeid
+        r = s.get("https://mp.weixin.qq.com/cgi-bin/searchbiz", params={
+            "action": "search_biz", "token": token, "lang": "zh_CN", "f": "json",
+            "ajax": "1", "random": __import__("random").random(),
+            "query": "Gangtise投研", "begin": "0", "count": "5"}, timeout=15)
+        js = r.json()
+        bizs = js.get("list") or []
+        if not bizs:
+            return None
+        fakeid = bizs[0]["fakeid"]
+        # 2) 拿该号最新文章列表
+        r2 = s.get("https://mp.weixin.qq.com/cgi-bin/appmsg", params={
+            "action": "list_ex", "token": token, "lang": "zh_CN", "f": "json",
+            "ajax": "1", "begin": "0", "count": "5", "query": "",
+            "fakeid": fakeid, "type": "9"}, timeout=15)
+        pats = _today_title_patterns()
+        for a in (r2.json().get("app_msg_list") or [])[:5]:
+            title = a.get("title") or ""
+            if "Gangtise" in title and any(p in title for p in pats):
+                # appmsg 列表不直接给正文链接,用 digest 先返回,正文链接需 digest 页跳转
+                url = a.get("link") or ""
+                text = a.get("digest") or ""
+                if url:
+                    _, full = _mp_article(requests.Session(), url)
+                    if full:
+                        text = full[:12000]
+                if text:
+                    return {"title": title, "text": text, "url": url,
+                            "time": a.get("update_time", ""), "media": "Gangtise投研(公众号)",
+                            "source": "gangtise公众号(公众平台接口)"}
+    except Exception:
+        pass
+    return None
+
+
 def fetch_gangtise() -> dict | None:
-    """gangtise 每日早报。公众号(mp.weixin)无开放接口,经豆包搜索找镜像;
-    只接受标题含'早报'且正文/标题带 gangtise 痕迹的结果,找不到返回 None(不硬凑)。"""
+    """gangtise 每日早报。命名规律 'Gangtise投研日报 | 8月27日星期四':
+    搜狗微信搜索 -> 代理页解真实 URL -> 按当天日期匹配标题 -> 抓正文。
+    被反爬/当日未发布时回退:①公众平台接口(需 cookie) ②豆包搜索镜像;仍无则 None(不硬凑)。"""
+    import time as _t
+    # 路线0:公众平台接口(有 cookie 时最可靠)
+    r = fetch_gangtise_mp()
+    if r:
+        return r
+    try:
+        s = requests.Session()
+        s.headers.update(_SOGOU_UA)
+        pats = _today_title_patterns()
+        for query in ("Gangtise投研日报", "gangtise 投研日报"):
+            links = _sogou_weixin_links(s, query)
+            for proxy in links:
+                try:
+                    target = _sogou_proxy_target(s, proxy)
+                    if not target or "mp.weixin.qq.com" not in target:
+                        continue
+                    title, text = _mp_article(s, target)
+                    if title and text and "gangtise" in title.lower() \
+                            and any(p in title for p in pats) and len(text) > 500:
+                        return {"title": title, "text": text[:12000], "url": target,
+                                "time": "", "media": "Gangtise投研(公众号)",
+                                "source": "gangtise公众号(搜狗微信)"}
+                    _t.sleep(1.5)  # 慢速翻结果,降低反爬概率
+                except Exception:
+                    continue
+    except Exception:
+        pass
+    # 回退:豆包搜索镜像(多数日期无可靠镜像)
     try:
         from search import web_search
-        for q in ("Gangtise 投研日报", "gangtise 早报"):
-            for w in web_search(q, count=5):
-                blob = (w["title"] + w["url"] + w["text"][:300]).lower()
-                if "gangtise" in blob and "早报" in w["title"]:
-                    return {"title": w["title"], "text": w["text"], "url": w["url"],
-                            "time": w["time"], "media": w["site"], "source": f"gangtise镜像({w['site']})"}
+        for w in web_search("Gangtise投研日报", count=5):
+            blob = (w["title"] + w["url"] + w["text"][:300]).lower()
+            if "gangtise" in blob and any(p in w["title"] for p in pats):
+                return {"title": w["title"], "text": w["text"], "url": w["url"],
+                        "time": w["time"], "media": w["site"], "source": f"gangtise镜像({w['site']})"}
     except Exception:
         pass
     return None
