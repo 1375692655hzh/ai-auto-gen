@@ -23,6 +23,19 @@ from datetime import datetime
 SCREENSHOT_DIR = Path(__file__).resolve().parent.parent / "logs" / "screenshots"
 
 
+def browser_channel() -> str:
+    """浏览器内核选择, 读 config.yaml 的 browser.channel(默认 chromium 自带内核)。
+    可选: chromium(自带) / chrome / msedge。"""
+    try:
+        import yaml
+        cfg = yaml.safe_load((Path(__file__).resolve().parent.parent
+                              / "config.yaml").read_text(encoding="utf-8"))
+        ch = ((cfg.get("browser") or {}).get("channel") or "chromium").lower()
+        return ch if ch in ("chromium", "chrome", "msedge") else "chromium"
+    except Exception:
+        return "chromium"
+
+
 def find_chrome() -> str:
     """跨平台找本机 Google Chrome 可执行文件。找不到返回 ""(改用 playwright 自带 Chromium)。"""
     cands = []
@@ -65,6 +78,18 @@ class BrowserPublisher:
         self.logger = logger
         self.max_daily = int(self.config.get("max_daily", 10))
         self.stock_tags = self.config.get("stock_tags", "keep")
+        # 登录态目录: 项目内 profiles/<平台>/(旧版在家目录, 首次自动迁移)
+        self.profile_dir = str(Path(__file__).resolve().parent.parent
+                               / "profiles" / self.name)
+        legacy = getattr(type(self), "profile_dir", None)
+        if legacy and Path(legacy) != Path(self.profile_dir):
+            try:
+                src, dst = Path(legacy), Path(self.profile_dir)
+                if src.exists() and not dst.exists():
+                    shutil.copytree(src, dst)
+                    self.logger.info(f"[{self.name}] 迁移旧登录态: {src} -> {dst}")
+            except Exception:
+                pass
 
     # ---------- 子类实现 ----------
 
@@ -198,12 +223,43 @@ class BrowserPublisher:
         use_bb = bool(self.config.get("bitbrowser")) and bitbrowser.available(
             (self.config.get("bitbrowser") or {}).get("api", bitbrowser.DEFAULT_API))
 
+        # 接管用户自己的 Chrome(带调试端口启动, 复用日常登录态)
+        use_cdp = False
+        if not use_bb:
+            try:
+                import yaml as _yaml
+                gcfg = _yaml.safe_load((Path(__file__).resolve().parent.parent
+                                        / "config.yaml").read_text(encoding="utf-8"))
+                bcfg = gcfg.get("browser") or {}
+                if bcfg.get("mode") == "cdp":
+                    import urllib.request as _u
+                    try:
+                        _u.urlopen(bcfg.get("cdp_url", "http://127.0.0.1:9222")
+                                   + "/json/version", timeout=3)
+                        use_cdp = True
+                    except Exception:
+                        self.logger.warning(
+                            f"[{self.name}] Chrome 调试端口不通(先用 chrome_debug.bat 启动 Chrome), 回退独立模式")
+            except Exception:
+                pass
+
         async with async_playwright() as p:
             _close_bb = None
             if use_bb:
                 browser, context, page, window_id = await self._connect_bitbrowser(p)
                 _close_bb = lambda: bitbrowser.close_window(window_id)
                 self.logger.info(f"[{self.name}] 比特浏览器 CDP 模式")
+            elif use_cdp:
+                import yaml as _yaml
+                gcfg = _yaml.safe_load((Path(__file__).resolve().parent.parent
+                                        / "config.yaml").read_text(encoding="utf-8"))
+                bcfg = gcfg.get("browser") or {}
+                cdp_url = bcfg.get("cdp_url", "http://127.0.0.1:9222")
+                browser = await p.chromium.connect_over_cdp(cdp_url)
+                context = browser.contexts[0] if browser.contexts else await browser.new_context()
+                page = await context.new_page()
+                page.set_default_timeout(60000)
+                self.logger.info(f"[{self.name}] 已接管本机 Chrome ({cdp_url}), 复用日常登录态")
             else:
                 if self.config.get("bitbrowser"):
                     self.logger.warning(f"[{self.name}] 比特浏览器客户端未运行(本地 API 不通), 回退本机 Chrome")
@@ -214,15 +270,25 @@ class BrowserPublisher:
                     args=["--disable-blink-features=AutomationControlled"],
                     ignore_default_args=["--enable-automation"],
                 )
-                chrome = find_chrome()
-                if chrome:
-                    launch_kwargs["executable_path"] = chrome
-                    self.logger.info(f"[{self.name}] 使用本机 Chrome: {chrome}")
+                ch = browser_channel()
+                if ch == "chromium":
+                    # 自带内核: 不依赖本机装没装浏览器(需先 playwright install chromium)
+                    self.logger.info(f"[{self.name}] 使用 Playwright 自带 Chromium")
                 else:
-                    # 没装独立 Chrome → 用 playwright 自带 Chromium(需先 playwright install chromium)
-                    self.logger.info(f"[{self.name}] 未找到本机 Chrome,改用 playwright 自带 Chromium")
+                    launch_kwargs["channel"] = ch        # 复用本机 Chrome / Edge 内核
+                    self.logger.info(f"[{self.name}] 使用本机浏览器内核: {ch}")
                 context = await p.chromium.launch_persistent_context(
                     self.profile_dir, **launch_kwargs)
+                # 注入 login.py 存档的登录 Cookie(平台的会话 Cookie 浏览器关了就丢)
+                try:
+                    import json as _json
+                    sp = Path(self.profile_dir).with_suffix(".state.json")
+                    if sp.exists():
+                        state = _json.loads(sp.read_text(encoding="utf-8"))
+                        if state.get("cookies"):
+                            await context.add_cookies(state["cookies"])
+                except Exception as e:
+                    self.logger.warning(f"[{self.name}] 登录态注入失败(可能需重新 login): {e}")
                 # 抹掉自动化特征(风控检测 navigator.webdriver)
                 await context.add_init_script(
                     "Object.defineProperty(navigator,'webdriver',{get:()=>undefined});")
@@ -276,13 +342,17 @@ class BrowserPublisher:
             except Exception as e:
                 self.logger.error(f"[{self.name}] 流程异常: {e}")
             finally:
-                try:
-                    await context.close()
-                finally:
+                if use_cdp:
                     if browser is not None:
-                        await browser.close()      # CDP 接管: 断开并关闭比特浏览器窗口
-                    if _close_bb:
-                        _close_bb()
+                        await browser.close()      # 只断开连接, 不动用户的 Chrome
+                else:
+                    try:
+                        await context.close()
+                    finally:
+                        if browser is not None:
+                            await browser.close()  # CDP 接管: 断开并关闭比特浏览器窗口
+                        if _close_bb:
+                            _close_bb()
 
     # ---------- 工具 ----------
 

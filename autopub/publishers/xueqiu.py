@@ -31,15 +31,11 @@ class XueqiuPublisher(BrowserPublisher):
     SUGGEST_WRAP = '[class*="suggestions__wrap"], [class*="index_suggestions"]'
 
     async def is_logged_in(self, page) -> bool:
+        # 注意: writeV2 不登录也会渲染编辑器(有标题框), 不能用"有标题框"判断。
+        # 铁判据: xq_a_token Cookie 存在且非空。
         try:
-            url = (page.url or "").lower()
-            if any(m in url for m in self.logged_out_url_marks):
-                return False
-            for _ in range(8):
-                if await page.locator(self.TITLE_SEL).count() > 0:
-                    return True
-                await page.wait_for_timeout(1000)
-            return False
+            return any(c["name"] == "xq_a_token" and c["value"]
+                       for c in await page.context.cookies())
         except Exception:
             return False
 

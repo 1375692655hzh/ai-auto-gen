@@ -16,6 +16,17 @@ model:
   model: ""             # 模型名,如 deepseek-chat / gpt-4o-mini / qwen-plus
   api_key: ""           # 建议留空,改在网页里填(写这里会进分享包,注意安全)
 
+# ===== 浏览器 =====
+# mode:
+#   own    = 工具自带 Chromium + 独立登录态(login.py 登录) —— 默认, 最安全
+#   cdp    = 接管"你自己的 Chrome"(用你日常的登录态, 无需重新登录)
+#            前提: Chrome 用调试端口启动(双击 chrome_debug.bat), 且保持开着
+# channel: own 模式下选内核 chromium / chrome / msedge
+browser:
+  mode: cdp
+  cdp_url: http://127.0.0.1:9222
+  channel: chromium
+
 # 全局节流
 throttle:
   min_interval_seconds: 60      # 篇间最小间隔
@@ -40,6 +51,10 @@ platforms:
   weibo:
     enabled: false
     max_daily: 8
+    stock_tags: strip
+  futu:
+    enabled: true
+    max_daily: 5
     stock_tags: strip
   xueqiu:
     enabled: true
