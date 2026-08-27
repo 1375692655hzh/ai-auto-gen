@@ -64,6 +64,9 @@ class BilibiliPublisher(BrowserPublisher):
                 ok_tags += 1
         self.logger.info(f"[{self.name}] 标签: {ok_tags}/{len(tags[:10])}")
 
+        # 封面: 系统推荐帧, 按配置取第 N 张(默认第1张)
+        await self._set_cover(page)
+
         # 分区: 页面常按标题自动推荐(hot-tag 自动选中); 没有就点配置的默认分区
         await self._ensure_zone(page)
 
@@ -83,6 +86,50 @@ class BilibiliPublisher(BrowserPublisher):
             if txt:
                 return {"ok": True, "url": "", "note": "投稿成功"}
         return {"ok": False, "url": "", "note": "投稿结果未知(超时)"}
+
+    async def _set_cover(self, page) -> None:
+        """封面: 封面设置 → 系统推荐缩略图(.img-item-cover)取第 N 张(cover_index, 默认1) → 完成。"""
+        idx = max(0, int(self.config.get("cover_index", 1)) - 1)
+        try:
+            opened = False
+            for _ in range(12):                        # 推荐封面要等视频处理, 最多 ~36s
+                opened = await page.evaluate("""() => {
+                    for (const t of ['封面设置', '添加封面']) {
+                        for (const e of document.querySelectorAll('span,div,button')) {
+                            if (e.children.length<=1 && (e.innerText||'').trim()===t && e.offsetParent) {
+                                e.click(); return true;
+                            }
+                        }
+                    }
+                    return false;
+                }""")
+                if opened:
+                    break
+                await page.wait_for_timeout(3000)
+            if not opened:
+                self.logger.warning(f"[{self.name}] 封面设置入口没找到(视频可能还在处理), 跳过封面")
+                return
+            await page.wait_for_timeout(2500)
+            r = await page.evaluate("""(idx) => {
+                const thumbs = [...document.querySelectorAll('.img-item-cover')].filter(e=>e.offsetParent);
+                if (!thumbs.length) return 0;
+                thumbs[Math.min(idx, thumbs.length-1)].click();
+                return thumbs.length;
+            }""", idx)
+            if not r:
+                self.logger.warning(f"[{self.name}] 推荐封面缩略图没出现, 跳过")
+                return
+            await page.wait_for_timeout(1200)
+            await page.evaluate("""() => {
+                for (const e of document.querySelectorAll('button, span, div')) {
+                    if (e.offsetParent && e.children.length<=1 && (e.innerText||'').trim()==='完成') {
+                        e.click(); return;
+                    }
+                }
+            }""")
+            self.logger.info(f"[{self.name}] 封面已选: 推荐第{idx+1}张(共{r}张)")
+        except Exception as e:
+            self.logger.warning(f"[{self.name}] 封面设置异常(不阻断): {str(e)[:50]}")
 
     async def _add_tag(self, page, tag: str) -> bool:
         try:
