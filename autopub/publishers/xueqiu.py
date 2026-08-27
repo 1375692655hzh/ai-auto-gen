@@ -349,7 +349,13 @@ class XueqiuPublisher(BrowserPublisher):
         if not path.exists():
             self.logger.warning(f"[{self.name}] 配图不存在: {path}")
             return False
-        try:
+        async def _try_once() -> bool:
+            # 关掉编辑器残留的联想/股票下拉, 否则工具栏点击会被挡, 文件框弹不出
+            try:
+                await page.keyboard.press("Escape")
+            except Exception:
+                pass
+            await page.wait_for_timeout(300)
             before = await page.locator('.ProseMirror img').count()
             try:
                 async with page.expect_file_chooser(timeout=8000) as fc:
@@ -365,6 +371,14 @@ class XueqiuPublisher(BrowserPublisher):
                     self.logger.info(f"[{self.name}] 配图已上传: {path.name}")
                     await page.keyboard.press("ArrowRight")
                     return True
+            return False
+
+        try:
+            if await _try_once():
+                return True
+            self.logger.warning(f"[{self.name}] 配图第1次未嵌入, 重试: {path.name}")
+            if await _try_once():
+                return True
             self.logger.warning(f"[{self.name}] 配图未嵌入: {path.name}")
             return False
         except Exception as e:
