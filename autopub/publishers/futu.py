@@ -57,6 +57,8 @@ class FutuPublisher(BrowserPublisher):
             await self._shot(page, "no_editor")
             return {"ok": False, "url": "", "note": "正文编辑器没找到"}
         await page.wait_for_timeout(1500)
+        # 文末关联股票 chip(正文抽取, 编辑器 $ 联想)
+        await self._append_stock_tags(page, article)
         await self._shot(page, "content_filled")
 
         if draft:
@@ -101,6 +103,73 @@ class FutuPublisher(BrowserPublisher):
                 else:
                     await page.keyboard.type(text, delay=6)
         return True
+
+    async def _append_stock_tags(self, page, article: dict) -> None:
+        """文末空一行, 打 $名字 → stock-popup 联想 → 点匹配项成 nnstock chip。
+        抽取失败/联想无结果 → 回退纯文本, 不卡主流程。"""
+        n = int(self.config.get("stock_tags_count", 3))
+        if n <= 0:
+            return
+        try:
+            import stocks as stocks_mod
+            text = article["title"] + "\n" + (article.get("body") or "")
+            hits = stocks_mod.extract(text, top=n)
+        except Exception as e:
+            self.logger.warning(f"[{self.name}] 股票抽取失败(跳过tag): {e}")
+            return
+        if not hits:
+            return
+        # 光标移文末 + 空行
+        try:
+            await page.evaluate("""() => {
+                const ed=document.querySelector('.ProseMirror'); if(!ed)return;
+                ed.focus(); const s=window.getSelection(), r=document.createRange();
+                r.selectNodeContents(ed); r.collapse(false); s.removeAllRanges(); s.addRange(r);
+            }""")
+            await page.keyboard.press("Enter")
+        except Exception:
+            pass
+        ok = 0
+        for code, name, market in hits:
+            if await self._insert_stock_tag(page, name, code):
+                ok += 1
+            await page.keyboard.type(" ", delay=8)
+        self.logger.info(f"[{self.name}] 文末股票chip: {ok}/{len(hits)} "
+                         f"{[f'{nm}({cd})' for cd, nm, _ in hits]}")
+
+    async def _insert_stock_tag(self, page, name: str, code: str) -> bool:
+        """编辑器内打 $名字 → #stock-popup 出候选 → 点 code+name 都匹配的项。"""
+        try:
+            before = await page.locator('.ProseMirror .nnstock').count()
+            await page.keyboard.type("$", delay=100)
+            await page.wait_for_timeout(500)
+            await page.keyboard.type(name, delay=80)
+            for _ in range(10):                               # 最多 ~5s 等联想
+                await page.wait_for_timeout(500)
+                clicked = await page.evaluate("""([name, code]) => {
+                    const p = document.querySelector('#stock-popup, [class*="stock-popup"]');
+                    if (!p) return false;
+                    const items = [...p.querySelectorAll('[class*="list__item"], [class*="item"]')];
+                    for (const it of items) {
+                        const t = (it.innerText || '').replace(/\\s+/g, ' ');
+                        if (t.includes(code) && t.includes(name)) { it.click(); return true; }
+                    }
+                    return false;
+                }""", [name, code])
+                if clicked:
+                    await page.wait_for_timeout(800)
+                    if await page.locator('.ProseMirror .nnstock').count() > before:
+                        return True
+            # 无匹配 → 清理残留的 $名字
+            await page.keyboard.press("Escape")
+            for _ in range(len(name) + 1):
+                await page.keyboard.press("Backspace")
+            await page.keyboard.type(f"{name}({code})", delay=5)
+            self.logger.warning(f"[{self.name}] 股票联想无匹配, 留纯文本: {name}")
+            return False
+        except Exception as e:
+            self.logger.warning(f"[{self.name}] 股票tag失败 {name}: {str(e)[:50]}")
+            return False
 
     async def _upload_image(self, page, src, art_dir) -> bool:
         """富途编辑器没有正文图片的 file input(封面图 input 类型不符),

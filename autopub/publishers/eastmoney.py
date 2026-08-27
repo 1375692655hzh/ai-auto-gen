@@ -107,6 +107,8 @@ class EastmoneyPublisher(BrowserPublisher):
             await self._shot(page, "no_editor")
             return {"ok": False, "url": "", "note": "正文编辑器没找到"}
         await page.wait_for_timeout(1500)
+        # 文末关联股票 tag(从正文抽取, 编辑器联想, 搜不到自动回退纯文本)
+        await self._append_stock_tags(page, article)
         await self._shot(page, "content_filled")
 
         if draft:
@@ -125,6 +127,63 @@ class EastmoneyPublisher(BrowserPublisher):
 
     # ---------- 正文富文本 ----------
 
+    async def _append_stock_tags(self, page, article: dict) -> None:
+        """文末空一行, 用编辑器"股票"按钮打关联 tag(联想选中)。
+        抽取失败/联想无结果 → 回退纯文本, 绝不卡住。"""
+        n = int(self.config.get("stock_tags_count", 3))
+        if n <= 0:
+            return
+        try:
+            import stocks as stocks_mod
+            text = article["title"] + "\n" + (article.get("body") or "")
+            hits = stocks_mod.extract(text, top=n)
+        except Exception as e:
+            self.logger.warning(f"[{self.name}] 股票抽取失败(跳过tag): {e}")
+            return
+        if not hits:
+            return
+        ok = 0
+        # 光标移文末 + 空行
+        try:
+            await page.evaluate("""() => {
+                const ed=document.querySelector('%s'); if(!ed)return;
+                ed.focus(); const s=window.getSelection(), r=document.createRange();
+                r.selectNodeContents(ed); r.collapse(false); s.removeAllRanges(); s.addRange(r);
+            }""" % self.BODY_SEL)
+            await page.keyboard.press("Enter")
+        except Exception:
+            pass
+        for code, name, market in hits:
+            if await self._insert_stock_tag(page, name, code, market):
+                ok += 1
+            await page.keyboard.type(" ", delay=8)
+        self.logger.info(f"[{self.name}] 文末股票tag: {ok}/{len(hits)} "
+                         f"{[f'{nm}({cd})' for cd,nm,_ in hits]}")
+
+    async def _insert_stock_tag(self, page, name: str, code: str, market: str) -> bool:
+        """点工具栏"股票"→出$→输名字→联想选中。5秒无联想→Esc+回退纯文本。"""
+        try:
+            await page.locator('span:text-is("股票"), button:text-is("股票")').first.click(timeout=4000)
+            await page.wait_for_timeout(300)
+            await page.keyboard.type(name, delay=60)
+            # 等联想下拉出现含该名字的项
+            target = page.locator('.mention_suggest *',
+                                  has_text=name).first
+            for _ in range(10):
+                await page.wait_for_timeout(500)
+                if await target.count() > 0 and await target.is_visible():
+                    await target.click(timeout=3000)
+                    return True
+            # 无联想 → 清理: Esc + 删掉刚输入的名字和$
+            await page.keyboard.press("Escape")
+            for _ in range(len(name) + 1):
+                await page.keyboard.press("Backspace")
+            await page.keyboard.type(f"{name}({code})", delay=5)
+            self.logger.warning(f"[{self.name}] 股票联想无结果, 留纯文本: {name}")
+            return False
+        except Exception as e:
+            self.logger.warning(f"[{self.name}] 股票tag失败 {name}: {str(e)[:50]}")
+            return False
     async def _focus_editor(self, page) -> bool:
         loc = page.locator(self.BODY_SEL).first
         if await loc.count() == 0:

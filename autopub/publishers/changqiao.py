@@ -52,7 +52,8 @@ class ChangqiaoPublisher(BrowserPublisher):
             await self._shot(page, "no_editor")
             return {"ok": False, "url": "", "note": "正文编辑器没找到"}
         await page.wait_for_timeout(1500)
-        # 长桥硬校验: 正文必须 >30 字, 否则"确认发布"点击静默无效
+        # 文末关联股票(正文抽取, 编辑器"股票"按钮搜索弹窗)
+        await self._append_stock_tags(page, article)
         body_len = 0
         try:
             body_len = len(await page.evaluate(
@@ -76,6 +77,91 @@ class ChangqiaoPublisher(BrowserPublisher):
             return {"ok": True, "url": "", "note": "draft(未发布)"}
 
         return await self._do_publish(page)
+
+    async def _append_stock_tags(self, page, article: dict) -> None:
+        """工具栏"股票"→搜索弹窗→选股→选走势(看涨/看跌, 默认看涨)→插入 chip。
+        任何一步失败 → Esc 清理跳过, 不卡主流程。"""
+        n = int(self.config.get("stock_tags_count", 3))
+        stance = self.config.get("stock_stance", "看涨")
+        if n <= 0:
+            return
+        try:
+            import stocks as stocks_mod
+            text = article["title"] + "\n" + (article.get("body") or "")
+            hits = stocks_mod.extract(text, top=n)
+        except Exception as e:
+            self.logger.warning(f"[{self.name}] 股票抽取失败(跳过tag): {e}")
+            return
+        ok = 0
+        for code, name, market in hits:
+            if await self._insert_stock_tag(page, name, code, stance):
+                ok += 1
+        self.logger.info(f"[{self.name}] 文末股票chip: {ok}/{len(hits)} "
+                         f"{[f'{nm}({cd})' for cd, nm, _ in hits]}")
+
+    async def _insert_stock_tag(self, page, name: str, code: str, stance: str) -> bool:
+        try:
+            before = await page.locator('.ck-content .security-tag').count()
+            # 光标移文末(必须真实点击, CK 工具栏按钮要在编辑器激活后才出现)
+            await page.locator(self.BODY_SEL).first.click(timeout=4000)
+            await page.keyboard.press("Control+End")
+            await page.wait_for_timeout(400)
+            await page.keyboard.press("Enter")
+            # 工具栏"股票"按钮 → 搜索弹窗(工具栏无选区时会隐藏, 用 JS 直点)
+            opened = await page.evaluate("""() => {
+                for (const e of document.querySelectorAll('.ck-toolbar .ck-button__label')) {
+                    if ((e.innerText||'').trim() === '股票') {
+                        const btn = e.closest('button') || e;
+                        btn.click(); return true;
+                    }
+                }
+                return false;
+            }""")
+            if not opened:
+                self.logger.warning(f"[{self.name}] 工具栏没有股票按钮, 跳过: {name}")
+                return False
+            await page.wait_for_timeout(800)
+            inp = page.locator('.ant-modal-wrap input:not([type=hidden])').first
+            await inp.fill(name)
+            clicked = False
+            for _ in range(10):                             # 最多 ~5s 等结果
+                await page.wait_for_timeout(500)
+                clicked = await page.evaluate("""([name, code]) => {
+                    const modal = document.querySelector('.ant-modal-wrap');
+                    if (!modal) return false;
+                    for (const it of modal.querySelectorAll('[class*="item"], [class*="option"], li')) {
+                        const t = (it.innerText||'').replace(/\\s+/g,' ');
+                        if (t.includes(name) && t.includes(code) && t.length < 60) { it.click(); return true; }
+                    }
+                    return false;
+                }""", [name, code])
+                if clicked:
+                    break
+            if not clicked:
+                await page.keyboard.press("Escape")
+                self.logger.warning(f"[{self.name}] 股票搜索无匹配, 跳过: {name}")
+                return False
+            # 第二步: 选走势(看涨/看跌)
+            await page.wait_for_timeout(1000)
+            await page.evaluate("""(stance) => {
+                const modal = document.querySelector('.ant-modal-wrap');
+                if (!modal) return;
+                const cands = [...modal.querySelectorAll('button, span, div')]
+                    .filter(e => e.children.length === 0 && (e.innerText || '').trim() === stance);
+                if (cands.length) (cands[0].closest('button') || cands[0]).click();
+            }""", stance)
+            await page.wait_for_timeout(800)
+            await page.keyboard.press("Escape")             # 关残留弹窗
+            if await page.locator('.ck-content .security-tag').count() > before:
+                return True
+            return False
+        except Exception as e:
+            try:
+                await page.keyboard.press("Escape")
+            except Exception:
+                pass
+            self.logger.warning(f"[{self.name}] 股票tag失败 {name}: {str(e)[:50]}")
+            return False
 
     async def _type_body(self, page, blocks, art_dir=None) -> bool:
         loc = page.locator(self.BODY_SEL).first

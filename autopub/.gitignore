@@ -17,3 +17,7 @@ __pycache__/
 
 # 浏览器登录态(本就在用户主目录,不应进仓库)
 .*_chrome_profile/
+profiles/
+logs/
+tdoc.json
+stocks_cache.json

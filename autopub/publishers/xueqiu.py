@@ -104,7 +104,20 @@ class XueqiuPublisher(BrowserPublisher):
 
         # 守卫: 配了 append_hot 却没抓到足量热榜 → 不发(避免发出没热榜的残缺版)
         want_hot = int(self.config.get("append_hot", 3))
-        if want_hot > 0 and len(self.hot_stocks) < want_hot and not draft:
+        # 文末 cashtag 选股: 优先"正文抽取的关联公司", 抽不到再回退美股热榜
+        try:
+            import stocks as stocks_mod
+            text = article["title"] + "\n" + (article.get("body") or "")
+            hits = stocks_mod.extract(text, top=want_hot)
+        except Exception:
+            hits = []
+        if hits:
+            def _xq(code, market):
+                return code.zfill(5) if market == "HK" else code
+            self.hot_stocks = [(_xq(c, m), n) for c, n, m in hits]
+            self.logger.info(f"[{self.name}] 文末tag用正文关联股: "
+                             f"{[f'{n}({c})' for c, n in self.hot_stocks]}")
+        if want_hot > 0 and not hits and len(self.hot_stocks) < want_hot and not draft:
             self.logger.error(f"[{self.name}] 热榜只抓到{len(self.hot_stocks)}/{want_hot}只, 跳过发布(下次重试)")
             return {"ok": False, "url": "", "note": f"热榜抓取不足({len(self.hot_stocks)}/{want_hot})"}
 
