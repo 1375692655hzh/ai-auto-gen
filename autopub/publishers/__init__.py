@@ -7,6 +7,7 @@ from .zhihu import ZhihuPublisher
 from .tonghuashun import TonghuashunPublisher
 from .weibo import WeiboPublisher
 from .futu import FutuPublisher
+from .changqiao import ChangqiaoPublisher
 
 REGISTRY = {
     "laohu": LaohuPublisher,
@@ -16,6 +17,7 @@ REGISTRY = {
     "tonghuashun": TonghuashunPublisher,
     "weibo": WeiboPublisher,
     "futu": FutuPublisher,
+    "changqiao": ChangqiaoPublisher,
 }
 
 

@@ -56,6 +56,10 @@ platforms:
     enabled: true
     max_daily: 5
     stock_tags: strip
+  changqiao:
+    enabled: true
+    max_daily: 5
+    stock_tags: strip
   xueqiu:
     enabled: true
     max_daily: 15
