@@ -336,6 +336,11 @@ class EastmoneyPublisher(BrowserPublisher):
         """勾上"已阅读并同意《财富号作者发文规范》《东方财富社区管理规定》"的 checkbox。"""
         try:
             checked = await page.evaluate("""() => {
+                // 兜底1: i.check-icon 等自定义图标(父级文案含"已阅读并同意")
+                for (const e of document.querySelectorAll('[class*="check-icon"],[class*="checkIcon"],[class*="agree"]')) {
+                    const t = (e.parentElement && e.parentElement.innerText) || '';
+                    if (/已阅读并同意/.test(t) && e.offsetParent) { e.click(); return true; }
+                }
                 // 找"已阅读并同意"文案附近的 checkbox / radio
                 const labels = [...document.querySelectorAll('*')].filter(e =>
                     e.children.length <= 3 && /已阅读并同意|发文规范|社区管理规定/.test(e.innerText||''));
@@ -393,6 +398,8 @@ class EastmoneyPublisher(BrowserPublisher):
             await page.wait_for_timeout(2500)
             await self._shot(page, f"pub_{attempt}")
             acted = await self._handle_publish_dialog(page)
+            # "请同意规范"弹窗出现时, 勾选状态已被重置 → 重新勾上下轮重试
+            await self._check_agreement(page)
             await page.wait_for_timeout(2500)
             # 内容拦截检测(东财敏感词过滤): 弹"不文明/不合适发布用语"等 = 发布失败
             block = await page.evaluate("""() => {

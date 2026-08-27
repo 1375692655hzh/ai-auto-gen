@@ -66,7 +66,7 @@ platforms:
     stock_tags: keep
     append_hot: 3          # 文末加雪球美股热榜前N个 cashtag(雪球长文限插3个)
   zhihu:
-    enabled: true
+    enabled: false   # 账号触发"网络环境异常请前往安全认证"风控, 暂停; 过安全认证后可改回 true
     max_daily: 5
     stock_tags: strip
     fill_chart_gaps: true     # 图片传不上→把依赖图表的位置用文字说明替代(保格式), 知乎专用
