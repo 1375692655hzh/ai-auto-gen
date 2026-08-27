@@ -35,7 +35,7 @@ throttle:
 # 各平台设置(enabled=false 的不发)
 platforms:
   laohu:
-    enabled: true
+    enabled: false   # 需要实名认证, 暂停
     max_daily: 10
     # card=遇 $股票$ 走联想插入真卡片;strip=转纯文本;keep=原样打字面
     stock_tags: card
