@@ -44,7 +44,8 @@ SECTION_TITLES = {"宏观政策": "一、宏观与政策", "行业产业": "二�
                   "大宗商品": "五、大宗商品"}
 
 
-def build_morning_article(entries: list, date: str | None = None) -> str:
+def build_morning_article(entries: list, date: str | None = None, extras: dict | None = None) -> str:
+    extras = extras or {}
     date = date or today()
     L = [f"# AI财经早报 | {date}", ""]
     L.append(f"**【导读】**今日共 {len(entries)} 条要闻:"
@@ -67,6 +68,26 @@ def build_morning_article(entries: list, date: str | None = None) -> str:
                 note = f"〔关联:{tags}·{a.get('direction','中性')}" + (f"——{a['impact']}" if a.get("impact") else "") + "〕"
                 L.append(note)
             L.append("")
+    # 固定尾部板块:外围市场(倒数第三) → 事件日历(倒数第二) → 上市公司公告(最后)
+    if extras.get("markets"):
+        L.append("## 六、外围市场")
+        L.append("")
+        L.append(" · ".join(f"{m['name']} {m['price']}({m['chg_pct'] or '—'})"
+                            for m in extras["markets"]))
+        L.append("")
+    if extras.get("calendar"):
+        L.append("## 七、今日事件日历")
+        L.append("")
+        for c in extras["calendar"][:10]:
+            star = "★" * min(c.get("importance", 2), 4)
+            L.append(f"- {c['time']} [{c['country']}] {c['event']} {star}")
+        L.append("")
+    if extras.get("announcements"):
+        L.append("## 八、上市公司公告")
+        L.append("")
+        for a in extras["announcements"][:10]:
+            L.append(f"- **{a['company']}**:{a['title']}")
+        L.append("")
     L.append("---")
     L.append("> 内容基于公开信息由 AI 整理,不构成投资建议。")
     return "\n".join(L)
@@ -92,9 +113,10 @@ def _wrap(draw, text, font, max_w):
     return lines
 
 
-def render_long_image(entries: list, date: str | None = None,
+def render_long_image(entries: list, date: str | None = None, extras: dict | None = None,
                       out_path: Path | None = None) -> Path:
     from PIL import Image, ImageDraw
+    extras = extras or {}
     date = date or today()
     W, PAD, CARD_PAD = 1080, 40, 36
     out_path = out_path or (GEN_ROOT / "output" / "daily" / f"早报长图-{date}.png")
@@ -126,7 +148,34 @@ def render_long_image(entries: list, date: str | None = None,
                        _font(30), W - PAD * 2)[:2]
     head_h = 300 + len(top3_lines) * 44
     foot_h = 150
-    H = head_h + sum(c[4] + 24 for c in cards) + foot_h + PAD
+
+    # 尾部固定板块:外围市场(倒数第三) → 事件日历(倒数第二) → 上市公司公告(最后)
+    SPECIALS = []  # (标题, 色块色, [(左文本, 右文本, 右色)])
+    if extras.get("markets"):
+        rows = [(m["name"], f"{m['price']}  {m['chg_pct'] or ''}".strip(),
+                 (200, 30, 40) if m.get("chg_pct", "").startswith("+")
+                 else (0, 130, 80) if m.get("chg_pct", "").startswith("-") else (110, 110, 120))
+                for m in extras["markets"]]
+        SPECIALS.append(("外围市场 · 隔夜涨跌", (31, 78, 121), rows))
+    if extras.get("calendar"):
+        rows = [(f"{c['time']} [{c['country']}]", f"{'★' * min(c.get('importance', 2), 4)} {c['event']}"[:46],
+                 (60, 60, 67)) for c in extras["calendar"][:12]]
+        SPECIALS.append(("今日事件日历", (153, 68, 100), rows))
+    if extras.get("announcements"):
+        rows = [(a["company"], a["title"][:44], (60, 60, 67))
+                for a in extras["announcements"][:12]]
+        SPECIALS.append(("上市公司公告", (122, 63, 42), rows))
+    f_spec_l, f_spec_r = _font(34, True), _font(30)
+    special_cards = []
+    for title, color, rows in SPECIALS:
+        row_lines = []
+        for lt, rt, rc in rows:
+            rl = _wrap(probe, rt, f_spec_r, inner_w - 260)[:2]
+            row_lines.append((lt, rl, rc))
+        h = CARD_PAD * 2 + 56 + sum(16 + len(rl) * 42 for _, rl, _ in row_lines)
+        special_cards.append((title, color, row_lines, h))
+
+    H = head_h + sum(c[4] + 24 for c in cards) + sum(sc[3] + 24 for sc in special_cards) + foot_h + PAD
     img = Image.new("RGB", (W, H), (244, 245, 247))
     d = ImageDraw.Draw(img)
 
@@ -160,8 +209,22 @@ def render_long_image(entries: list, date: str | None = None,
             cy += 42
         y += h + 24
 
+    # 尾部固定板块卡片
+    for title, color, row_lines, h in special_cards:
+        d.rounded_rectangle([PAD, y, W - PAD, y + h], radius=20, fill=(255, 255, 255))
+        d.rectangle([PAD, y + 20, PAD + 10, y + h - 20], fill=color)
+        d.text((PAD + CARD_PAD, y + CARD_PAD), title, font=_font(40, True), fill=color)
+        cy = y + CARD_PAD + 56
+        for lt, rl, rc in row_lines:
+            d.text((PAD + CARD_PAD, cy), lt, font=f_spec_l, fill=(30, 30, 36))
+            for ln in rl:
+                d.text((PAD + CARD_PAD + 240, cy), ln, font=f_spec_r, fill=rc)
+                cy += 42
+            cy += 16
+        y += h + 24
+
     # 尾部
-    d.text((PAD, H - foot_h + 30), "内容基于公开信息由 AI 整理,不构成投资建议",
+    d.text((PAD, H - foot_h + 30), "内容基于公开信息由 AI 整理，不构成投资建议",
            font=_font(28), fill=(130, 130, 138))
     d.text((PAD, H - foot_h + 80), "AI财经日报 · 每天几分钟看懂财经",
            font=_font(28, True), fill=(17, 34, 64))
@@ -169,9 +232,10 @@ def render_long_image(entries: list, date: str | None = None,
     return out_path
 
 
-def run_all(date: str | None = None) -> dict:
-    """从 daily JSON 生成三形态产物。"""
+def run_all(date: str | None = None, extras: dict | None = None) -> dict:
+    """从 daily JSON 生成三形态产物(extras 提供日历/外围市场/公告板块数据)。"""
     date = date or today()
+    extras = extras or {}
     data_file = GEN_ROOT / "output" / "daily" / f"daily-{date}.json"
     entries = json.loads(data_file.read_text(encoding="utf-8"))
 
@@ -180,8 +244,8 @@ def run_all(date: str | None = None) -> dict:
     group.write_text(build_group_msg(entries, date), encoding="utf-8")
 
     article = save_text(out_dir("articles_dir") / f"AI财经早报-{date}.md",
-                        build_morning_article(entries, date))
-    img = render_long_image(entries, date)
+                        build_morning_article(entries, date, extras))
+    img = render_long_image(entries, date, extras)
     return {"group": group, "article": article, "image": img}
 
 

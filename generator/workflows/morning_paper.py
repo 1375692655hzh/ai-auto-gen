@@ -38,6 +38,7 @@ class MorningPaperWorkflow(WorkflowBase):
     def steps(self):
         return [
             ("fetch", self.step_fetch, False),
+            ("extras", self.step_extras, False),      # 日历/外围市场/公告(版式板块)
             ("rank", self.step_rank, False),
             ("expand", self.step_expand, False),
             ("assemble", self.step_assemble, True),   # 审核点:出稿后人工过目
@@ -52,10 +53,20 @@ class MorningPaperWorkflow(WorkflowBase):
         refs, ref_failed = sources.gather_refs()
         if failed or ref_failed:
             print(f"⚠ 不可用来源: {', '.join(failed + ref_failed)}")
+        # 富途早报/财联社有声早报/gangtise镜像 → 并入同行早报证据层
+        import extra_sources
+        peers, peer_failed = extra_sources.fetch_peer_mornings()
+        refs = peers + refs
+        if peer_failed:
+            print(f"⚠ 同行早报缺失: {', '.join(peer_failed)}")
         if not items:
             sys.exit("没有抓到快讯")
         print(f"抓取: 快讯 {len(items)} 条 + 同行早报 {len(refs)} 篇")
         return {"items": items, "refs": refs}
+
+    def step_extras(self, ctx):
+        import extra_sources
+        return {"extras": extra_sources.fetch_extras()}
 
     def step_rank(self, ctx):
         coarse = daily.coarse_filter(ctx["items"])
@@ -123,9 +134,9 @@ class MorningPaperWorkflow(WorkflowBase):
         return {"md_path": str(md_path), "voice_path": str(voice_path), "data_path": str(data_path)}
 
     def step_formats(self, ctx):
-        """三形态产出:①长图卡片 ②群发模板 ③同行式早报文章。"""
+        """三形态产出:①长图卡片 ②群发模板 ③同行式早报文章(含日历/外围/公告板块)。"""
         import formats
-        r = formats.run_all(self.date)
+        r = formats.run_all(self.date, ctx.get("extras"))
         print(f"长图: {r['image']}\n群发: {r['group']}\n早报文章: {r['article']}")
         return {k: str(v) for k, v in r.items()}
 
