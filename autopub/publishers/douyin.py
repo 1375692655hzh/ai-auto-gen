@@ -23,11 +23,11 @@ class DouyinPublisher(BrowserPublisher):
         if not video or not Path(video).exists():
             return {"ok": False, "url": "", "note": f"视频文件不存在: {video}"}
         title = article["title"]
-        # 简介 = 标题 + 正文摘要 + 话题标签
+        # 抖音发布页有独立的"作品标题"输入框; 简介编辑器单独填(不要塞标题, 会重复)
         desc = article.get("body") or title
         tags = article.get("tags") or ["财经", "早报"]
         topic = " ".join("#" + t for t in tags)
-        full_desc = (title + "\n" + desc[:400] + "\n" + topic)[:1000]
+        full_desc = (desc[:400] + "\n" + topic)[:1000]
 
         await page.goto(self.compose_url, wait_until="domcontentloaded", timeout=60000)
         await page.wait_for_timeout(6000)
@@ -49,9 +49,18 @@ class DouyinPublisher(BrowserPublisher):
             self.logger.info(f"[{self.name}] 发布页已有视频(不重复上传)")
         await page.wait_for_timeout(3000)
 
-        # 简介(抖音会弹"我知道了"等提示, 先关)
+        # 标题(独立输入框)
         for tip in ("我知道了", "知道了"):
             await self._click_text(page, tip)
+        tinput = page.locator('input[placeholder*="作品标题"]').first
+        if await tinput.count() > 0:
+            await tinput.click()
+            await tinput.fill(title)
+            self.logger.info(f"[{self.name}] 标题已填: {title[:30]}")
+        else:
+            self.logger.warning(f"[{self.name}] 标题输入框没找到")
+
+        # 简介(编辑器, 只放摘要+话题)
         editor = page.locator('.ql-editor, [contenteditable="true"]').first
         await editor.click(timeout=8000)
         await page.keyboard.type(full_desc, delay=10)
