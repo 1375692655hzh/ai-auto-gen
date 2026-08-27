@@ -60,6 +60,13 @@ platforms:
     enabled: true
     max_daily: 5
     stock_tags: strip
+  bilibili:
+    enabled: false         # 视频投稿(publish_video.py 入口), 文章流程不启用
+    max_daily: 5
+    zones: ["资讯"]        # 默认分区(页面自动推荐时忽略)
+  douyin:
+    enabled: false         # 视频发布(publish_video.py 入口), 文章流程不启用
+    max_daily: 5
   xueqiu:
     enabled: true
     max_daily: 15

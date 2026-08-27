@@ -8,6 +8,8 @@ from .tonghuashun import TonghuashunPublisher
 from .weibo import WeiboPublisher
 from .futu import FutuPublisher
 from .changqiao import ChangqiaoPublisher
+from .bilibili import BilibiliPublisher
+from .douyin import DouyinPublisher
 
 REGISTRY = {
     "laohu": LaohuPublisher,
@@ -18,6 +20,8 @@ REGISTRY = {
     "weibo": WeiboPublisher,
     "futu": FutuPublisher,
     "changqiao": ChangqiaoPublisher,
+    "bilibili": BilibiliPublisher,
+    "douyin": DouyinPublisher,
 }
 
 
