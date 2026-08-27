@@ -45,6 +45,9 @@ platforms:
     enabled: true
     max_daily: 15
     stock_tags: keep
+    bitbrowser:
+      api: http://127.0.0.1:54345
+      window_id: "8eb4ae1e9a6e407e8ebe87f333889811"   # 比特浏览器窗口「雪球」
     append_hot: 3          # 文末加雪球美股热榜前N个 cashtag(雪球长文限插3个)
   zhihu:
     enabled: true
