@@ -230,6 +230,19 @@ execFileSync(
 );
 console.log(`\n✅ 完成，耗时 ${((Date.now() - t0) / 1000 / 60).toFixed(1)} 分钟`);
 
+/* ---- 封面: 渲染开场标题帧(约0.7s处, 动画已稳定) 作为当期封面 ---- */
+const coverFile = path.join(projDir, "out", "cover.png");
+try {
+	execFileSync(
+		"npx",
+		["remotion", "still", COMPOSITION_ID, coverFile, "--frame=20", "--public-dir", projDir],
+		{ stdio: "inherit", shell: true },
+	);
+	console.log(`🖼 封面已生成 -> ${coverFile}(与视频开场同款视觉)`);
+} catch (e) {
+	console.error(`封面生成失败(不影响视频): ${e.message}`);
+}
+
 /* ---- 更新项目状态（预览模式不改状态） ---- */
 if (ESTIMATE) {
 	console.log("预览模式：项目状态保持不变（正式出片需 status=reviewed）");

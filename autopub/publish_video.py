@@ -28,6 +28,7 @@ async def main():
     ap.add_argument("--tags", default="财经,早报", help="标签/话题(逗号分隔)")
     ap.add_argument("--platforms", default="bilibili,douyin", help="平台(逗号分隔)")
     ap.add_argument("--draft", action="store_true", help="存草稿, 不真发")
+    ap.add_argument("--cover", default="", help="封面图(默认自动用视频同目录 out/cover.png)")
     args = ap.parse_args()
 
     logger = setup_logging()
@@ -40,6 +41,7 @@ async def main():
         "blocks": [],
         "video": str(Path(args.video).resolve()),
         "tags": [t.strip() for t in args.tags.split(",") if t.strip()],
+        "cover": args.cover or str(Path(args.video).resolve().parent / "cover.png"),
     }
     for plat in [p.strip() for p in args.platforms.split(",") if p.strip()]:
         logger.info(f"===== [{plat}] 视频发布 =====")

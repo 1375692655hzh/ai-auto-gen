@@ -64,8 +64,8 @@ class BilibiliPublisher(BrowserPublisher):
                 ok_tags += 1
         self.logger.info(f"[{self.name}] 标签: {ok_tags}/{len(tags[:10])}")
 
-        # 封面: 系统推荐帧, 按配置取第 N 张(默认第1张)
-        await self._set_cover(page)
+        # 封面: 优先上传视频管线产出的 cover.png, 没有才用系统推荐帧
+        await self._set_cover(page, article)
 
         # 分区: 页面常按标题自动推荐(hot-tag 自动选中); 没有就点配置的默认分区
         await self._ensure_zone(page)
@@ -87,25 +87,86 @@ class BilibiliPublisher(BrowserPublisher):
                 return {"ok": True, "url": "", "note": "投稿成功"}
         return {"ok": False, "url": "", "note": "投稿结果未知(超时)"}
 
-    async def _set_cover(self, page) -> None:
-        """封面: 封面设置 → 系统推荐缩略图(.img-item-cover)取第 N 张(cover_index, 默认1) → 完成。"""
-        idx = max(0, int(self.config.get("cover_index", 1)) - 1)
+    async def _set_cover(self, page, article: dict) -> None:
+        """封面: 优先上传 article["cover"](视频管线产出的当期封面), 否则推荐帧第 N 张。"""
+        cover = article.get("cover")
+        if cover and Path(cover).exists():
+            await self._upload_cover(page, cover)
+            return
+        await self._pick_recommended_cover(page)
+
+    async def _upload_cover(self, page, cover: str) -> None:
+        """封面设置 → 编辑器"上传封面"区域 → 最后一个 file input 选图 → 完成。
+        (实测: 该区域点击后 file input 动态出现, 取 .last)"""
         try:
-            opened = False
-            for _ in range(12):                        # 推荐封面要等视频处理, 最多 ~36s
-                opened = await page.evaluate("""() => {
-                    for (const t of ['封面设置', '添加封面']) {
-                        for (const e of document.querySelectorAll('span,div,button')) {
-                            if (e.children.length<=1 && (e.innerText||'').trim()===t && e.offsetParent) {
-                                e.click(); return true;
-                            }
+            opened = await self._open_cover_editor(page)
+            if not opened:
+                self.logger.warning(f"[{self.name}] 封面设置入口没找到, 跳过封面")
+                return
+            await page.wait_for_timeout(2500)
+            area = None
+            for _ in range(8):                            # 编辑器加载慢, 最多再等 ~16s
+                area = await page.evaluate("""() => {
+                    for (const e of document.querySelectorAll('span,div,button')) {
+                        if (e.offsetParent && e.children.length<=1
+                            && (e.innerText||'').trim()==='上传封面') {
+                            const r = e.getBoundingClientRect();
+                            return {x: r.x + r.width/2, y: r.y + r.height/2};
                         }
                     }
-                    return false;
+                    return null;
                 }""")
-                if opened:
+                if area:
                     break
+                await page.wait_for_timeout(2000)
+            if not area:
+                raise RuntimeError("上传封面区域没找到")
+            await page.mouse.click(area["x"], area["y"])
+            await page.wait_for_timeout(1500)
+            await page.locator('input[type=file]').last.set_input_files(str(cover))
+            await page.wait_for_timeout(4000)               # 等裁剪预览生成
+            clicked = await page.evaluate("""() => {
+                for (const e of document.querySelectorAll('button,span,div')) {
+                    if (e.offsetParent && e.children.length<=1 && (e.innerText||'').trim()==='完成') {
+                        e.click(); return true;
+                    }
+                }
+                return false;
+            }""")
+            if not clicked:
+                raise RuntimeError("完成按钮没点中")
+            self.logger.info(f"[{self.name}] 封面已上传: {Path(cover).name}")
+        except Exception as e:
+            self.logger.warning(f"[{self.name}] 封面上传异常({str(e)[:50]}), 改用推荐帧")
+            await self._pick_recommended_cover(page)
+
+    async def _open_cover_editor(self, page) -> bool:
+        """打开封面编辑器。必须真实 locator 点击(JS 点击触发不了 React 弹层)。"""
+        for entry in ('封面设置', '添加封面'):
+            for _ in range(8):                             # 推荐封面要等视频处理, 最多 ~24s
+                loc = page.locator(f'text={entry}').first
+                if await loc.count() > 0:
+                    try:
+                        await loc.click(timeout=4000)
+                        await page.wait_for_timeout(2000)
+                        # 编辑器开着的标志: 出现"上传封面"区域或推荐缩略图
+                        ok = await page.evaluate("""() =>
+                            [...document.querySelectorAll('span,div')].some(e =>
+                                e.offsetParent && e.children.length<=1
+                                && (e.innerText||'').trim()==='上传封面')
+                            || document.querySelectorAll('.img-item-cover').length > 0""")
+                        if ok:
+                            return True
+                    except Exception:
+                        pass
                 await page.wait_for_timeout(3000)
+        return False
+
+    async def _pick_recommended_cover(self, page) -> None:
+        """封面: 系统推荐缩略图(.img-item-cover)取第 N 张(cover_index, 默认1)。"""
+        idx = max(0, int(self.config.get("cover_index", 1)) - 1)
+        try:
+            opened = await self._open_cover_editor(page)
             if not opened:
                 self.logger.warning(f"[{self.name}] 封面设置入口没找到(视频可能还在处理), 跳过封面")
                 return
