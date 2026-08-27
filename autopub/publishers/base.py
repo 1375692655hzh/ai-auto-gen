@@ -161,35 +161,74 @@ class BrowserPublisher:
 
     # ---------- 主循环 ----------
 
+    async def _connect_bitbrowser(self, p):
+        """比特浏览器模式: 本地 API 打开窗口 → connect_over_cdp 接管。
+        指纹/代理/IP 隔离由比特浏览器窗口环境负责。
+        返回 (browser, context, page, window_id); 失败抛异常。"""
+        import bitbrowser
+        bb = self.config.get("bitbrowser") or {}
+        window_id = bb.get("window_id") or bitbrowser.find_window_by_name(
+            self.name, bb.get("api", bitbrowser.DEFAULT_API))
+        if not window_id:
+            raise RuntimeError("bitbrowser 已配置但未找到窗口 "
+                               f"(平台 {self.name}; 请在 config.yaml 填 window_id 或把窗口名设为平台名)")
+        api = bb.get("api", bitbrowser.DEFAULT_API)
+        info = bitbrowser.open_window(window_id, api)
+        self.logger.info(f"[{self.name}] 比特浏览器窗口已打开 (id={window_id[:8]}..., "
+                         f"ws={info.get('ws', '')})")
+        browser = await p.chromium.connect_over_cdp(info.get("ws") or info.get("http"))
+        context = browser.contexts[0] if browser.contexts else await browser.new_context()
+        page = context.pages[0] if context.pages else await context.new_page()
+        self._bb_window_id = window_id
+        return browser, context, page, window_id
+
     async def run(self, articles: list, draft: bool = False,
                   min_interval_seconds: int = 60,
                   max_consecutive_failures: int = 3):
-        """启浏览器 → 登录 → 逐篇发。articles 已按需过滤(未发过的)。"""
+        """启浏览器 → 登录 → 逐篇发。articles 已按需过滤(未发过的)。
+
+        浏览器两种模式:
+          - config 有 bitbrowser 配置 → 接管比特浏览器窗口(指纹+代理隔离)
+          - 否则 → 本机 Chrome + 独立 profile(原逻辑)
+        """
         from playwright.async_api import async_playwright
+        import bitbrowser
         SCREENSHOT_DIR.mkdir(parents=True, exist_ok=True)
 
+        use_bb = bool(self.config.get("bitbrowser")) and bitbrowser.available(
+            (self.config.get("bitbrowser") or {}).get("api", bitbrowser.DEFAULT_API))
+
         async with async_playwright() as p:
-            launch_kwargs = dict(
-                headless=False,
-                viewport={"width": 1280, "height": 800},
-                locale="zh-CN",
-                args=["--disable-blink-features=AutomationControlled"],
-                ignore_default_args=["--enable-automation"],
-            )
-            chrome = find_chrome()
-            if chrome:
-                launch_kwargs["executable_path"] = chrome
-                self.logger.info(f"[{self.name}] 使用本机 Chrome: {chrome}")
+            _close_bb = None
+            if use_bb:
+                browser, context, page, window_id = await self._connect_bitbrowser(p)
+                _close_bb = lambda: bitbrowser.close_window(window_id)
+                self.logger.info(f"[{self.name}] 比特浏览器 CDP 模式")
             else:
-                # 没装独立 Chrome → 用 playwright 自带 Chromium(需先 playwright install chromium)
-                self.logger.info(f"[{self.name}] 未找到本机 Chrome,改用 playwright 自带 Chromium")
-            context = await p.chromium.launch_persistent_context(
-                self.profile_dir, **launch_kwargs)
-            # 抹掉自动化特征(风控检测 navigator.webdriver)
-            await context.add_init_script(
-                "Object.defineProperty(navigator,'webdriver',{get:()=>undefined});")
-            self.logger.info(f"[{self.name}] 浏览器 profile: {self.profile_dir}")
-            page = context.pages[0] if context.pages else await context.new_page()
+                if self.config.get("bitbrowser"):
+                    self.logger.warning(f"[{self.name}] 比特浏览器客户端未运行(本地 API 不通), 回退本机 Chrome")
+                launch_kwargs = dict(
+                    headless=False,
+                    viewport={"width": 1280, "height": 800},
+                    locale="zh-CN",
+                    args=["--disable-blink-features=AutomationControlled"],
+                    ignore_default_args=["--enable-automation"],
+                )
+                chrome = find_chrome()
+                if chrome:
+                    launch_kwargs["executable_path"] = chrome
+                    self.logger.info(f"[{self.name}] 使用本机 Chrome: {chrome}")
+                else:
+                    # 没装独立 Chrome → 用 playwright 自带 Chromium(需先 playwright install chromium)
+                    self.logger.info(f"[{self.name}] 未找到本机 Chrome,改用 playwright 自带 Chromium")
+                context = await p.chromium.launch_persistent_context(
+                    self.profile_dir, **launch_kwargs)
+                # 抹掉自动化特征(风控检测 navigator.webdriver)
+                await context.add_init_script(
+                    "Object.defineProperty(navigator,'webdriver',{get:()=>undefined});")
+                self.logger.info(f"[{self.name}] 浏览器 profile: {self.profile_dir}")
+                page = context.pages[0] if context.pages else await context.new_page()
+                browser = None
             page.set_default_timeout(60000)
 
             try:
@@ -237,7 +276,13 @@ class BrowserPublisher:
             except Exception as e:
                 self.logger.error(f"[{self.name}] 流程异常: {e}")
             finally:
-                await context.close()
+                try:
+                    await context.close()
+                finally:
+                    if browser is not None:
+                        await browser.close()      # CDP 接管: 断开并关闭比特浏览器窗口
+                    if _close_bb:
+                        _close_bb()
 
     # ---------- 工具 ----------
 
