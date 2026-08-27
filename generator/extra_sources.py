@@ -287,78 +287,11 @@ def _mp_article(session, url: str) -> tuple:
     return title, text
 
 
-def _mp_token_cookie() -> tuple:
-    """微信公众平台 cookie(用你自己公众号后台的登录 cookie)。
-    配置在 autopub/secret.local.json 的 wechat_mp_cookie 字段;返回 (token, cookie)。"""
-    import json as _json
-    from pathlib import Path as _P
-    sec = _P(__file__).resolve().parents[1] / "autopub" / "secret.local.json"
-    if not sec.exists():
-        return "", ""
-    try:
-        data = _json.loads(sec.read_text(encoding="utf-8"))
-        cookie = data.get("wechat_mp_cookie", "")
-        m = re.search(r"token=(\d+)", cookie) or re.search(r"(?:^|;\s*)token=(\d+)", cookie)
-        return (m.group(1) if m else ""), cookie
-    except Exception:
-        return "", ""
-
-
-def fetch_gangtise_mp() -> dict | None:
-    """经微信公众平台 searchbiz/appmsg 接口搜 'Gangtise投研' 的最新文章。
-    需要自己的公众号后台 cookie(secret.local.json: wechat_mp_cookie, 含 token=xxx)。
-    无 cookie 或接口风控时返回 None。"""
-    token, cookie = _mp_token_cookie()
-    if not cookie:
-        return None
-    s = requests.Session()
-    s.headers.update({"User-Agent": _SOGOU_UA["User-Agent"], "Cookie": cookie,
-                      "Referer": "https://mp.weixin.qq.com/"})
-    try:
-        # 1) 搜公众号拿 fakeid
-        r = s.get("https://mp.weixin.qq.com/cgi-bin/searchbiz", params={
-            "action": "search_biz", "token": token, "lang": "zh_CN", "f": "json",
-            "ajax": "1", "random": __import__("random").random(),
-            "query": "Gangtise投研", "begin": "0", "count": "5"}, timeout=15)
-        js = r.json()
-        bizs = js.get("list") or []
-        if not bizs:
-            return None
-        fakeid = bizs[0]["fakeid"]
-        # 2) 拿该号最新文章列表
-        r2 = s.get("https://mp.weixin.qq.com/cgi-bin/appmsg", params={
-            "action": "list_ex", "token": token, "lang": "zh_CN", "f": "json",
-            "ajax": "1", "begin": "0", "count": "5", "query": "",
-            "fakeid": fakeid, "type": "9"}, timeout=15)
-        pats = _today_title_patterns()
-        for a in (r2.json().get("app_msg_list") or [])[:5]:
-            title = a.get("title") or ""
-            if "Gangtise" in title and any(p in title for p in pats):
-                # appmsg 列表不直接给正文链接,用 digest 先返回,正文链接需 digest 页跳转
-                url = a.get("link") or ""
-                text = a.get("digest") or ""
-                if url:
-                    _, full = _mp_article(requests.Session(), url)
-                    if full:
-                        text = full[:12000]
-                if text:
-                    return {"title": title, "text": text, "url": url,
-                            "time": a.get("update_time", ""), "media": "Gangtise投研(公众号)",
-                            "source": "gangtise公众号(公众平台接口)"}
-    except Exception:
-        pass
-    return None
-
-
 def fetch_gangtise() -> dict | None:
     """gangtise 每日早报。命名规律 'Gangtise投研日报 | 8月27日星期四':
     搜狗微信搜索 -> 代理页解真实 URL -> 按当天日期匹配标题 -> 抓正文。
-    被反爬/当日未发布时回退:①公众平台接口(需 cookie) ②豆包搜索镜像;仍无则 None(不硬凑)。"""
+    被反爬/当日未发布时回退豆包搜索镜像,仍无则返回 None(不硬凑)。"""
     import time as _t
-    # 路线0:公众平台接口(有 cookie 时最可靠)
-    r = fetch_gangtise_mp()
-    if r:
-        return r
     try:
         s = requests.Session()
         s.headers.update(_SOGOU_UA)
