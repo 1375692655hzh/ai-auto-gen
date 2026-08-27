@@ -1,0 +1,9 @@
+{
+	"id": "nvidia-500b",
+	"title": "英伟达5000亿新局：AI算力变成资产类别，谁来买单",
+	"status": "built",
+	"created": "2026-08-18",
+	"note": "状态说明：draft=待人工审核（build 拒绝执行）；reviewed=审核通过可制作；built=已出片。人工审核 = 修改 story.json 里的 narration 文本后，把本字段改为 reviewed。",
+	"builtAt": "2026-08-18",
+	"output": "out/final.mp4 (3.32 min)"
+}

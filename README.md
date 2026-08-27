@@ -8,11 +8,12 @@ AI 文章生成与多平台自动发布工具：基于大语言模型生成文�
 
 | 模块 | 技术栈 | 接入方式 | 支持平台 |
 |---|---|---|---|
-| [`generator/`](generator/) | Python + LLM | 多源财经快讯 + OpenAI 兼容模型 | 早报（A股/港美股）与分析文章生成，直接产出待发文章 + 口播稿 |
+| [`generator/`](generator/) | Python + LLM | 多源财经快讯 + OpenAI 兼容模型 | 早报（A股/港美股）、AI 财经日报（逐条详情+AI 分析）与分析文章生成 |
+| [`video/`](video/) | Node.js + Remotion | Edge-TTS/DashScope 配音 + React 模板渲染 | 日报/分析文章一键成片（1080p，10 种画面模板） |
 | [`autopub/`](autopub/) | Python + Playwright | 浏览器持久化配置（人工首登保会话） | 雪球、知乎专栏、东方财富财富号、老虎社区（同花顺/微博为占位） |
 | [`adapters-kit/`](adapters-kit/) | Node.js + Playwright | API 优先 + storageState 认证 | 搜狐号、今日头条（头条号）、网易号、什么值得买 |
 
-生成 → 发布链路：`generator` 产出的文章直接落入 `autopub/articles/` 待发目录，`autopub` 负责多平台发布。
+生成 → 成片 → 发布链路：`generator daily` 产出图文日报 + 结构化 JSON → `generator video` 转成 Remotion 故事板一键出片 → `autopub` 发布图文到多平台。
 
 ### autopub/ — 浏览器自动化发布（Python）
 
@@ -56,6 +57,8 @@ node examples/publish.js <sohu|toutiao|wangyi|zdm> <accountId> <storageState.jso
 
 - [x] 多平台自动发布（8 平台，两个子系统）
 - [x] AI 文章生成模块（早报 + 分析文章，多模型可切换，复用 autopub 模型配置）
+- [x] AI 财经日报（逐条详情 + AI 板块/影响分析 + 口播稿 + 数字防幻觉校验）
+- [x] 日报一键成片（Remotion：TTS 配音 + 模板渲染）
 - [x] 生成 → 发布链路（generator 产出直接进入 autopub 待发目录）
 - [ ] 定时自动早报（交易日早间）
 - [ ] 发布结果统一对账与数据看板

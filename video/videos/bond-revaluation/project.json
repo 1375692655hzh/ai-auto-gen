@@ -1,0 +1,7 @@
+{
+	"id": "bond-revaluation",
+	"title": "bond-revaluation",
+	"status": "draft",
+	"created": "2026-08-18",
+	"note": "draft=待审核；reviewed=审核通过可制作；built=已出片。审核=改 story.json 的 narration 后把 status 改为 reviewed。"
+}

@@ -33,6 +33,11 @@ def main():
     p_d.add_argument("--items", type=int, default=0, help="条数(默认取 config,15)")
     p_d.add_argument("--no-voice", action="store_true", help="不生成口播稿")
 
+    p_v = sub.add_parser("video", help="把 daily JSON 做成视频(Remotion: TTS+渲染)")
+    p_v.add_argument("--date", default=None, help="日报日期(默认今天)")
+    p_v.add_argument("--estimate", action="store_true", help="无声预览(不出正式片)")
+    p_v.add_argument("--no-render", action="store_true", help="只生成 story.json 不渲染")
+
     p_f = sub.add_parser("fetch", help="抓取信息源并展示(不调用模型)")
     p_f.add_argument("--limit", type=int, default=10)
 
@@ -49,6 +54,9 @@ def main():
     elif args.cmd == "daily":
         import daily
         daily.run(want=args.items, with_voice=not args.no_voice)
+    elif args.cmd == "video":
+        import video
+        video.run(date=args.date, estimate=args.estimate, no_render=args.no_render)
     elif args.cmd == "fetch":
         import sources
         items, failed = sources.gather()

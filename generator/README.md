@@ -30,6 +30,12 @@ python generator/main.py fetch --limit 10
 python generator/main.py daily
 python generator/main.py daily --items 10 --no-voice   # 条数/不要口播
 
+# 日报做成视频(Remotion: Edge-TTS 配音 + 模板渲染 1080p)
+python generator/main.py video                  # 用今天的 daily JSON 出片 final.mp4
+python generator/main.py video --estimate       # 无声预览
+python generator/main.py video --date 2026-08-27
+# 首次使用需: cd video && npm install
+
 # 早报:A股 + 港美股两篇(各带口播稿)
 python generator/main.py morning
 python generator/main.py morning --market us     # 只出港美股
