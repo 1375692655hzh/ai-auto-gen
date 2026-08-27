@@ -77,6 +77,11 @@ class WorkflowBase:
             if from_step:
                 started = True
             if only and step_name != only:
+                # --only:目标步骤之前的存档也装载,保证上下文完整
+                if step_list.index((step_name, fn, is_review)) < [s[0] for s in step_list].index(only):
+                    ck = self._load_ckpt(step_name)
+                    if ck is not None:
+                        self.ctx.update(ck)
                 continue
 
             # 断点复用(非 --from/--only 重跑时,已有存档的步骤直接跳过)

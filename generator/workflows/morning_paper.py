@@ -41,6 +41,7 @@ class MorningPaperWorkflow(WorkflowBase):
             ("rank", self.step_rank, False),
             ("expand", self.step_expand, False),
             ("assemble", self.step_assemble, True),   # 审核点:出稿后人工过目
+            ("formats", self.step_formats, False),    # 长图/群发模板/同行式早报文章
             ("video", self.step_video, False),
         ]
 
@@ -120,6 +121,13 @@ class MorningPaperWorkflow(WorkflowBase):
         data_path.write_text(json.dumps(clean, ensure_ascii=False, indent=2), encoding="utf-8")
         print(f"图文: {md_path}\n口播: {voice_path}\nJSON: {data_path}")
         return {"md_path": str(md_path), "voice_path": str(voice_path), "data_path": str(data_path)}
+
+    def step_formats(self, ctx):
+        """三形态产出:①长图卡片 ②群发模板 ③同行式早报文章。"""
+        import formats
+        r = formats.run_all(self.date)
+        print(f"长图: {r['image']}\n群发: {r['group']}\n早报文章: {r['article']}")
+        return {k: str(v) for k, v in r.items()}
 
     def step_video(self, ctx):
         if not self.with_video:
