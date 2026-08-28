@@ -4,6 +4,15 @@
 
 ## 现有来源
 
+早报四路径（2026-08-28 打通，全部实测 ok）：
+- **富途《港美早报》**：列表接口 seqMark 翻页 + 文章页 WAF 破盾，正文保留段落
+- **财联社有声早报**：专栏 1151，每天 07:00，48h 内最新一篇全文
+- **华尔街见闻早餐FM-Radio**：搜索接口定位 + 内容 API 补全文
+- **元宝·Gangtise**：Playwright 持久化登录态问元宝拿当日投研日报（gangtise 搜狗链失败时自动兜底）；登录态过期时跑 `py -3.11 generator/yuanbao_fetch.py --login` 扫码
+  注意：富途/财联社/元宝走 `peer_mornings` 聚合进工作流（`cli sources fetch peer_mornings` 手动可取），不需要在 config 里单开（避免与聚合重复抓取）。
+
+## 其余来源
+
 `python cli.py sources list` 查看全部（类型/启用/健康）。
 `python cli.py sources check` 全量体检（更新健康标记）。
 `python cli.py sources fetch <id> --fresh` 单源实抓看条目。
