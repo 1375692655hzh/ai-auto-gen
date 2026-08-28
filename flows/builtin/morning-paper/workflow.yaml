@@ -1,0 +1,31 @@
+id: morning-paper
+title: AI财经早报
+description: 抓取→粗筛→精排→联网取证→扩写解读→数字校验→图文日报+口播稿(+视频)
+version: 1.0.0
+
+# 参数: 可被 data/config.local.yaml 或命令行 --set k=v 覆盖
+params:
+  items: 15          # 每日条数(0=取 config daily.items)
+  with_video: false  # 是否接视频成片
+  no_voice: false    # 不生成口播稿
+
+steps:
+  - id: fetch                      # 快讯+同行早报(免 LLM)
+    uses: fetch_news
+  - id: extras                     # 日历/外围/公告(版式板块)
+    uses: fetch_extras
+  - id: rank                       # LLM 精排选条
+    uses: rank_items
+    with: {items: "{params.items}"}
+  - id: expand                     # 并行扩写(联网取证+AI解读+数字校验)
+    uses: expand_entries
+    with: {workers: 2}
+  - id: assemble                   # 图文+口播+daily JSON  ← 审核点
+    uses: assemble_daily
+    review: true
+    with: {no_voice: "{params.no_voice}"}
+  - id: formats                    # 长图/群发模板/同行式早报文章
+    uses: render_formats
+  - id: video                      # 一键成片(可关)
+    uses: render_video
+    when: "{params.with_video}"

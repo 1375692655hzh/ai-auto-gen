@@ -9,6 +9,7 @@
 """
 
 import json
+import sys
 import time
 from pathlib import Path
 
@@ -103,8 +104,22 @@ class WorkflowBase:
             print(f"[{self.name}] ✓ {step_name} 完成({dt:.0f}s)")
 
             if is_review and not auto:
-                ans = input(f"\n⏸ 审核点[{step_name}]:产物在 {self.run_dir}\n"
-                            "   检查/修改后回车继续(r=从本步重跑,q=退出): ").strip().lower()
+                import os
+                non_tty = (not sys.stdin.isatty()
+                           or os.environ.get("AAG_NONINTERACTIVE") == "1")
+                if non_tty:
+                    # 非交互环境(agent/CI): 不阻塞, 挂起等外部审核后重跑续跑
+                    self._on_review_pause(step_name)
+                    print(f"\n⏸ 审核点[{step_name}] 挂起(非交互): 产物在 {self.run_dir}\n"
+                          f"   人工检查/修改后重跑同一命令自动续跑(存档已复用, 不重复花钱)")
+                    raise SystemExit(2)
+                try:
+                    ans = input(f"\n⏸ 审核点[{step_name}]:产物在 {self.run_dir}\n"
+                                "   检查/修改后回车继续(r=从本步重跑,q=退出): ").strip().lower()
+                except EOFError:
+                    self._on_review_pause(step_name)
+                    print(f"\n⏸ 审核点[{step_name}] 挂起(stdin 关闭): 产物在 {self.run_dir}")
+                    raise SystemExit(2)
                 if ans == "q":
                     print("已退出。重跑: python generator/main.py run "
                           f"{self.name} --from {step_name}")
@@ -113,6 +128,10 @@ class WorkflowBase:
                     self._ckpt_path(step_name).unlink()
                     return self.run(auto=False, from_step=step_name)
         return self.ctx
+
+    def _on_review_pause(self, step_name: str) -> None:
+        """审核点在非交互环境挂起时的钩子(子类可覆盖, 如写 run.json)。默认无操作。"""
+        return
 
     def summary(self) -> str:
         secs = sum(self.stats["steps"].values())

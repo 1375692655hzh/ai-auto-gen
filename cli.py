@@ -208,6 +208,89 @@ def sources_cmd(args) -> int:
     return EXIT_FAIL
 
 
+def flows_cmd(args) -> int:
+    sys.path.insert(0, str(ROOT))
+    from flows.engine import discover, lint, run_flow, YamlWorkflow, RUNS_ROOT
+
+    if args.sub == "list":
+        packs = discover()
+        rows = []
+        for name, d in packs.items():
+            errs = lint(d)
+            rows.append({"name": name, "title": (YamlWorkflow(d).title if not errs else "?"),
+                         "path": str(d), "lint": "ok" if not errs else errs})
+        if args.json:
+            print(json.dumps(rows, ensure_ascii=False, indent=2))
+            return EXIT_OK
+        for r in rows:
+            mark = "✅" if r["lint"] == "ok" else "❌"
+            print(f"{mark} {r['name']:<20} {r['title']}")
+            if r["lint"] != "ok":
+                for e in r["lint"]:
+                    print(f"    - {e}")
+        return EXIT_OK
+
+    if args.sub == "lint":
+        packs = discover()
+        if args.name not in packs:
+            print(f"未知工作流: {args.name} (可用: {sorted(packs)})", file=sys.stderr)
+            return EXIT_CONFIG
+        errs = lint(packs[args.name])
+        print("|".join(errs) if errs else "lint 通过")
+        return EXIT_FAIL if errs else EXIT_OK
+
+    if args.sub in ("run", "resume"):
+        overrides = {}
+        for kv in args.set:
+            k, _, v = kv.partition("=")
+            if not k or not v:
+                print(f"--set 格式应为 k=v: {kv}", file=sys.stderr)
+                return EXIT_CONFIG
+            if v.lower() in ("true", "false"):
+                v = v.lower() == "true"
+            else:
+                try:
+                    v = int(v)
+                except ValueError:
+                    pass
+            overrides[k] = v
+        try:
+            run_flow(args.name, date=args.date, auto=args.auto,
+                     from_step=args.from_step, fresh=args.fresh,
+                     only=args.only, overrides=overrides)
+        except SystemExit as e:
+            return int(e.code) if isinstance(e.code, int) else EXIT_FAIL
+        return EXIT_OK
+
+    if args.sub == "status":
+        import json as _j
+        date = args.date
+        if not date:
+            packs = discover()
+            if args.name not in packs:
+                print(f"未知工作流: {args.name}", file=sys.stderr)
+                return EXIT_CONFIG
+            droot = RUNS_ROOT / args.name
+            dates = sorted([p.name for p in droot.glob("*") if p.is_dir()]) if droot.exists() else []
+            date = dates[-1] if dates else None
+        rj = RUNS_ROOT / args.name / str(date) / "run.json"
+        if not rj.exists():
+            print(f"无运行记录: {rj}", file=sys.stderr)
+            return EXIT_CONFIG
+        data = _j.loads(rj.read_text(encoding="utf-8"))
+        if args.json:
+            print(_j.dumps(data, ensure_ascii=False, indent=2))
+            return EXIT_OK
+        print(f"工作流 {data['flow']} @ {data['date']}  状态: {data['status']}"
+              + (f"  ({data['note']})" if data.get("note") else ""))
+        for k, v in data.get("steps", {}).items():
+            print(f"  · {k:<12} {v}")
+        for k, v in (data.get("artifacts") or {}).items():
+            print(f"  📄 {k}: {v}")
+        return EXIT_OK
+    return EXIT_FAIL
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description="ai-auto-gen 统一 CLI",
                                  prog="cli.py")
@@ -239,6 +322,26 @@ def main() -> int:
     ps_f.add_argument("--fresh", action="store_true", help="绕过缓存")
     ps_f.add_argument("--json", action="store_true")
 
+    p_fl = sub.add_parser("flows", help="生成工作流(板块二)")
+    fsub = p_fl.add_subparsers(dest="sub", required=True)
+    pf_l = fsub.add_parser("list", help="全部工作流包")
+    pf_l.add_argument("--json", action="store_true")
+    pf_i = fsub.add_parser("lint", help="校验 workflow.yaml")
+    pf_i.add_argument("name")
+    pf_r = fsub.add_parser("run", help="运行工作流(断点续跑, 幂等)")
+    for a, kw in [("--date", {"default": None}), ("--auto", {"action": "store_true"}),
+                  ("--from", {"dest": "from_step", "default": None}),
+                  ("--only", {"default": None}),
+                  ("--fresh", {"action": "store_true"})]:
+        pf_r.add_argument(a, **kw)
+    pf_r.add_argument("--set", action="append", default=[], metavar="k=v", help="覆盖参数(可多次)")
+    pf_r.add_argument("name", help="工作流名(flows list 可查)")
+    pf_s = fsub.add_parser("status", help="运行状态(读 run.json)")
+    pf_s.add_argument("name")
+    pf_s.add_argument("--date", default=None)
+    pf_s.add_argument("--json", action="store_true")
+    fsub.add_parser("resume", help="= run(存档复用自动续跑)").add_argument("name")  # 兼容占位
+
     p_g = sub.add_parser("gen", help="生成模块(generator/main.py 参数透传)")
     p_g.add_argument("args", nargs=argparse.REMAINDER)
 
@@ -254,6 +357,8 @@ def main() -> int:
         return doctor(json_out=args.json)
     if args.cmd == "sources":
         return sources_cmd(args)
+    if args.cmd == "flows":
+        return flows_cmd(args)
     if args.cmd == "gen":
         return _passthrough(ROOT / "generator" / "main.py", args.args)
     if args.cmd == "publish":
