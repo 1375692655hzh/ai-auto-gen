@@ -84,6 +84,13 @@ def lint(pack_dir: Path) -> list:
     return errs
 
 
+def _truthy(v) -> bool:
+    """when 求值: 布尔照用; 字符串把 'false/none/off/material/空' 视为关(其余为开)。"""
+    if isinstance(v, str):
+        return v.strip().lower() not in ("", "false", "none", "off", "material")
+    return bool(v)
+
+
 class YamlWorkflow(WorkflowBase):
     """由 workflow.yaml 驱动的工作流(继承 generator WorkflowBase 全部断点/审核语义)。"""
 
@@ -119,8 +126,8 @@ class YamlWorkflow(WorkflowBase):
         for st in self.spec.get("steps", []):
             sid = st.get("id", "?")
             when = st.get("when")
-            if when and not self._resolve(when):
-                out.append((sid, self._skip_fn(sid, f"when:{when}"), False))
+            if when and not _truthy(self._resolve(when)):
+                out.append((sid, self._skip_fn(sid, f"when:{when}={self._resolve(when)!r}"), False))
                 continue
             uses = st.get("uses")
             if uses not in STEPS:
