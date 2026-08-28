@@ -4,6 +4,8 @@
 output:
   # 生成的正式文章直接进发布系统的待发目录
   articles_dir: ../autopub/articles
+  # 长图产物(图片, 发布侧可见; 不进 articles 队列)
+  images_dir: ../autopub/images
   # 口播稿(不发布)与过程产物
   scripts_dir: output/口播
   research_dir: output/research
