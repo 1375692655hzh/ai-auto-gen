@@ -122,6 +122,46 @@ def _load_sectors(pack_dir: Path) -> list:
     return [w for g in groups for w in g]
 
 
+def _ark_complete(user: str, system: str, model: str, max_tokens: int = 16384) -> str:
+    """ark 系模型走 arkcli CLI(火山订阅额度, 模型可用 ark: 前缀切换)。
+    11 模型横评(2026-08-29)推荐序: kimi-k3 > doubao-seed-2-1-turbo > glm-5-3-flash。
+    失败抛异常, 由调用方降级回默认 llm_complete。"""
+    import json as _json
+    import shutil
+    import subprocess
+    from pathlib import Path as _P
+    # 绕开 npm .cmd 垫片(cmd.exe 命令行 8191 上限装不下 13k 字任务文本):
+    # 垫片本质 = node <npm>/node_modules/@volcengine/ark-cli/scripts/run.js <args>,
+    # node.exe 是真 exe, CreateProcess 32k 字符上限足够
+    exe = shutil.which("arkcli")
+    if not exe:
+        raise RuntimeError("arkcli 不在 PATH, 无法走 ark 通道")
+    js = _P(exe).parent / "node_modules" / "@volcengine" / "ark-cli" / "scripts" / "run.js"
+    if not js.exists():
+        raise RuntimeError(f"arkcli 入口未找到: {js}")
+    node = shutil.which("node") or "node"
+    cmd = [node, str(js), "+chat", "--no-progress", "--model", model,
+           "--instructions", system, "--reasoning-effort", "low",
+           "--max-output-tokens", str(max_tokens), user]
+    try:
+        r = subprocess.run(cmd, capture_output=True, timeout=900)
+    except FileNotFoundError:
+        raise RuntimeError("arkcli 不在 PATH, 无法走 ark 通道")
+    out = r.stdout.decode("utf-8", "replace").strip()
+    if not out:
+        raise RuntimeError(f"arkcli 无输出: {r.stderr.decode('utf-8', 'replace')[:200]}")
+    try:
+        d = _json.JSONDecoder().raw_decode(out)[0]      # 截掉尾部版本提示
+    except Exception:
+        raise RuntimeError(f"arkcli 输出异常: {out[:150]}")
+    if d.get("ok") is False:
+        raise RuntimeError(f"arkcli 错误: {str((d.get('error') or {}).get('message'))[:200]}")
+    if not d.get("content"):
+        raise RuntimeError(f"ark {model} content 为空(思考链截断, 试 --thinking disabled)")
+    print(f"  [ark] {d.get('model')} tokens={(d.get('usage') or {}).get('total_tokens')}")
+    return d["content"]
+
+
 def _restore_raw(wf, ctx) -> None:
     """把待发队列的文章还原为无解读干净稿(raw_backup 优先, 否则剥离 ↳ 行)。"""
     article_p = ctx.get("article_path")
@@ -187,11 +227,21 @@ def tag_morning_items(ctx, wf, params):
     system = daily.load_prompt("morning_tags_system",
                                "你是量化资讯编辑,只输出严格 JSON。")
     print(f"解读标签[{mode}]: {len(items)} 条正文条目 / 送模型 {len(user)} 字 ...")
-    raw = llm_complete(user, system=system, max_tokens=4000, temperature=0.2)
+    m_model = str(params.get("model", "")).strip()
+
+    def _call() -> str:
+        if m_model.startswith("ark:"):
+            try:
+                return _ark_complete(user, system, m_model[4:])
+            except RuntimeError as e:
+                print(f"⚠ ark 通道失败({e}), 降级默认模型")
+        return llm_complete(user, system=system, max_tokens=4000, temperature=0.2)
+
+    raw = _call()
     parsed, err = _parse_tags(raw, sectors, items, mode)
     if err and not err.startswith("表外词"):
         print(f"⚠ JSON 校验失败({err}), 重试一次 ...")
-        raw = llm_complete(user, system=system, max_tokens=4000, temperature=0.2)
+        raw = _call()
         parsed, err = _parse_tags(raw, sectors, items, mode)
     if err:
         print(f"⚠ 解读标签失败({err}), 降级发布无解读版")

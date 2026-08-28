@@ -9,6 +9,7 @@ params:
   per_report_chars: 6000  # 每份早报送入模型的最大字数
   tag_lines: true         # 解读标签开关(失败自动降级为无解读版)
   tag_mode: direction     # direction=板块×方向(利好/利空/中性) / sectors=只写板块不写多空
+  tag_model: ""           # 打标模型: 空=默认 / ark:kimi-k3 等走 arkcli 订阅(失败自动回落)
   with_image: false       # 长图产物(按需; 图片是文章的额外产物类别)
   image_top: 16           # 图条上限(配额内截断)
 
@@ -25,7 +26,7 @@ steps:
   - id: tag                      # 文章 → 逐条解读标签(板块×方向)+公告热度汇总  ← 审核点
     uses: tag_morning_items
     when: "{params.format}"
-    with: {enabled: "{params.tag_lines}", mode: "{params.tag_mode}"}
+    with: {enabled: "{params.tag_lines}", mode: "{params.tag_mode}", model: "{params.tag_model}"}
     review: true
   - id: image                    # 文章+解读 → 早报长图(按需, PNG 不进待发队列; 可离线重渲染)
     uses: render_morning_image
