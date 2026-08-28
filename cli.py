@@ -150,6 +150,64 @@ def publish_status(json_out: bool = False) -> int:
     return EXIT_OK
 
 
+def sources_cmd(args) -> int:
+    sys.path.insert(0, str(ROOT))
+    from sources import list_sources, fetch_one
+    from sources import health as health_mod
+
+    if args.sub == "list":
+        srcs = list_sources()
+        if args.json:
+            print(json.dumps(srcs, ensure_ascii=False, indent=2))
+            return EXIT_OK
+        print(f"{'类型':<14}{'来源id':<22}{'启用':<6}{'健康':<10}标题")
+        for m in srcs:
+            print(f"{m['kind']:<14}{m['id']:<22}{('是' if m['enabled'] else '否'):<6}"
+                  f"{m['health']:<10}{m['title']}")
+        return EXIT_OK
+
+    if args.sub == "check":
+        srcs = [m for m in list_sources() if not args.id or m["id"] == args.id]
+        if args.id and not srcs:
+            print(f"未知来源: {args.id}", file=sys.stderr)
+            return EXIT_CONFIG
+        results = []
+        for m in srcs:
+            items, err = fetch_one(m["id"], fresh=True)
+            n = len(items) if isinstance(items, list) else 1
+            ok = not err and n > 0
+            results.append({"id": m["id"], "ok": ok, "items": n,
+                            "error": err or ("空结果" if n == 0 else ""),
+                            "health": health_mod.get(m["id"]).get("status", "")})
+            mark = "✅" if ok else "❌"
+            print(f"{mark} {m['id']:<22} {n}条 {err or ('空结果' if n == 0 else '')}")
+        n_fail = sum(1 for r in results if not r["ok"])
+        if args.json:
+            print(json.dumps(results, ensure_ascii=False, indent=2))
+        return EXIT_FAIL if n_fail else EXIT_OK
+
+    if args.sub == "fetch":
+        items, err = fetch_one(args.sid, fresh=args.fresh)
+        if err:
+            print(json.dumps({"error": err}, ensure_ascii=False)
+                  if args.json else f"❌ {err}", file=sys.stderr if not args.json else sys.stdout)
+            return EXIT_FAIL
+        if isinstance(items, dict):
+            items = [items]
+        shown = items[:args.limit]
+        if args.json:
+            print(json.dumps(shown, ensure_ascii=False, indent=2))
+        else:
+            for it in shown:
+                t = it.get("time", "")
+                body = (it.get("title") or it.get("event") or it.get("text", ""))[:70]
+                extra = it.get("country") or it.get("media") or ""
+                print(f"[{t}] {extra + ' ' if extra else ''}{body}")
+            print(f"(共 {len(items)} 条, 显示 {len(shown)})")
+        return EXIT_OK
+    return EXIT_FAIL
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description="ai-auto-gen 统一 CLI",
                                  prog="cli.py")
@@ -168,6 +226,19 @@ def main() -> int:
         p_x = psub.add_parser(name, help=help_)
         p_x.add_argument("args", nargs=argparse.REMAINDER)
 
+    p_src = sub.add_parser("sources", help="来源库(板块一)")
+    ssub = p_src.add_subparsers(dest="sub", required=True)
+    ps_l = ssub.add_parser("list", help="全部来源+启用/健康状态")
+    ps_l.add_argument("--json", action="store_true")
+    ps_c = ssub.add_parser("check", help="实抓体检(更新健康标记, dead 自动跳过可复位)")
+    ps_c.add_argument("--id", default=None, help="只查指定来源")
+    ps_c.add_argument("--json", action="store_true")
+    ps_f = ssub.add_parser("fetch", help="抓取指定来源(TTL 缓存)")
+    ps_f.add_argument("sid", help="来源 id (list 可查)")
+    ps_f.add_argument("--limit", type=int, default=5)
+    ps_f.add_argument("--fresh", action="store_true", help="绕过缓存")
+    ps_f.add_argument("--json", action="store_true")
+
     p_g = sub.add_parser("gen", help="生成模块(generator/main.py 参数透传)")
     p_g.add_argument("args", nargs=argparse.REMAINDER)
 
@@ -181,6 +252,8 @@ def main() -> int:
 
     if args.cmd == "doctor":
         return doctor(json_out=args.json)
+    if args.cmd == "sources":
+        return sources_cmd(args)
     if args.cmd == "gen":
         return _passthrough(ROOT / "generator" / "main.py", args.args)
     if args.cmd == "publish":

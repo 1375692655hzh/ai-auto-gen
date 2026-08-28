@@ -1,0 +1,108 @@
+"""来源注册:包装 generator 现有抓取函数为标准来源(P1 包装不重写)。
+
+物理迁移(函数搬到本包、generator 留 shim)在后续阶段做——
+注册 id 与语义已稳定,届时不影响调用方。
+
+kind: flash 快讯 | peer_article 同行早报 | calendar 日历 | market 行情 | announcement 公告
+      peer_group/extras_group 聚合来源(morning_paper 工作流直接调用,不进 gather)
+"""
+
+import sys
+import importlib.util
+from pathlib import Path
+
+_GEN = Path(__file__).resolve().parent.parent / "generator"
+if str(_GEN) not in sys.path:
+    sys.path.insert(0, str(_GEN))          # extra_sources 内部 `from search import ...` 需要
+
+
+def _load(alias: str, path: Path):
+    """按路径加载 generator 同名模块(本包也叫 sources, 不能直接 import sources)。"""
+    spec = importlib.util.spec_from_file_location(alias, path)
+    mod = importlib.util.module_from_spec(spec)
+    sys.modules[alias] = mod
+    spec.loader.exec_module(mod)
+    return mod
+
+
+gs = _load("gen_sources", _GEN / "sources.py")          # generator/sources.py
+ges = _load("gen_extra_sources", _GEN / "extra_sources.py")
+
+from sources.base import source            # noqa: E402
+
+
+# ---------- 快讯(gather 主力) ----------
+
+@source("sina_7x24", "flash", "新浪财经7×24", ttl_min=10, default_enabled=True)
+def _sina(conf):
+    return gs.fetch_sina_724(int(conf.get("page_size", 100)))
+
+
+@source("eastmoney_fast", "flash", "东财财经快讯", ttl_min=10, default_enabled=True)
+def _em_fast(conf):
+    return gs.fetch_eastmoney_fast(int(conf.get("page_size", 50)))
+
+
+# ---------- 同行早报文章(gather_refs) ----------
+
+@source("eastmoney_zaozhidao", "peer_article", "东财搜索《早知道》系列", ttl_min=120,
+        default_enabled=True)
+def _zaozhidao(conf):
+    return gs.fetch_eastmoney_zaozhidao(conf.get("keywords"))
+
+
+@source("wscn_breakfast", "peer_article", "华尔街见闻早餐", ttl_min=120, default_enabled=True)
+def _wscn(conf):
+    return gs.fetch_wscn_breakfast(int(conf.get("count", 2)))
+
+
+@source("futu_morning", "peer_article", "富途《港美早报》", risk="medium", ttl_min=120)
+def _futu(conf):
+    r = ges.fetch_futu_morning()
+    return [r] if r else []
+
+
+@source("cls_morning", "peer_article", "财联社《早知道》", ttl_min=120)
+def _cls(conf):
+    r = ges.fetch_cls_morning()
+    return [r] if r else []
+
+
+@source("gangtise", "peer_article", "Gangtise投研日报(搜狗微信链)", risk="high", ttl_min=120)
+def _gangtise(conf):
+    r = ges.fetch_gangtise()
+    return [r] if r else []
+
+
+# ---------- 版式素材(日历/外围行情/公告) ----------
+
+@source("calendar", "calendar", "财经日历(今日事件)", ttl_min=120)
+def _calendar(conf):
+    return ges.fetch_calendar()
+
+
+@source("global_markets", "market", "全球市场行情摘要", ttl_min=30)
+def _markets(conf):
+    return ges.fetch_global_markets()
+
+
+@source("cls_announcements", "announcement", "财联社重点公告", ttl_min=30)
+def _ann(conf):
+    return ges.fetch_cls_announcements(int(conf.get("limit", 15)))
+
+
+# ---------- 聚合来源(工作流直接调用, 仅供 aag sources fetch 手动取用) ----------
+
+@source("peer_mornings", "peer_group", "同行早报聚合(富途+财联社+gangtise)", ttl_min=120)
+def _peers(conf):
+    items, failed = ges.fetch_peer_mornings()
+    if failed:
+        # 聚合内部单源失败已有降级; 把失败信息附在 extra 里便于排查
+        for it in items:
+            it.setdefault("extra", {})
+    return items
+
+
+@source("extras", "extras_group", "版式素材聚合(日历+行情+公告+同行)", ttl_min=60)
+def _extras(conf):
+    return [ges.fetch_extras()]
