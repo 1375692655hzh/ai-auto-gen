@@ -12,6 +12,7 @@ import datetime
 import hashlib
 import html
 import json
+import sys
 import random
 import re
 
@@ -45,10 +46,39 @@ def _waf_suffix() -> str:
 
 
 def fetch_futu_morning() -> dict | None:
-    """富途《港美早报/富途早报》最新一篇,返回 {title,text,url,time}。"""
-    r = _get("https://news.futunn.com/news-site-api/main/get-market-list",
-             "https://news.futunn.com/", params={"size": 60}).json()
-    arts = (r.get("data") or {}).get("list") or []
+    """富途《港美早报/富途早报》最新一篇,返回 {title,text,url,time}。
+
+    列表按时间倒序但早报每天只有一篇,混排在要闻流里很快被顶下去——
+    用 seqMark 翻页(最多 10 页)直到命中(参考 NEWS 项目 futu-topic-parse.ts)。"""
+    arts, seq_mark = [], ""
+    import time as _time
+    for _page in range(10):
+        params = {"size": 60}
+        if seq_mark:
+            params["seqMark"] = seq_mark
+        try:
+            r = _get("https://news.futunn.com/news-site-api/main/get-market-list",
+                     "https://news.futunn.com/", params=params).json()
+        except Exception:
+            if _page == 0:
+                _time.sleep(2)                 # 列表接口偶发抖动, 首页重试一次
+                r = _get("https://news.futunn.com/news-site-api/main/get-market-list",
+                         "https://news.futunn.com/", params=params).json()
+            else:
+                raise
+        data = r.get("data") or {}
+        lst = data.get("list") or []
+        if not lst and _page == 0:             # 空列表同样视作抖动, 退避重试一次
+            _time.sleep(2)
+            r = _get("https://news.futunn.com/news-site-api/main/get-market-list",
+                     "https://news.futunn.com/", params=params).json()
+            lst = (r.get("data") or {}).get("list") or []
+        arts.extend(lst)
+        if any(re.search(r"港美早报|富途早报", a.get("title", "")) for a in arts):
+            break                                   # 命中即停(倒序, 最新的在前)
+        if not data.get("hasMore") or not data.get("seqMark") or not lst:
+            break
+        seq_mark = data["seqMark"]
     hits = [a for a in arts if re.search(r"港美早报|富途早报", a.get("title", ""))]
     if not hits:
         return None
@@ -72,8 +102,9 @@ def fetch_futu_morning() -> dict | None:
         j = seg[6000:].find(end)
         if j > 0:
             seg = seg[:6000 + j]
-    text = html.unescape(re.sub(r"<[^>]+>", " ", seg))
+    text = html.unescape(re.sub(r"<[^>]+>", "\n", seg))
     text = re.sub(r"[ \t]+", " ", text)
+    text = re.sub(r"\n\s*\n+", "\n", text).strip()
     return {"title": art["title"].strip(), "text": text[:8000], "url": url,
             "time": datetime.datetime.fromtimestamp(int(art.get("timestamp") or 0)).strftime("%Y-%m-%d %H:%M"),
             "media": "富途牛牛", "source": "富途早报"}
@@ -95,23 +126,24 @@ def _cls_articles(subject_id: str) -> list:
 
 
 def fetch_cls_morning() -> dict | None:
-    """财联社有声早报(每天 07:00 发布),取今天那篇的全文。"""
-    today_s = datetime.date.today().strftime("%Y-%m-%d")
-    for a in _cls_articles("1151"):
-        t = a.get("article_time") or 0
-        if datetime.datetime.fromtimestamp(t).strftime("%Y-%m-%d") != today_s:
-            continue
-        if "早报" not in (a.get("article_title") or ""):
-            continue
-        detail = _cls_page_props(f"https://www.cls.cn/detail/{a['article_id']}")
-        content = ((detail.get("articleDetail") or {}).get("content")) or ""
-        text = html.unescape(re.sub(r"<[^>]+>", " ", content))
-        text = re.sub(r"[ \t]+", " ", text)
-        return {"title": a["article_title"], "text": text[:8000],
-                "url": f"https://www.cls.cn/detail/{a['article_id']}",
-                "time": datetime.datetime.fromtimestamp(t).strftime("%Y-%m-%d %H:%M"),
-                "media": "财联社", "source": "财联社有声早报"}
-    return None
+    """财联社有声早报(专栏 1151, 每天 07:00 发布): 今天那篇优先, 否则 48h 内最新一篇全文。"""
+    cutoff = datetime.datetime.now() - datetime.timedelta(hours=48)
+    cands = [a for a in _cls_articles("1151")
+             if "早报" in (a.get("article_title") or "")
+             and datetime.datetime.fromtimestamp(a.get("article_time") or 0) >= cutoff]
+    if not cands:
+        return None
+    a = max(cands, key=lambda x: x.get("article_time") or 0)
+    t = a.get("article_time") or 0
+    detail = _cls_page_props(f"https://www.cls.cn/detail/{a['article_id']}")
+    content = ((detail.get("articleDetail") or {}).get("content")) or ""
+    text = html.unescape(re.sub(r"<[^>]+>", "\n", content))
+    text = re.sub(r"[ \t]+", " ", text)
+    text = re.sub(r"\n\s*\n+", "\n", text).strip()
+    return {"title": a["article_title"], "text": text[:8000],
+            "url": f"https://www.cls.cn/detail/{a['article_id']}",
+            "time": datetime.datetime.fromtimestamp(t).strftime("%Y-%m-%d %H:%M"),
+            "media": "财联社", "source": "财联社有声早报"}
 
 
 def _cls_article_text(article_id) -> str:
@@ -344,7 +376,34 @@ def fetch_peer_mornings() -> tuple:
                 failed.append(f"{name}(今日未发布或未命中)")
         except Exception as e:
             failed.append(f"{name}({type(e).__name__}: {str(e)[:60]})")
+    # gangtise 没拿到 → 元宝镜像兜底(Playwright 登录态, 更稳)
+    if not any("gangtise" in (r.get("source") or "") or "元宝" in (r.get("source") or "")
+               for r in refs):
+        try:
+            r = fetch_yuanbao_gangtise()
+            if r and r.get("text"):
+                refs.append(r)
+                print(f"  同行早报 ✓ 元宝·gangtise镜像:《{r['title'][:30]}》{len(r['text'])}字")
+        except Exception as e:
+            failed.append(f"元宝镜像({type(e).__name__}: {str(e)[:60]})")
     return refs, failed
+
+
+def fetch_yuanbao_gangtise() -> dict | None:
+    """元宝网页版(持久化登录态)问当日 gangtise 日报全文; 未登录返回 None 不阻断。"""
+    import importlib.util
+    from pathlib import Path
+    p = Path(__file__).resolve().parent / "yuanbao_fetch.py"
+    spec = importlib.util.spec_from_file_location("yuanbao_fetch_mod", p)
+    mod = importlib.util.module_from_spec(spec)
+    sys.modules["yuanbao_fetch_mod"] = mod
+    spec.loader.exec_module(mod)
+    r = mod.run()
+    if not r.get("ok") or not r.get("text"):
+        return None
+    return {"title": f"Gangtise投研日报(元宝镜像)", "text": r["text"][:12000],
+            "url": r.get("article_url") or "", "time": r.get("date", ""),
+            "media": "元宝/Gangtise", "source": "元宝·Gangtise"}
 
 
 def fetch_extras() -> dict:

@@ -58,7 +58,8 @@ def fetch_one(source_id: str, conf: dict | None = None, fresh: bool = False):
         _health.record(source_id, False, f"{type(ex).__name__}: {ex}")
         return [], f"{type(ex).__name__}: {str(ex)[:120]}"
     _health.record(source_id, True)
-    _cache.save(source_id, conf, items)
+    if items:                      # 空结果不写缓存(避免偶发空返回被缓存数小时)
+        _cache.save(source_id, conf, items)
     return items, ""
 
 

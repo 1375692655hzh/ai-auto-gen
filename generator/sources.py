@@ -150,7 +150,7 @@ def fetch_eastmoney_zaozhidao(keywords: list | None = None) -> list:
 
 
 def fetch_wscn_breakfast(limit: int = 2) -> list:
-    """华尔街见闻「早餐」系列文章(A股早餐/全球早餐)。"""
+    """华尔街见闻「早餐FM-Radio」系列文章(搜索接口只有摘要, 正文用内容 API 补抓)。"""
     import datetime as _dt
     r = requests.get(
         "https://api-one-wscn.awtmt.com/apiv1/search/article",
@@ -170,17 +170,36 @@ def fetch_wscn_breakfast(limit: int = 2) -> list:
         ts = it.get("display_time") or 0
         if ts and _dt.datetime.fromtimestamp(ts) < cutoff:
             continue
+        uri = (it.get("uri") or "").split("?")[0]
         out.append({
             "time": _dt.datetime.fromtimestamp(ts).strftime("%Y-%m-%d %H:%M") if ts else "",
             "title": title,
-            "text": _strip_html(it.get("content", "")),
+            "text": _wscn_full_text(uri) or _strip_html(it.get("content", "")),
             "media": "华尔街见闻",
-            "url": (it.get("uri") or "").split("?")[0],
+            "url": uri,
             "source": "华尔街见闻",
         })
         if len(out) >= limit:
             break
     return out
+
+
+def _wscn_full_text(uri: str) -> str:
+    """wscn 内容 API 抓全文: /articles/<id> → apiv1/content/articles/<id>。"""
+    m = re.search(r"/articles/(\d+)", uri or "")
+    if not m:
+        return ""
+    try:
+        r = requests.get(f"https://api-one-wscn.awtmt.com/apiv1/content/articles/{m.group(1)}",
+                         params={"extract": 0},
+                         headers={"User-Agent": UA, "Referer": "https://wallstreetcn.com/"},
+                         timeout=15)
+        r.raise_for_status()
+        content = ((r.json().get("data") or {}).get("content")) or ""
+        text = html.unescape(re.sub(r"<[^>]+>", "\n", content))
+        return re.sub(r"\n\s*\n+", "\n", text).strip()
+    except Exception:
+        return ""
 
 
 REF_FETCHERS = {

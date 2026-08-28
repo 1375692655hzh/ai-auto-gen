@@ -62,7 +62,7 @@ def _futu(conf):
     return [r] if r else []
 
 
-@source("cls_morning", "peer_article", "财联社《早知道》", ttl_min=120)
+@source("cls_morning", "peer_article", "财联社有声早报(专栏1151, 每日07:00)", ttl_min=120)
 def _cls(conf):
     r = ges.fetch_cls_morning()
     return [r] if r else []
@@ -72,6 +72,26 @@ def _cls(conf):
 def _gangtise(conf):
     r = ges.fetch_gangtise()
     return [r] if r else []
+
+
+@source("yuanbao_gangtise", "peer_article",
+        "元宝取Gangtise投研日报(Playwright登录态, gangtise 的可靠替代)",
+        risk="high", auth="browser_profile", ttl_min=120)
+def _yuanbao(conf):
+    """元宝网页版对话抓当日 gangtise 日报全文; 首次需 py -3.11 generator/yuanbao_fetch.py --login 扫码。"""
+    import importlib.util
+    from pathlib import Path
+    p = Path(__file__).resolve().parents[1] / "generator" / "yuanbao_fetch.py"
+    spec = importlib.util.spec_from_file_location("yuanbao_fetch_mod", p)
+    mod = importlib.util.module_from_spec(spec)
+    sys.modules["yuanbao_fetch_mod"] = mod
+    spec.loader.exec_module(mod)
+    r = mod.run()
+    if not r.get("ok"):
+        raise RuntimeError(r.get("error") or "元宝返回失败(未登录? 先跑 yuanbao_fetch.py --login)")
+    return [{"time": r.get("date", ""), "title": f"Gangtise投研日报(元宝镜像 {r.get('date','')})",
+             "text": (r.get("text") or "")[:12000], "media": "元宝/Gangtise",
+             "url": r.get("article_url") or "", "source": "元宝·Gangtise"}]
 
 
 # ---------- 版式素材(日历/外围行情/公告) ----------
