@@ -19,6 +19,8 @@
 | `python cli.py flows list/lint/run <wf>/status/new/export/import` | 生成工作流（断点续跑/审核挂起 exit 2） | `run` 会调 LLM |
 | `python cli.py gen <args>` | 生成模块透传（旧入口，等价 flows） | `run` 会调 LLM |
 | `python cli.py publish status [--json]` | 待发队列 + 发布账本 | 无 |
+| `python cli.py publish targets` | 平台矩阵（14 平台×引擎×验证状态） | 无 |
+| `python cli.py skills list/install` | 把 skills/ 装到本机 agent 技能目录 | 复制文件 |
 | `python cli.py publish login [plat]` | 一键登录平台 | 弹浏览器等人工扫码 |
 | `python cli.py publish run [--draft ...]` | 发全部启用平台 | **真发**！必须先 `--draft` |
 | `python cli.py publish run-video --video <mp4> --title <t> [--draft]` | B站/抖音投稿 | **真发**！必须先 `--draft` |

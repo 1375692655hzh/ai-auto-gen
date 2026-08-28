@@ -1,0 +1,24 @@
+# 发布平台注册表(板块三): 统一门面 publish/ 按 engine 路由
+#
+# engine:
+#   autopub  → Python Playwright 浏览器适配器(autopub/publishers/, 已真发验证)
+#   kit      → Node API 适配器(adapters-kit/, 脱敏学习包: 依赖未装+未接入账本, 默认禁用)
+# enabled 与 autopub/config.yaml platforms.<id>.enabled 联动(以 config 为准, 此处为总开关视图)
+
+platforms:
+  # ---- autopub 引擎(浏览器自动化) ----
+  xueqiu:     {engine: autopub, title: 雪球,     verified: published}
+  eastmoney:  {engine: autopub, title: 东方财富,  verified: published}
+  weibo:      {engine: autopub, title: 微博,      verified: published}
+  futu:       {engine: autopub, title: 富途牛牛,  verified: published}
+  changqiao:  {engine: autopub, title: 长桥,     verified: published}
+  bilibili:   {engine: autopub, title: B站,      verified: draft}
+  douyin:     {engine: autopub, title: 抖音,      verified: draft}
+  laohu:      {engine: autopub, title: 老虎社区,  verified: disabled-需实名}
+  zhihu:      {engine: autopub, title: 知乎专栏,  verified: disabled-风控}
+  tonghuashun: {engine: autopub, title: 同花顺,   verified: placeholder}
+  # ---- kit 引擎(Node API, 学习包未投产) ----
+  sohu:       {engine: kit, title: 搜狐号,   verified: learning-only}
+  toutiao:    {engine: kit, title: 今日头条, verified: learning-only}
+  netease:    {engine: kit, title: 网易号,   verified: learning-only}
+  smzdm:      {engine: kit, title: 什么值得买, verified: learning-only}

@@ -330,6 +330,7 @@ def main() -> int:
     psub = p_s.add_subparsers(dest="sub", required=True)
     ps_st = psub.add_parser("status", help="账本+队列")
     ps_st.add_argument("--json", action="store_true")
+    psub.add_parser("targets", help="平台矩阵(14平台×引擎×验证状态)")
     for name, help_ in [("login", "一键登录(可带平台名)"),
                          ("run", "发全部平台(--draft --platforms --file 等透传)"),
                          ("run-video", "视频发布(publish_video 参数透传)")]:
@@ -381,6 +382,11 @@ def main() -> int:
     p_g = sub.add_parser("gen", help="生成模块(generator/main.py 参数透传)")
     p_g.add_argument("args", nargs=argparse.REMAINDER)
 
+    p_k = sub.add_parser("skills", help="把 skills/ 安装到本机 agent 技能目录")
+    ksub = p_k.add_subparsers(dest="sub", required=True)
+    ksub.add_parser("install", help="复制到 ~/.agents/skills 与 ~/.claude/skills(存在才装)")
+    ksub.add_parser("list", help="查看项目内技能")
+
     p_v = sub.add_parser("video", help="视频模块")
     vsub = p_v.add_subparsers(dest="sub", required=True)
     pv_b = vsub.add_parser("build", help="Remotion 出片")
@@ -400,12 +406,46 @@ def main() -> int:
     if args.cmd == "publish":
         if args.sub == "status":
             return publish_status(json_out=args.json)
+        if args.sub == "targets":
+            sys.path.insert(0, str(ROOT))
+            from publish.facade import platform_status
+            rows = platform_status()
+            icons = {"published": "✅已真发", "draft": "🟡draft验证", "disabled-需实名": "⛔需实名",
+                     "disabled-风控": "⛔风控", "placeholder": "⚪占位", "learning-only": "📘学习包"}
+            for r in rows:
+                en = "启用" if r["enabled"] else "停用"
+                print(f"{r['engine']:<8} {r['id']:<12} {r['title']:<8} {en}  "
+                      f"{icons.get(r['verified'], r['verified'])}")
+            return EXIT_OK
         if args.sub == "login":
             return _passthrough(ROOT / "autopub" / "login.py", args.args)
         if args.sub == "run":
             return _passthrough(ROOT / "autopub" / "publish_all.py", args.args)
         if args.sub == "run-video":
             return _passthrough(ROOT / "autopub" / "publish_video.py", args.args)
+    if args.cmd == "skills":
+        import shutil
+        src = ROOT / "skills"
+        if args.sub == "list":
+            for d in sorted(src.iterdir()):
+                if (d / "SKILL.md").exists():
+                    print(f"· {d.name}")
+            return EXIT_OK
+        if args.sub == "install":
+            installed = []
+            for dest in (Path.home() / ".agents" / "skills", Path.home() / ".claude" / "skills"):
+                if dest.exists():
+                    for d in src.iterdir():
+                        if (d / "SKILL.md").exists():
+                            tgt = dest / d.name
+                            shutil.copytree(d, tgt, dirs_exist_ok=True)
+                            installed.append(str(tgt))
+            print("已安装:" if installed else "未找到 agent 技能目录(手动复制 skills/ 即可):")
+            for p_ in installed or [str(src)]:
+                print(f"  {p_}")
+            return EXIT_OK
+        return EXIT_FAIL
+
     if args.cmd == "video":
         if args.sub == "build":
             r = subprocess.run(["node", "scripts/build.mjs"] + args.args,
