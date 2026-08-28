@@ -80,12 +80,21 @@ def render_digest_image(payload: dict, date: str, out_path: str):
     img = Image.new("RGB", (W, H), BG)
     d = ImageDraw.Draw(img)
 
-    # ---- 头部: 主标+右侧日期条数 / 金线 / 今日焦点(标签内联) ----
+    # ---- 头部: 主标+右侧突出日期(金色) / 今日焦点(标签内联) ----
     d.rectangle([0, 0, W, head_h], fill=HEAD)
     d.text((M, 20), tmpl["title"], font=_font(46, True), fill=(255, 255, 255))
-    sub = f"{date} · {len(cards)}条"
-    d.text((W - M - probe.textlength(sub, font=_font(24)), 34),
-           sub, font=_font(24), fill=(150, 168, 196))
+    try:
+        from datetime import datetime as _dt
+        _d = _dt.strptime(date, "%Y-%m-%d")
+        date_str = f"{_d.year}年{_d.month}月{_d.day}日 周{'一二三四五六日'[_d.weekday()]}"
+    except ValueError:
+        date_str = date
+    n_str = f" · {len(cards)}条"
+    d_font = _font(34, True)
+    dx = W - M - probe.textlength(date_str, font=d_font) - probe.textlength(n_str, font=_font(24))
+    d.text((dx, 28), date_str, font=d_font, fill=(255, 215, 80))
+    d.text((dx + probe.textlength(date_str, font=d_font), 38), n_str,
+           font=_font(24), fill=(150, 168, 196))
     fy = 20 + 56 + 8
     d.text((M, fy), "今日焦点", font=_font(24, True), fill=(255, 215, 80))
     fx = M + probe.textlength("今日焦点", font=_font(24, True)) + 14
