@@ -302,9 +302,8 @@ def _render_tags(article: str, items: list, ann_zone: list,
     ann_sector_count = {}
     for n, dirs in sorted(parsed.items()):
         it = by_tag[n]
-        # 免标兜底: 行情条/传闻条不给标签(两种模式同规则)
-        if it["tag"] == "行情":
-            warn.append(f"#{n} 行情条被过滤"); continue
+        # 免标兜底: 传闻条不给标签; 行情条免标范围交给提示词纪律(纯指数速览不标,
+        # 个股/板块行情正常打板块)——代码无法可靠区分两者, 一刀切会误伤个股行情
         if re.search(r"据报|被曝|据报道|消息人士", it["text"]):
             warn.append(f"#{n} 传闻条被过滤"); continue
         if mode == "direction" and it["tag"] == "地缘":

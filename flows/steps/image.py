@@ -26,20 +26,27 @@ def render_morning_image(ctx, wf, params):
     if len(items) < 6:
         sys.exit(f"文章条目过少({len(items)}), 疑似格式异常")
 
-    # ---- 选条(代码侧, 文章顺序即重要性序) ----
+    # ---- 选条(两轮制: 配额内优先带解读的条, 免标条补位; 文章顺序即重要性序) ----
     top = int(params.get("top", 16))
-    picked, quota_left = {}, {k: v for k, v in QUOTA.items()}
-    for it in items:                                 # 每分类保底 1
+    quota_left = {k: v for k, v in QUOTA.items()}
+    picked = {}
+    for it in items:                                 # 第一轮: 有解读(板块)的条优先占配额
         c = it["cat"]
-        if quota_left.get(c, 0) > 0:
+        if it.get("sectors") and quota_left.get(c, 0) > 0:
+            picked[it["n"]] = it
+            quota_left[c] -= 1
+    for it in items:                                 # 第二轮: 免标条按序补足配额
+        c = it["cat"]
+        if not it.get("sectors") and quota_left.get(c, 0) > 0:
             picked[it["n"]] = it
             quota_left[c] -= 1
     for it in items:                                 # 余量按序补到 top
         if len(picked) >= top:
             break
         picked.setdefault(it["n"], it)
-    sel = list(picked.values())
-    print(f"长图选条: {len(sel)}/{len(items)} 条 (配额 {QUOTA})")
+    sel = [it for it in items if it["n"] in picked]  # 保持文章顺序
+    n_tagged = sum(1 for it in sel if it.get("sectors"))
+    print(f"长图选条: {len(sel)}/{len(items)} 条, 带解读 {n_tagged} 条 (配额 {QUOTA})")
 
     # ---- LLM 精简(title/point/hot) ----
     refined, degraded = {}, False

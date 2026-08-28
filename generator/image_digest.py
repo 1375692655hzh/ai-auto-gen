@@ -166,8 +166,9 @@ def _draw_item(d, probe, c: dict, color, top: int):
     dir_w = probe.textlength(dirline, font=_font(24, True)) + 14 if dirline else 0
     hot = bool(c.get("hot"))
     hot_w = 66 if hot else 0
-    # 标签胶囊
-    tag_end = _pill(d, left, r1y + 7, c["tag"], color, probe)
+    # 标签胶囊: 优先板块词(软件/AI/芯片), 无板块条目回退条目标签(地缘/公司)
+    pill_text = (c.get("sectors") or [c["tag"]])[0]
+    tag_end = _pill(d, left, r1y + 7, pill_text, color, probe)
     tx = tag_end + 12
     # 右置解读(先画, 标题据此截断)
     if dirline:
