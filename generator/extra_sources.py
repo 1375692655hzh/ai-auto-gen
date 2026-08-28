@@ -98,6 +98,10 @@ def fetch_futu_morning() -> dict | None:
     if i < 0:
         return None
     seg = h[i:i + 120000]
+    # 跳过 origin_content 标签自身的属性残渣(如 origin_content zh-cn">)
+    gt = seg.find(">")
+    if 0 <= gt < 60:
+        seg = seg[gt + 1:]
     for end in ('class="origin_', "免责声明", "相关阅读"):
         j = seg[6000:].find(end)
         if j > 0:

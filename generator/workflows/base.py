@@ -85,6 +85,10 @@ class WorkflowBase:
                         self.ctx.update(ck)
                 continue
 
+            if getattr(fn, "is_skip", False):
+                # 条件跳过的步骤: 不执行也不落存档(否则换参数重跑会被空存档卡住)
+                continue
+
             # 断点复用(非 --from/--only 重跑时,已有存档的步骤直接跳过)
             replay = bool(from_step or only or fresh)
             if not replay:

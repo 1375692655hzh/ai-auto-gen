@@ -6,7 +6,7 @@ version: 1.1.0
 params:
   format: article         # 产出形式: article=渲染早报文章(成品进待发队列) / material=只要知识素材
   wscn_count: 2           # 华尔街见闻早餐取几篇(通常当天1篇)
-  per_report_chars: 4000  # 每份早报送入模型的最大字数
+  per_report_chars: 6000  # 每份早报送入模型的最大字数
 
 steps:
   - id: fetch                    # 四源抓取(免 LLM, gangtise 失败自动元宝兜底)

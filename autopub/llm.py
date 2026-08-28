@@ -145,7 +145,11 @@ def _call_openai_compatible(cfg, prompt, system, max_tokens, temperature, timeou
             detail = r.text[:200]
         raise RuntimeError(f"HTTP {r.status_code}: {detail}")
     data = r.json()
-    return (data["choices"][0]["message"]["content"] or "").strip()
+    choice = data["choices"][0]
+    if choice.get("finish_reason") == "length":
+        raise RuntimeError("LLM 输出被 max_tokens 截断(finish_reason=length),"
+                           " 提高调用方 max_tokens 或精简提示词后重试")
+    return (choice["message"]["content"] or "").strip()
 
 
 def _call_claude_cli(prompt: str, timeout: int = 90) -> str:

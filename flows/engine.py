@@ -87,7 +87,7 @@ def lint(pack_dir: Path) -> list:
 def _truthy(v) -> bool:
     """when 求值: 布尔照用; 字符串把 'false/none/off/material/空' 视为关(其余为开)。"""
     if isinstance(v, str):
-        return v.strip().lower() not in ("", "false", "none", "off", "material")
+        return v.strip().lower() not in ("", "false", "none", "off", "no", "0", "material")
     return bool(v)
 
 
@@ -100,6 +100,7 @@ class YamlWorkflow(WorkflowBase):
         self.name = self.spec["id"]
         self.title = self.spec.get("title", self.name)
         self.description = self.spec.get("description", "")
+        self._skipped = set()          # when 不满足被跳过的步骤(id)
         self.params = dict(self.spec.get("params") or {})
         if overrides:
             self.params.update(overrides)
@@ -117,8 +118,11 @@ class YamlWorkflow(WorkflowBase):
 
     def _skip_fn(self, step_id, reason):
         def fn(ctx):
-            print(f"[{self.name}] · {step_id}: 跳过({reason})")
             return {}
+        fn.is_skip = True
+        fn.skip_reason = reason
+        self._skipped.add(step_id)
+        print(f"[{self.name}] · {step_id}: 跳过({reason})")
         return fn
 
     def steps(self):
@@ -150,7 +154,8 @@ class YamlWorkflow(WorkflowBase):
         steps = {}
         for name in [s.get("id") for s in self.spec.get("steps", [])]:
             ck = self.run_dir / f"{name}.json"
-            steps[name] = ("done" if ck.exists() else "pending")
+            steps[name] = ("skipped" if name in self._skipped
+                           else "done" if ck.exists() else "pending")
         for name, secs in self.stats["steps"].items():
             steps[name] = f"done({secs}s)"
         artifacts = {k: v for k, v in self.ctx.items() if k.endswith("_path")}
@@ -174,7 +179,7 @@ class YamlWorkflow(WorkflowBase):
                 daily.PROMPTS[f.stem] = f.read_text(encoding="utf-8")
                 print(f"[{self.name}] 提示词覆盖: {f.stem}")
         except Exception as e:
-            print(f"⚠ 提示词注入失败(忽略): {e}")
+            raise RuntimeError(f"包内提示词注入失败(必须修复, 不允许静默降级): {e}") from e
 
     def _inject_pack_templates(self) -> None:
         """包内 templates/image/*.yaml 覆盖图片版式参数。"""
@@ -188,7 +193,7 @@ class YamlWorkflow(WorkflowBase):
                 formats.IMG_TMPL.update(yaml.safe_load(f.read_text(encoding="utf-8")) or {})
                 print(f"[{self.name}] 图片模板覆盖: {f.name}")
         except Exception as e:
-            print(f"⚠ 图片模板注入失败(忽略): {e}")
+            raise RuntimeError(f"包内图片模板注入失败(必须修复, 不允许静默降级): {e}") from e
 
     def run(self, auto=False, from_step=None, fresh=False, only=None):
         self._inject_pack_prompts()
@@ -198,6 +203,9 @@ class YamlWorkflow(WorkflowBase):
         except SystemExit as e:
             self._write_run("waiting_review" if e.code == 2 else "stopped",
                             "审核挂起" if e.code == 2 else f"exit {e.code}")
+            raise
+        except Exception as e:
+            self._write_run("failed", f"{type(e).__name__}: {e}")
             raise
         self._write_run("done")
         return ctx
