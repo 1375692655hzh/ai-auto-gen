@@ -8,10 +8,35 @@ import re
 import textwrap
 from pathlib import Path
 
-from common import GEN_ROOT, today, out_dir, save_text
+from common import GEN_ROOT, today, out_dir, save_text, load_cfg
 
-FONT_REG = r"C:\Windows\Fonts\msyh.ttc"
-FONT_BOLD = r"C:\Windows\Fonts\msyhbd.ttc"
+
+def _resolve_font(kind: str) -> str:
+    """中文字体路径: config.yaml fonts 段可覆盖; 否则按平台候选表探测。"""
+    try:
+        cfg = (load_cfg().get("fonts") or {})
+        if cfg.get(kind):
+            return cfg[kind]
+    except Exception:
+        pass
+    cands = {
+        "regular": [r"C:\Windows\Fonts\msyh.ttc",
+                    "/System/Library/Fonts/PingFang.ttc",
+                    "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+                    "/usr/share/fonts/truetype/wqy/wqy-microhei.ttc"],
+        "bold": [r"C:\Windows\Fonts\msyhbd.ttc",
+                 "/System/Library/Fonts/PingFang.ttc",
+                 "/usr/share/fonts/opentype/noto/NotoSansCJK-Bold.ttc",
+                 "/usr/share/fonts/truetype/wqy/wqy-microhei.ttc"],
+    }[kind]
+    for c in cands:
+        if Path(c).exists():
+            return c
+    return cands[0]
+
+
+FONT_REG = _resolve_font("regular")
+FONT_BOLD = _resolve_font("bold")
 
 CAT_COLORS = {  # 分类主题色(RGB)
     "宏观政策": (31, 78, 121), "公司动态": (0, 122, 87), "行业产业": (153, 68, 100),

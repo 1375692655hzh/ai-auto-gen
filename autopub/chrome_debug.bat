@@ -3,7 +3,8 @@ rem 启动"自动化专用 Chrome"(你的 Chrome 程序 + 独立登录目录, �
 rem 首次使用: 启动后在这个 Chrome 里逐个登录平台(扫码), 之后工具自动接管发文。
 rem 注意: Chrome 136+ 安全限制, 日常默认目录不允许开调试端口, 所以必须用独立目录。
 chcp 65001 >nul
-set DATADIR=C:\chrome-autopub
+rem 数据目录可用环境变量 AAG_CHROME_DATADIR 覆盖(默认 C:\chrome-autopub, 存有已登录态勿轻易改)
+if defined AAG_CHROME_DATADIR (set DATADIR=%AAG_CHROME_DATADIR%) else (set DATADIR=C:\chrome-autopub)
 for %%P in (
   "%ProgramFiles%\Google\Chrome\Application\chrome.exe"
   "%ProgramFiles(x86)%\Google\Chrome\Application\chrome.exe"

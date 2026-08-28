@@ -10,7 +10,12 @@ import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import path from "node:path";
 
-const FFPROBE = path.join("node_modules", "@remotion", "compositor-win32-x64-msvc", "ffprobe.exe");
+const COMPOSITOR_PKG = {
+	win32: ["compositor-win32-x64-msvc", "ffprobe.exe"],
+	darwin: ["compositor-darwin-arm64-x64", "ffprobe"],
+	linux: ["compositor-linux-x64-gnu", "ffprobe"],
+}[process.platform] || ["compositor-win32-x64-msvc", "ffprobe.exe"];
+const FFPROBE = path.join("node_modules", "@remotion", COMPOSITOR_PKG[0], COMPOSITOR_PKG[1]);
 const COMPOSITION_ID = "Story";
 
 /** 读取 .env（KEY=VALUE，等号后原样），不覆盖已有环境变量 */

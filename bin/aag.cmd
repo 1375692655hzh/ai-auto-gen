@@ -1,0 +1,3 @@
+@echo off
+rem ai-auto-gen 统一入口: aag <doctor|gen|publish|video> ...
+py -3.11 "%~dp0..\cli.py" %*

@@ -34,3 +34,6 @@ node_modules/
 .zcode/
 .DS_Store
 Thumbs.db
+
+# 运行时数据根(P1+ 各板块缓存/健康/运行产物/账本)
+/data/
