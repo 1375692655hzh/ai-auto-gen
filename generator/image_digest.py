@@ -16,6 +16,8 @@ from formats import _font, _wrap, _load_img_tmpl, CAT_COLORS, DEFAULT_COLOR
 W, M = 1080, 32                       # 画布宽 / 页边距
 CW = W - M * 2                        # 内容宽 1016
 ITEM_H, HEAD_H, SEC_HEAD, SEC_GAP = 112, 164, 56, 14
+PILL_SLOT = 120                       # 胶囊固定槽宽(容4字词), 标题起点恒定防抖动
+PILL_TAG_OK = {"地缘", "政策"}        # 无板块条目仅这两类编辑部词可上图(其余对读者零信息)
 BG, HEAD = (245, 246, 250), (17, 34, 64)
 LINE_GREY, TXT_GREY, CNT_GREY = (228, 230, 235), (92, 100, 112), (138, 144, 153)
 DIR_MARK = {"利好": ("▲", (216, 64, 52)), "利空": ("▼", (30, 158, 90)),
@@ -33,21 +35,22 @@ def _truncate(draw, text, font, max_w):
 
 
 def _dir_line(c: dict) -> str:
-    """解读文案(右置短版): ▲AI·软件。中性零信息不占位。"""
-    sectors = c.get("sectors") or []
+    """右槽=判决: 「▲利好」/「▼利空」箭头+方向词。板块词归左胶囊(槽位契约:
+    左=归属 右=判决, 构造性互斥, 杜绝同维度双重编码); 中性零信息不占位。"""
     direction = c.get("direction") or ""
-    if not sectors or not direction or direction == "中性":
+    if direction in ("", "中性") or not (c.get("sectors") or []):
         return ""
-    return f"{DIR_MARK.get(direction, ('◆',))[0]}{'·'.join(sectors[:3])}"
+    return f"{DIR_MARK.get(direction, ('◆',))[0]}{direction}"
 
 
 def _pill(draw, x, y, text, color, probe):
-    """彩色胶囊标签, 返回右端 x。"""
+    """彩色胶囊标签(固定槽宽居中), 返回右端 x。"""
     f = _font(24, True)
-    w = probe.textlength(text, font=f) + 20
-    draw.rounded_rectangle([x, y, x + w, y + 34], radius=6, fill=color)
-    draw.text((x + 10, y + 5), text, font=f, fill=(255, 255, 255))
-    return x + w
+    text = text[:4]
+    tw = probe.textlength(text, font=f)
+    draw.rounded_rectangle([x, y, x + PILL_SLOT, y + 34], radius=6, fill=color)
+    draw.text((x + (PILL_SLOT - tw) / 2, y + 5), text, font=f, fill=(255, 255, 255))
+    return x + PILL_SLOT
 
 
 def render_digest_image(payload: dict, date: str, out_path: str):
@@ -166,10 +169,14 @@ def _draw_item(d, probe, c: dict, color, top: int):
     dir_w = probe.textlength(dirline, font=_font(24, True)) + 14 if dirline else 0
     hot = bool(c.get("hot"))
     hot_w = 66 if hot else 0
-    # 标签胶囊: 优先板块词(软件/AI/芯片), 无板块条目回退条目标签(地缘/公司)
-    pill_text = (c.get("sectors") or [c["tag"]])[0]
-    tag_end = _pill(d, left, r1y + 7, pill_text, color, probe)
-    tx = tag_end + 12
+    # 标签胶囊(左=归属): 板块词优先; 无板块仅 地缘/政策 白名单上图, 其余顶格
+    sectors = c.get("sectors") or []
+    pill_text = sectors[0] if sectors else (c["tag"] if c["tag"] in PILL_TAG_OK else "")
+    if pill_text:
+        _pill(d, left, r1y + 7, pill_text, color, probe)
+        tx = left + PILL_SLOT + 12
+    else:
+        tx = left
     # 右置解读(先画, 标题据此截断)
     if dirline:
         _, mc = DIR_MARK.get(c["direction"], ("◆", (130, 130, 140)))
