@@ -39,19 +39,38 @@ def _first_sentences(paragraph: str, limit: int = 80) -> str:
     return cut.rstrip("，,、") + "……"
 
 
+def video_title(entries: list, limit: int = 30) -> str:
+    """视频标题:重点事件 + 【财经早报】,不带日期(参考同行B站命名)。
+
+    重点事件取第 1 条要闻标题,过长时截断到句读边界。
+    """
+    headline = entries[0]["title"].strip()
+    if len(headline) > limit:
+        cut = headline[:limit]
+        for sep in ("：", ":", "，", ",", "。", "；"):
+            i = cut.rfind(sep)
+            if i > limit // 2:
+                headline = cut[:i]
+                break
+        else:
+            headline = cut.rstrip("，,、")
+    return f"{headline}【财经早报】"
+
+
 def build_story(entries: list) -> dict:
     scenes = []
     n = len(entries)
     top3 = " / ".join(e["title"] for e in entries[:3])
+    vt = video_title(entries)
     scenes.append({
         "id": "opening",
         "template": "title",
-        "narration": f"早上好,今天是{today()},AI财经日报,{n}条要闻。今天最值得盯的:{'、'.join(e['title'] for e in entries[:3])}。",
-        "caption": f"AI财经日报 {today()}",
+        "narration": f"早上好,今天是{today()},财经早报,{n}条要闻。今天最值得盯的:{'、'.join(e['title'] for e in entries[:3])}。",
+        "caption": vt,
         "data": {
-            "kicker": "AI 财经日报",
+            "kicker": "财经早报",
             "kickerColor": "blue",
-            "titlePre": today(),
+            "titlePre": vt.replace("【财经早报】", ""),
             "subtitle1": _rich(f"今日 {n} 条要闻", True),
             "subtitle2": _rich(f"重点关注:{top3}"),
         },
@@ -87,7 +106,7 @@ def build_story(entries: list) -> dict:
     scenes.append({
         "id": "closing",
         "template": "conclusion",
-        "narration": "以上就是今天的财经日报,内容基于公开信息整理,不构成投资建议。关注我,每天几分钟看懂财经。",
+        "narration": "以上就是今天的财经早报,内容基于公开信息整理,不构成投资建议。关注我,每天几分钟看懂财经。",
         "caption": "关注不迷路",
         "data": {
             "kicker": "免责声明",
@@ -96,7 +115,7 @@ def build_story(entries: list) -> dict:
         },
     })
     return {
-        "meta": {"title": f"AI财经日报 {today()}", "voice": "zh-CN-YunxiNeural",
+        "meta": {"title": vt, "voice": "zh-CN-YunxiNeural",
                  "fps": 30, "width": 1920, "height": 1080, "padSeconds": 0.8},
         "scenes": scenes,
     }
@@ -114,13 +133,15 @@ def run(date: str | None = None, estimate: bool = False, no_render: bool = False
     proj_id = f"daily-{date.replace('-', '')}"
     proj_dir = VIDEO_ROOT / "videos" / proj_id
     proj_dir.mkdir(parents=True, exist_ok=True)
+    story = build_story(entries)
     (proj_dir / "story.json").write_text(
-        json.dumps(build_story(entries), ensure_ascii=False, indent=2), encoding="utf-8")
+        json.dumps(story, ensure_ascii=False, indent=2), encoding="utf-8")
     (proj_dir / "project.json").write_text(
-        json.dumps({"id": proj_id, "title": f"AI财经日报 {date}", "status": "draft",
+        json.dumps({"id": proj_id, "title": story["meta"]["title"], "status": "draft",
                     "created": date, "note": "由 generator daily 自动生成"},
                    ensure_ascii=False, indent=2), encoding="utf-8")
     print(f"已生成 video/videos/{proj_id}/story.json ({len(entries)} 条 + 开场收尾)")
+    print(f"视频标题: {story['meta']['title']}")
 
     cmd = ["node", "scripts/build.mjs", proj_id]
     if estimate:
