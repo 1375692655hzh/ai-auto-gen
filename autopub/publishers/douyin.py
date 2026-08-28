@@ -32,12 +32,23 @@ class DouyinPublisher(BrowserPublisher):
         await page.goto(self.compose_url, wait_until="domcontentloaded", timeout=60000)
         await page.wait_for_timeout(6000)
 
-        # 若不在发布页(没编辑器) → 选文件上传
-        editor = page.locator('.ql-editor, [contenteditable="true"]').first
-        if await editor.count() == 0:
+        # 若发布页没出现 → 选文件上传。
+        # "已有视频"的判据必须严格: 只有页面上有"重新上传/更换视频"标志才算,
+        # 否则页面残留的任意 contenteditable 会误判导致跳过上传发出旧视频/空稿件
+        fname = Path(video).name
+        has_video = await page.evaluate(
+            "() => { const t = document.body.innerText;"
+            "        return t.includes('重新上传') || t.includes('更换视频'); }")
+        if not has_video:
+            editor = page.locator('.ql-editor, [contenteditable="true"]').first
+            if await editor.count() > 0:
+                # 有编辑器但没有视频标志: 可能是上次残留的空发布页, 刷新一次再传
+                self.logger.warning(f"[{self.name}] 页面有编辑器但无视频(残留?), 刷新后重新上传")
+                await page.goto(self.compose_url, wait_until="domcontentloaded", timeout=60000)
+                await page.wait_for_timeout(5000)
             inp = page.locator('input[type=file][accept*="video"], input[type=file]').first
             await inp.set_input_files(str(video))
-            self.logger.info(f"[{self.name}] 开始上传: {Path(video).name}")
+            self.logger.info(f"[{self.name}] 开始上传: {fname}")
             for _ in range(60):
                 await page.wait_for_timeout(2000)
                 if await page.locator('.ql-editor, [contenteditable="true"]').count() > 0:
@@ -80,7 +91,7 @@ class DouyinPublisher(BrowserPublisher):
             if ok:
                 self.logger.info(f"[{self.name}] 已点暂存离开")
                 await page.wait_for_timeout(1500)
-                await self._click_text(page, "确定")
+                await self._click_text(page, "确定", exact=True)
             return {"ok": bool(ok), "url": "", "note": "draft(暂存)" if ok else "暂存按钮没点中"}
 
         ok = await self._click_text(page, "发布", exact=True)

@@ -24,6 +24,10 @@ LOGIN_URLS = {                            # 登录检测落点: 发文页(登录
     "laohu": "https://nl.tigerbrokers.com/community#/post",
     "eastmoney": "https://guba.eastmoney.com/",
     "weibo": "https://weibo.com/new?publishtype=article",
+    "futu": "https://q.futunn.com/editor?feed_type=4",
+    "changqiao": "https://mp.longportapp.com/topics/new",
+    "bilibili": "https://member.bilibili.com/platform/upload/video/frame",
+    "douyin": "https://creator.douyin.com/creator-micro/content/upload",
     "tonghuashun": "https://t.10jqka.com.cn/",
 }
 

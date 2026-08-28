@@ -246,14 +246,14 @@ class ZhihuPublisher(BrowserPublisher):
             bold = r.get("bold") and not is_heading  # 标题不额外加粗(本身大)
             italic = r.get("italic") and not is_heading
             if bold:
-                await page.keyboard.press("Meta+b")
+                await page.keyboard.press("ControlOrMeta+b")
             if italic:
-                await page.keyboard.press("Meta+i")
+                await page.keyboard.press("ControlOrMeta+i")
             await page.keyboard.type(text, delay=4)
             if italic:
-                await page.keyboard.press("Meta+i")
+                await page.keyboard.press("ControlOrMeta+i")
             if bold:
-                await page.keyboard.press("Meta+b")
+                await page.keyboard.press("ControlOrMeta+b")
 
     async def _upload_image(self, page, src, art_dir) -> bool:
         """知乎配图: 点工具栏图片按钮 → 模态 input setInputFiles → 点"插入图片"。"""

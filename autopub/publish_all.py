@@ -26,10 +26,11 @@ sys.path.insert(0, str(ROOT))
 
 import content as content_mod
 from state import State
-from publishers import get_publisher
+from publishers import get_publisher, REGISTRY
 
-# 平台发布顺序(老虎最稳→知乎)
-ORDER = ["laohu", "eastmoney", "xueqiu", "zhihu"]
+# 平台发布优先级(仅排序用;实际清单 = 这里列出的 ∩ config enabled,未列出的注册平台排最后)
+ORDER = ["eastmoney", "xueqiu", "weibo", "futu", "changqiao",
+         "laohu", "zhihu", "bilibili", "douyin", "tonghuashun"]
 STOP_ON_FAIL = False    # --stop-on-fail 时为 True: 失败立即停不重试
 
 
@@ -65,16 +66,20 @@ def load_articles(articles_dir, only_file=None):
     return arts
 
 
-async def publish_one_platform(plat, article, config, state, logger, throttle):
-    """单平台发一篇, 返回 result dict。已发过(state)则跳过。"""
-    if state.is_published(article["id"], plat):
+async def publish_one_platform(plat, article, config, state, logger, throttle,
+                               draft=False):
+    """单平台发一篇, 返回 result dict。已发过/结果未确认(state)则跳过。"""
+    if state.is_skip(article["id"], plat):
         existing = state.get(article["id"], plat)
+        if existing.get("status") == "uncertain":
+            return {"ok": False, "skipped": True, "url": existing.get("url", ""),
+                    "note": "上次结果未确认(uncertain),需人工核实,已跳过"}
         return {"ok": True, "skipped": True, "url": existing.get("url", ""),
                 "note": "已发过(跳过)"}
     plat_cfg = (config.get("platforms", {}) or {}).get(plat, {})
     pub = get_publisher(plat, plat_cfg, state, logger)
     try:
-        await pub.run([article], draft=False,
+        await pub.run([article], draft=draft,
                       min_interval_seconds=int(throttle.get("min_interval_seconds", 60)),
                       max_consecutive_failures=1)
     except Exception as e:
@@ -93,6 +98,8 @@ async def main():
                              "不填则发 config 里 enabled=true 的全部")
     parser.add_argument("--stop-on-fail", action="store_true",
                         help="任何平台失败立即停止(验证模式; 不加则失败跳过继续)")
+    parser.add_argument("--draft", action="store_true",
+                        help="草稿模式(只填充+截图,不真发);不加默认真发")
     args = parser.parse_args()
     global STOP_ON_FAIL
     STOP_ON_FAIL = args.stop_on_fail
@@ -103,20 +110,26 @@ async def main():
     throttle = config.get("throttle", {})
     articles_dir = ROOT / config.get("articles_dir", "articles")
 
+    all_known = [p for p in ORDER if p in REGISTRY] + \
+                [p for p in REGISTRY if p not in ORDER]
     if args.platforms:
-        # 网页勾选/命令行指定: 只发这些(仍按 ORDER 排序,且必须是已注册平台)
+        # 网页勾选/命令行指定: 只发这些(必须是已注册平台,拼错直接报错)
         picked = {p.strip() for p in args.platforms.split(",") if p.strip()}
-        enabled = [p for p in ORDER if p in picked]
+        unknown = picked - set(REGISTRY)
+        if unknown:
+            logger.error(f"未知平台: {sorted(unknown)} (已注册: {list(REGISTRY)})")
+            return
+        enabled = [p for p in all_known if p in picked]
     else:
-        enabled = [p for p in ORDER
+        enabled = [p for p in all_known
                    if (config.get("platforms", {}) or {}).get(p, {}).get("enabled")]
-    logger.info(f"启用平台(按序): {enabled}")
+    logger.info(f"启用平台(按序): {enabled}" + (" [草稿模式]" if args.draft else ""))
     if not enabled:
         logger.error("没有选中任何平台")
         return
 
     arts = load_articles(articles_dir, only_file=args.file)
-    # 只处理"还没发全"的文章
+    # 只处理"还没发全"的文章(uncertain 也算未完成,但会在单平台层被跳过并提示人工核实)
     todo = [a for a in arts if not all(state.is_published(a["id"], p) for p in enabled)]
     if not todo:
         logger.info("没有待发文章(都已全平台发完或目录为空)")
@@ -129,7 +142,8 @@ async def main():
         report[art["id"]] = {}
         for plat in enabled:
             logger.info(f"--- [{art['id'][:16]}] → {plat} ---")
-            r = await publish_one_platform(plat, art, config, state, logger, throttle)
+            r = await publish_one_platform(plat, art, config, state, logger, throttle,
+                                           draft=args.draft)
             report[art["id"]][plat] = r
             tag = "跳过(已发)" if r.get("skipped") else ("✅" if r["ok"] else "❌")
             logger.info(f"--- {plat}: {tag} {r.get('url','')} {r.get('note','')[:30]} ---")
@@ -165,7 +179,9 @@ async def archive(articles_dir, article_id, logger):
             logger.warning(f"归档失败 {article_id}: {e}")
 
 
-PLAT_NAME = {"laohu": "老虎", "eastmoney": "东财", "xueqiu": "雪球", "zhihu": "知乎"}
+PLAT_NAME = {"laohu": "老虎", "eastmoney": "东财", "xueqiu": "雪球", "zhihu": "知乎",
+             "weibo": "微博", "futu": "富途", "changqiao": "长桥",
+             "bilibili": "B站", "douyin": "抖音", "tonghuashun": "同花顺"}
 
 
 def build_summary(report, enabled):

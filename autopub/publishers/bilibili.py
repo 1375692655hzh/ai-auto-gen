@@ -29,16 +29,35 @@ class BilibiliPublisher(BrowserPublisher):
         await page.wait_for_timeout(6000)
 
         # 队列检查(上传框是多文件累加, 已有视频绝不重复选文件!)
-        has_item = await page.evaluate(
-            "() => document.body.innerText.includes('重新上传') || "
-            "document.body.innerText.includes('上传完成')")
+        # B站投稿页会恢复上次未完成稿件: 队列里有东西且不是本视频 → 刷新重置; 再不行就中止
+        # (此前误传3条视频的根因就是残留队列不清理 + 重复 set_input_files 累加)
+        fname = Path(video).name
+        for round_ in range(2):
+            has_item, is_mine = await page.evaluate(
+                """(fname) => {
+                    const t = document.body.innerText;
+                    const has = t.includes('重新上传') || t.includes('上传完成');
+                    return [has, t.includes(fname)];
+                }""", fname)
+            if not has_item:
+                break
+            if is_mine:
+                self.logger.info(f"[{self.name}] 队列已是本视频(上次残留), 不重复上传")
+                break
+            self.logger.warning(f"[{self.name}] 队列有非本视频的残留(第{round_+1}次), "
+                                "刷新页面重置投稿队列")
+            await page.goto(self.compose_url, wait_until="domcontentloaded", timeout=60000)
+            await page.wait_for_timeout(6000)
+        else:
+            await self._shot(page, "queue_dirty")
+            return {"ok": False, "url": "",
+                    "note": f"投稿队列有其他视频残留且刷新无效,请手动清理后重试"}
+
         if not has_item:
             inp = page.locator('input[type=file][accept*="mp4"]').first
             await inp.set_input_files(str(video))
-            self.logger.info(f"[{self.name}] 开始上传: {Path(video).name} "
+            self.logger.info(f"[{self.name}] 开始上传: {fname} "
                              f"({Path(video).stat().st_size // 1024}KB)")
-        else:
-            self.logger.info(f"[{self.name}] 上传队列已有视频, 不重复上传")
 
         # 等表单出现(标题框)
         for _ in range(60):
@@ -49,6 +68,17 @@ class BilibiliPublisher(BrowserPublisher):
             await self._shot(page, "no_form")
             return {"ok": False, "url": "", "note": "上传后表单没出现"}
         await page.wait_for_timeout(2000)
+        # 等上传真正完成(还在传时点投稿会把进行中的分P一起提交)
+        for _ in range(120):
+            uploading = await page.evaluate(
+                "() => document.body.innerText.includes('上传中') || "
+                "document.body.innerText.includes('等待上传')")
+            if not uploading:
+                break
+            await page.wait_for_timeout(3000)
+        else:
+            await self._shot(page, "upload_stuck")
+            return {"ok": False, "url": "", "note": "视频上传超时(6分钟)未完成"}
 
         # 标题
         t = page.locator('input[placeholder*="标题"]').first
@@ -72,9 +102,9 @@ class BilibiliPublisher(BrowserPublisher):
 
         await self._shot(page, "form_filled")
         if draft:
-            await self._click_text_btn(page, "存草稿")
-            return {"ok": True, "url": "", "note": "draft(存草稿)"}
-        ok = await self._click_text_btn(page, "立即投稿")
+            ok = await self._click_text_btn(page, "存草稿", exact=True)
+            return {"ok": bool(ok), "url": "", "note": "draft(存草稿)" if ok else "存草稿按钮没点中"}
+        ok = await self._click_text_btn(page, "立即投稿", exact=True)
         if not ok:
             return {"ok": False, "url": "", "note": "立即投稿按钮没点中"}
         # 等成功提示/跳转
@@ -235,13 +265,14 @@ class BilibiliPublisher(BrowserPublisher):
             self.logger.warning(f"[{self.name}] 分区选择异常(不阻断): {e}")
 
     async def _click_text_btn(self, page, text: str, exact: bool = False) -> bool:
+        """只匹配可见的 <button>(精确文案优先), 避免模糊匹配点到按钮组容器误触真发。"""
         try:
             r = await page.evaluate("""([text, exact]) => {
-                for (const e of document.querySelectorAll('button, [class*="btn"], span, a')) {
+                const btns = [...document.querySelectorAll('button')].filter(e => e.offsetParent);
+                for (const e of btns) {
                     const t = (e.innerText || '').trim();
-                    if (e.offsetParent && e.children.length <= 2
-                        && (exact ? t === text : t.includes(text))) {
-                        (e.closest('button') || e).click(); return true;
+                    if (exact ? t === text : t.includes(text)) {
+                        e.click(); return true;
                     }
                 }
                 return false;

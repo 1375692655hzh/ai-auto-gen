@@ -190,7 +190,7 @@ class EastmoneyPublisher(BrowserPublisher):
             return False
         await loc.click(timeout=6000)
         await page.wait_for_timeout(400)
-        await page.keyboard.press("Meta+A")
+        await page.keyboard.press("ControlOrMeta+A")
         await page.keyboard.press("Backspace")
         await page.wait_for_timeout(200)
         return True
@@ -264,14 +264,14 @@ class EastmoneyPublisher(BrowserPublisher):
             if not text:
                 continue
             if r.get("bold"):
-                await page.keyboard.press("Meta+b")
+                await page.keyboard.press("ControlOrMeta+b")
             if r.get("italic"):
-                await page.keyboard.press("Meta+i")
+                await page.keyboard.press("ControlOrMeta+i")
             await page.keyboard.type(text, delay=5)
             if r.get("italic"):
-                await page.keyboard.press("Meta+i")
+                await page.keyboard.press("ControlOrMeta+i")
             if r.get("bold"):
-                await page.keyboard.press("Meta+b")
+                await page.keyboard.press("ControlOrMeta+b")
 
     async def _cursor_to_end(self, page):
         """把光标强制放到编辑器内容末尾(防止模态交互后丢焦点)。"""

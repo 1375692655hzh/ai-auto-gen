@@ -164,7 +164,7 @@ class XueqiuPublisher(BrowserPublisher):
             return False
         await loc.click(timeout=6000)
         await page.wait_for_timeout(400)
-        await page.keyboard.press("Meta+A")
+        await page.keyboard.press("ControlOrMeta+A")
         await page.keyboard.press("Backspace")
         await page.wait_for_timeout(200)
         return True
@@ -209,7 +209,7 @@ class XueqiuPublisher(BrowserPublisher):
                     continue
                 await loc.click(timeout=4000)
                 await page.wait_for_timeout(150)
-                await page.keyboard.press("Meta+Alt+1")
+                await page.keyboard.press("ControlOrControlOrMeta+Alt+1")
                 await page.wait_for_timeout(200)
                 heads += 1
             except Exception as e:
@@ -265,14 +265,14 @@ class XueqiuPublisher(BrowserPublisher):
             if not text:
                 continue
             if r.get("bold"):
-                await page.keyboard.press("Meta+b")
+                await page.keyboard.press("ControlOrMeta+b")
             if r.get("italic"):
-                await page.keyboard.press("Meta+i")
+                await page.keyboard.press("ControlOrMeta+i")
             await page.keyboard.type(text, delay=5)
             if r.get("italic"):
-                await page.keyboard.press("Meta+i")
+                await page.keyboard.press("ControlOrMeta+i")
             if r.get("bold"):
-                await page.keyboard.press("Meta+b")
+                await page.keyboard.press("ControlOrMeta+b")
         return co, cf
 
     async def _insert_cashtag(self, page, code: str) -> bool:

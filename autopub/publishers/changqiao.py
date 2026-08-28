@@ -233,7 +233,8 @@ class ChangqiaoPublisher(BrowserPublisher):
             try:
                 url = page.url or ""
             except Exception:
-                return {"ok": True, "url": "", "note": "发布后页面跳转"}
+                # 页面被关/跳转读取失败 ≠ 发布成功(乐观误判会记假 published)
+                return {"ok": False, "url": "", "note": "发布结果未知(页面跳转读取失败)"}
             if "/topics/new" not in url:
                 m = re.search(r"/topics/(\d+)", url)
                 tid = m.group(1) if m else ""

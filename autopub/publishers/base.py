@@ -255,10 +255,13 @@ class BrowserPublisher:
                                         / "config.yaml").read_text(encoding="utf-8"))
                 bcfg = gcfg.get("browser") or {}
                 cdp_url = bcfg.get("cdp_url", "http://127.0.0.1:9222")
-                browser = await p.chromium.connect_over_cdp(cdp_url)
+                browser = await p.chromium.connect_over_cdp(cdp_url, timeout=15000)
                 context = browser.contexts[0] if browser.contexts else await browser.new_context()
                 page = await context.new_page()
                 page.set_default_timeout(60000)
+                # 抹掉自动化特征(风控检测 navigator.webdriver)
+                await context.add_init_script(
+                    "Object.defineProperty(navigator,'webdriver',{get:()=>undefined});")
                 self.logger.info(f"[{self.name}] 已接管本机 Chrome ({cdp_url}), 复用日常登录态")
             else:
                 if self.config.get("bitbrowser"):
@@ -306,7 +309,7 @@ class BrowserPublisher:
                     self.logger.warning(f"[{self.name}] prepare 失败(不阻断): {e}")
                 published = 0
                 consecutive_failures = 0
-                for article in articles:
+                for i, article in enumerate(articles):
                     if published >= self.max_daily:
                         self.logger.warning(
                             f"[{self.name}] 达单次上限 {self.max_daily},其余改天")
@@ -317,9 +320,14 @@ class BrowserPublisher:
                     try:
                         result = await self.publish_one(page, article, draft)
                     except Exception as e:
-                        result = {"ok": False, "url": "", "note": f"异常: {e}"}
+                        closed = "TargetClosed" in type(e).__name__ or "closed" in str(e).lower()
+                        result = {"ok": False, "url": "",
+                                  "note": "页面/浏览器被关闭" if closed else f"异常: {e}"}
                         self.logger.error(f"[{self.name}] 发布异常 ({article['id']}): {e}")
                         await self._shot(page, "exception")
+                        if closed:
+                            self.logger.error(f"[{self.name}] 浏览器已不可用, 终止本平台后续文章")
+                            break
 
                     if draft:
                         self.logger.info(f"[{self.name}] [草稿] {article['id']} 已填充+截图,未真发")
@@ -331,18 +339,30 @@ class BrowserPublisher:
                         self.logger.info(f"[{self.name}] 发布成功: {article['id']} {result.get('url','')}")
                     else:
                         consecutive_failures += 1
-                        self.state.mark(article["id"], self.name, "failed",
-                                        note=result.get("note", ""))
-                        self.logger.error(f"[{self.name}] 发布失败: {article['id']} {result.get('note','')}")
+                        note = result.get("note", "")
+                        if "未知" in note:
+                            # 已点发布但没等到成功确认: 可能已发出, 记 uncertain 禁止自动重发
+                            self.state.mark(article["id"], self.name, "uncertain", note=note)
+                            self.logger.error(
+                                f"[{self.name}] 结果未知({article['id']}): {note} —— "
+                                "记为 uncertain, 不会自动重试, 请到平台后台人工核实")
+                        else:
+                            self.state.mark(article["id"], self.name, "failed",
+                                            note=note)
+                            self.logger.error(f"[{self.name}] 发布失败: {article['id']} {note}")
 
                     # 篇间等待
-                    if article is not articles[-1]:
+                    if i < len(articles) - 1:
                         await page.wait_for_timeout(min_interval_seconds * 1000)
                 self.logger.info(f"[{self.name}] 本次完成,成功 {published}/{len(articles)}")
             except Exception as e:
                 self.logger.error(f"[{self.name}] 流程异常: {e}")
             finally:
                 if use_cdp:
+                    try:
+                        await page.close()        # 关掉本次发布开的 tab, 不泄漏到用户 Chrome
+                    except Exception:
+                        pass
                     if browser is not None:
                         await browser.close()      # 只断开连接, 不动用户的 Chrome
                 else:

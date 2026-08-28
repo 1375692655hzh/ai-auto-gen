@@ -221,7 +221,8 @@ class FutuPublisher(BrowserPublisher):
             try:
                 url = page.url or ""
             except Exception:
-                return {"ok": True, "url": "", "note": "发布后页面跳转"}
+                # 页面被关/跳转读取失败 ≠ 发布成功(乐观误判会记假 published)
+                return {"ok": False, "url": "", "note": "发布结果未知(页面跳转读取失败)"}
             if "/editor" not in url:
                 self.logger.info(f"[{self.name}] 发布后跳转: {url[:70]}")
                 return {"ok": True, "url": url, "note": ""}
