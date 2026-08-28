@@ -135,38 +135,52 @@ def tag_morning_items(ctx, wf, params):
     article_p = ctx.get("article_path")
     if not article_p or not Path(article_p).exists():
         sys.exit("缺少文章产物(先跑 article 步骤)")
-    article = Path(article_p).read_text(encoding="utf-8")
+    # 永远从「无解读原文」出发: 队列文件可能已带上一轮解读(换模式重跑会叠加)
+    raw_backup = wf.run_dir / f"article-raw-{wf.date}.md"
+    if raw_backup.exists():
+        article = raw_backup.read_text(encoding="utf-8")
+    else:
+        article = Path(article_p).read_text(encoding="utf-8")
+    # 幂等防御: 输入若已被历史轮次污染(带 ↳ 解读行), 先剥离还原为无解读原文
+    if "↳" in article or "↳" in article:
+        article = chr(10).join(l for l in article.splitlines() if not l.lstrip().startswith(chr(0x21b3)))
+        m = re.search(r"^(本文[^{}]*投资建议[^{}]*)$".format(chr(92)+chr(110), chr(92)+chr(110)), article, re.M)
+        if m:
+            article = article.replace(m.group(1),
+                "本文基于公开信息整理,不构成投资建议。市场有风险,投资需谨慎。")
+        print("⚠ 输入含历史解读行, 已剥离还原为无解读原文(幂等)")
     material = ""
     mp = ctx.get("material_path")
     if mp and Path(mp).exists():
         material = Path(mp).read_text(encoding="utf-8")
 
     sectors = _load_sectors(wf.pack_dir)
+    mode = "sectors" if str(params.get("mode", "direction")) == "sectors" else "direction"
     items, ann_zone = _index_items(article)          # 编号条目 + 公告区定位
     if not items:
         sys.exit("文章里没找到可打标的条目(格式异常?)")
 
-    tpl = daily.load_prompt("morning_tags")
+    tpl = daily.load_prompt("morning_tags_sectors" if mode == "sectors" else "morning_tags")
     if not tpl:
-        sys.exit("缺少提示词 morning_tags")
+        sys.exit(f"缺少提示词 (mode={mode})")
     user = (tpl.replace("<<DATE>>", wf.date)
                .replace("<<ARTICLE>>", article)
                .replace("<<MATERIAL>>", material[:12000])
                .replace("<<SECTORS>>", "、".join(sectors)))
     system = daily.load_prompt("morning_tags_system",
                                "你是量化资讯编辑,只输出严格 JSON。")
-    print(f"解读标签: {len(items)} 条正文条目 / 送模型 {len(user)} 字 ...")
+    print(f"解读标签[{mode}]: {len(items)} 条正文条目 / 送模型 {len(user)} 字 ...")
     raw = llm_complete(user, system=system, max_tokens=4000, temperature=0.2)
-    parsed, err = _parse_tags(raw, sectors, items)
+    parsed, err = _parse_tags(raw, sectors, items, mode)
     if err:
         print(f"⚠ JSON 校验失败({err}), 重试一次 ...")
         raw = llm_complete(user, system=system, max_tokens=4000, temperature=0.2)
-        parsed, err = _parse_tags(raw, sectors, items)
+        parsed, err = _parse_tags(raw, sectors, items, mode)
     if err:
         print(f"⚠ 解读标签失败({err}), 降级发布无解读版")
         return {"tagged_path": article_p, "tag_error": err}
 
-    tagged, report = _render_tags(article, items, ann_zone, parsed, sectors)
+    tagged, report = _render_tags(article, items, ann_zone, parsed, sectors, mode)
     # 备份无解读原稿 + 覆盖待发版
     raw_backup = wf.run_dir / f"article-raw-{wf.date}.md"
     raw_backup.write_text(article, encoding="utf-8")
@@ -199,7 +213,7 @@ def _index_items(article: str):
     return items, ann
 
 
-def _parse_tags(raw: str, sectors: list, items: list):
+def _parse_tags(raw: str, sectors: list, items: list, mode: str = "direction"):
     """解析+硬校验 LLM JSON。返回 (清理后的 items 映射, 错误)。"""
     import json as _j
     raw = raw.strip()
@@ -216,6 +230,11 @@ def _parse_tags(raw: str, sectors: list, items: list):
         n = o.get("n")
         if not isinstance(n, int) or n not in valid_n:
             continue                                  # 越界编号直接丢弃
+        if mode == "sectors":                         # 纯板块: {"n":1,"s":["芯片","AI"]}
+            ss = [x for x in (o.get("s") or []) if x in secset][:3]
+            if ss:
+                out[n] = [{"d": "", "s": ss}]
+            continue
         dirs = []
         for d in o.get("dirs") or []:
             key = d.get("d")
@@ -230,7 +249,7 @@ def _parse_tags(raw: str, sectors: list, items: list):
 
 
 def _render_tags(article: str, items: list, ann_zone: list,
-                 parsed: dict, sectors: list):
+                 parsed: dict, sectors: list, mode: str = "direction"):
     """渲染插行(构造性保证格式)。免标规则在此代码侧兜底过滤。"""
     lines = article.splitlines()
     by_tag = {it["n"]: it for it in items}
@@ -240,25 +259,29 @@ def _render_tags(article: str, items: list, ann_zone: list,
     ann_sector_count = {}
     for n, dirs in sorted(parsed.items()):
         it = by_tag[n]
-        # 免标兜底: 行情条/传闻条不给方向; 地缘条只允许降格词
+        # 免标兜底: 行情条/传闻条不给标签(两种模式同规则)
         if it["tag"] == "行情":
             warn.append(f"#{n} 行情条被过滤"); continue
         if re.search(r"据报|被曝|据报道|消息人士", it["text"]):
             warn.append(f"#{n} 传闻条被过滤"); continue
-        if it["tag"] == "地缘":
+        if mode == "direction" and it["tag"] == "地缘":
             dirs = [d for d in dirs if d["d"] in ("中性", "承压", "关注")] or None
             if dirs is None:
-                continue
+                continue                              # 纯板块模式地缘条可标板块
         if it["n"] in ann_zone:
-            for d in dirs:                            # 公告条: 收热度, 非中性才逐条渲染
-                for s in d["s"]:
-                    ann_sector_count[s] = ann_sector_count.get(s, 0) + 1
-                if d["d"] == "中性":
-                    dirs = [x for x in dirs if x["d"] != "中性"]
-            if not dirs:
-                continue
-        rows = [f"  ↳ {d['d']}：{'、'.join(d['s'])}" for d in dirs
-                if d["d"] in DIRECTIONS]
+            for d in dirs:                            # 公告条: 收热度
+                for s_ in d["s"]:
+                    ann_sector_count[s_] = ann_sector_count.get(s_, 0) + 1
+            if mode == "direction":                   # 方向模式: 中性公告只进汇总不逐条渲染
+                keep = [x for x in dirs if x["d"] != "中性"]
+                if not keep:
+                    continue
+                dirs = keep
+        if mode == "sectors":
+            rows = [f"  ↳ {'、'.join(s_ for d in dirs for s_ in d['s'])}"]
+        else:
+            rows = [f"  ↳ {d['d']}：{'、'.join(d['s'])}" for d in dirs
+                    if d["d"] in DIRECTIONS]
         if rows:
             inserts.setdefault(it["line"], []).extend(rows)
             used_dirs.extend(d["d"] for d in dirs)
@@ -269,17 +292,20 @@ def _render_tags(article: str, items: list, ann_zone: list,
         last_ann = max(by_tag[n]["line"] for n in ann_zone if n in by_tag)
         inserts.setdefault(last_ann, []).append(f"  ↳ 今日公告热度：{summary}")
     # 免责升级: 覆盖板块方向归类(合规配套)
+    disc = ("本文基于公开信息整理,板块标注仅为信息归类,不构成投资建议。"
+            "市场有风险,投资需谨慎。" if mode == "sectors" else
+            "本文基于公开信息整理,板块影响标注仅为对消息面的客观归类,"
+            "不代表对任何证券或板块走势的预测,不构成投资建议。"
+            "市场有风险,投资需谨慎。")
     for i in range(len(lines) - 1, -1, -1):
         if "投资建议" in lines[i]:
-            lines[i] = ("本文基于公开信息整理,板块影响标注仅为对消息面的客观归类,"
-                        "不代表对任何证券或板块走势的预测,不构成投资建议。"
-                        "市场有风险,投资需谨慎。")
+            lines[i] = disc
             break
     # 倒序插行
     for idx in sorted(inserts, reverse=True):
         lines[idx + 1:idx + 1] = inserts[idx]
     # 比例监控
-    n_dir = len([d for d in used_dirs if d in ("利好", "利空")])
+    n_dir = 0 if mode == "sectors" else len([d for d in used_dirs if d in ("利好", "利空")])
     if n_dir:
         bull = used_dirs.count("利好") / n_dir
         if bull > 0.8 or bull < 0.3:
