@@ -48,21 +48,26 @@ def render_morning_image(ctx, wf, params):
     n_tagged = sum(1 for it in sel if it.get("sectors"))
     print(f"长图选条: {len(sel)}/{len(items)} 条, 带解读 {n_tagged} 条 (配额 {QUOTA})")
 
-    # ---- LLM 精简(title/point/hot) ----
+    # ---- LLM 精简(title/point/pill/hot) ----
     refined, degraded = {}, False
+    import yaml
+    sf = Path(wf.pack_dir) / "sectors.yaml"
+    groups = (yaml.safe_load(sf.read_text(encoding="utf-8")) or {}).get("sectors") or []
+    vocab = [w for g in groups for w in g]
     if params.get("refine", True):
         feed = chr(10).join(f"{it['n']}|{it['tag']}|{it['text']}" for it in sel)
         tpl = daily.load_prompt("morning_image_lines")
         if tpl:
-            user = (tpl.replace("<<DATE>>", date).replace("<<ITEMS>>", feed))
+            user = (tpl.replace("<<DATE>>", date).replace("<<SECTORS>>", "、".join(vocab))
+                       .replace("<<ITEMS>>", feed))
             system = daily.load_prompt("morning_image_lines_system",
                                        "你是财经长图编辑,只输出严格 JSON。")
             raw = llm_complete(user, system=system, max_tokens=2500, temperature=0.2)
-            refined, err = _parse_lines(raw, {it["n"]: it["text"] for it in sel})
+            refined, err = _parse_lines(raw, {it["n"]: it["text"] for it in sel}, vocab)
             if err:
                 print(f"⚠ 精简校验失败({err}), 重试一次 ...")
                 raw = llm_complete(user, system=system, max_tokens=2500, temperature=0.2)
-                refined, err = _parse_lines(raw, {it["n"]: it["text"] for it in sel})
+                refined, err = _parse_lines(raw, {it["n"]: it["text"] for it in sel}, vocab)
             if err:
                 print(f"⚠ 降级为纯截断版({err})")
                 refined, degraded = {}, True
@@ -80,7 +85,7 @@ def render_morning_image(ctx, wf, params):
             point = _cut(it["text"], 30)
             hot = False
         card = {"n": it["n"], "cat": it["cat"], "tag": it["tag"], "title": title,
-                "point": point, "hot": hot,
+                "point": point, "hot": hot, "pill": r.get("pill", ""),
                 "sectors": it.get("sectors") or [], "direction": it.get("direction") or ""}
         cards.append(card)
     ann_count = {}                                    # 公告热度=全部公告条目, 非仅选中
@@ -180,7 +185,7 @@ def _cut(text: str, n: int) -> str:
     return cut.rstrip("，,、") + "…"
 
 
-def _parse_lines(raw: str, src: dict):
+def _parse_lines(raw: str, src: dict, vocab: list):
     """解析 LLM 精简 JSON + 数字保真硬校验。返回 ({n: rec}, err)。"""
     m = re.search(r"\{.*\}", raw.strip(), re.S)
     if not m:
@@ -200,7 +205,14 @@ def _parse_lines(raw: str, src: dict):
         bad_num = _num_violation(title + point, src[n])
         if bad_num:
             return None, f"#{n} 数字失真: {bad_num}"
-        out[n] = {"title": title, "point": point, "hot": bool(o.get("hot"))}
+        raw_pill = str(o.get("pill") or "")
+        if raw_pill in ("-", ""):
+            pill = "-"                               # 显式无主体: 不回退影响板块
+        elif raw_pill in vocab:
+            pill = raw_pill
+        else:                                        # 表外词: 交渲染层回退链
+            pill = ""
+        out[n] = {"title": title, "point": point, "pill": pill, "hot": bool(o.get("hot"))}
     if not out:
         return None, "无有效条目"
     return out, ""

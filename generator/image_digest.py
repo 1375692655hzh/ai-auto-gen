@@ -169,9 +169,16 @@ def _draw_item(d, probe, c: dict, color, top: int):
     dir_w = probe.textlength(dirline, font=_font(24, True)) + 14 if dirline else 0
     hot = bool(c.get("hot"))
     hot_w = 66 if hot else 0
-    # 标签胶囊(左=归属): 板块词优先; 无板块仅 地缘/政策 白名单上图, 其余顶格
-    sectors = c.get("sectors") or []
-    pill_text = sectors[0] if sectors else (c["tag"] if c["tag"] in PILL_TAG_OK else "")
+    # 标签胶囊(左=归属): 主体归属词(LLM pill, 「关于谁」)优先; "-"=显式无主体顶格;
+    # 字段缺失/表外 → 回退链: sectors[0](个股新闻≈主体) → tag白名单 → 顶格
+    pill_field = c.get("pill")
+    if pill_field == "-":
+        pill_text = ""
+    elif pill_field:
+        pill_text = pill_field
+    else:
+        sectors = c.get("sectors") or []
+        pill_text = sectors[0] if sectors else (c["tag"] if c["tag"] in PILL_TAG_OK else "")
     if pill_text:
         _pill(d, left, r1y + 7, pill_text, color, probe)
         tx = left + PILL_SLOT + 12
