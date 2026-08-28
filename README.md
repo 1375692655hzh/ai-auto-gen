@@ -1,4 +1,4 @@
-# ai-gen-article-publish
+# ai-auto-gen
 
 AI 文章生成与多平台自动发布工具：基于大语言模型生成文章，并自动发布到国内 8 大内容平台。
 
