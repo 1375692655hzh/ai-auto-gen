@@ -30,3 +30,4 @@ from flows.steps import expand as _expand        # noqa: E402,F401
 from flows.steps import assemble as _assemble    # noqa: E402,F401
 from flows.steps import formats as _formats      # noqa: E402,F401
 from flows.steps import video as _video          # noqa: E402,F401
+from flows.steps import morning as _morning      # noqa: E402,F401

@@ -1,0 +1,17 @@
+id: morning-digest
+title: 早报汇总(四源合成)
+description: 抓取财联社有声早报/华尔街见闻早餐/富途早报/元宝Gangtise四份早报 → 汇总去重分类 → LLM合成一篇早报文章(进待发队列)
+version: 1.0.0
+
+params:
+  wscn_count: 2        # 华尔街见闻早餐取几篇(通常当天1篇)
+  per_report_chars: 4000   # 每份早报送入模型的最大字数
+
+steps:
+  - id: fetch                    # 四源抓取(免 LLM, gangtise 失败自动元宝兜底)
+    uses: fetch_morning_reports
+    with: {wscn_count: "{params.wscn_count}"}
+  - id: synth                    # LLM 汇总分类合成文章  ← 审核点
+    uses: synthesize_morning
+    review: true
+    with: {per_report_chars: "{params.per_report_chars}"}
