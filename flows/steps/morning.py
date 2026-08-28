@@ -122,6 +122,22 @@ def _load_sectors(pack_dir: Path) -> list:
     return [w for g in groups for w in g]
 
 
+def _restore_raw(wf, ctx) -> None:
+    """把待发队列的文章还原为无解读干净稿(raw_backup 优先, 否则剥离 ↳ 行)。"""
+    article_p = ctx.get("article_path")
+    if not article_p or not Path(article_p).exists():
+        return
+    raw_backup = wf.run_dir / f"article-raw-{wf.date}.md"
+    if raw_backup.exists():
+        Path(article_p).write_text(raw_backup.read_text(encoding="utf-8"), encoding="utf-8")
+    else:
+        txt = Path(article_p).read_text(encoding="utf-8")
+        if chr(0x21B3) in txt:
+            txt = chr(10).join(l for l in txt.splitlines()
+                               if not l.lstrip().startswith(chr(0x21B3)))
+            Path(article_p).write_text(txt, encoding="utf-8")
+
+
 @step("tag_morning_items")
 def tag_morning_items(ctx, wf, params):
     """成品文章 → 逐条「板块×方向」解读标签。
@@ -131,6 +147,7 @@ def tag_morning_items(ctx, wf, params):
     from common import llm_complete
     if not params.get("enabled", True):
         print("解读标签未启用(--set tag_lines=false)")
+        _restore_raw(wf, ctx)                     # 回退干净稿(上轮解读不再滞留队列)
         return {}
     article_p = ctx.get("article_path")
     if not article_p or not Path(article_p).exists():
@@ -142,7 +159,7 @@ def tag_morning_items(ctx, wf, params):
     else:
         article = Path(article_p).read_text(encoding="utf-8")
     # 幂等防御: 输入若已被历史轮次污染(带 ↳ 解读行), 先剥离还原为无解读原文
-    if "↳" in article or "↳" in article:
+    if chr(0x21B3) in article:
         article = chr(10).join(l for l in article.splitlines() if not l.lstrip().startswith(chr(0x21b3)))
         m = re.search(r"^(本文[^{}]*投资建议[^{}]*)$".format(chr(92)+chr(110), chr(92)+chr(110)), article, re.M)
         if m:
@@ -172,14 +189,19 @@ def tag_morning_items(ctx, wf, params):
     print(f"解读标签[{mode}]: {len(items)} 条正文条目 / 送模型 {len(user)} 字 ...")
     raw = llm_complete(user, system=system, max_tokens=4000, temperature=0.2)
     parsed, err = _parse_tags(raw, sectors, items, mode)
-    if err:
+    if err and not err.startswith("表外词"):
         print(f"⚠ JSON 校验失败({err}), 重试一次 ...")
         raw = llm_complete(user, system=system, max_tokens=4000, temperature=0.2)
         parsed, err = _parse_tags(raw, sectors, items, mode)
     if err:
         print(f"⚠ 解读标签失败({err}), 降级发布无解读版")
+        _restore_raw(wf, ctx)                     # 真正还原无解读原稿
         return {"tagged_path": article_p, "tag_error": err}
 
+    if err and err.startswith("表外词"):
+        cand = wf.run_dir / f"tag-candidates-{wf.date}.txt"
+        cand.write_text(err.replace("表外词(已回退丢弃): ", "") + "\n", encoding="utf-8")
+        print(f"⚠ {err} → 已记入 {cand.name} (周审入表)")
     tagged, report = _render_tags(article, items, ann_zone, parsed, sectors, mode)
     # 备份无解读原稿 + 覆盖待发版
     raw_backup = wf.run_dir / f"article-raw-{wf.date}.md"
@@ -225,27 +247,37 @@ def _parse_tags(raw: str, sectors: list, items: list, mode: str = "direction"):
     except Exception as e:
         return None, f"JSON 解析失败: {e}"
     valid_n = {it["n"] for it in items}
-    secset, out = set(sectors), {}
+    secset, out, outside = set(sectors), {}, set()
     for o in data.get("items") or []:
         n = o.get("n")
         if not isinstance(n, int) or n not in valid_n:
             continue                                  # 越界编号直接丢弃
         if mode == "sectors":                         # 纯板块: {"n":1,"s":["芯片","AI"]}
-            ss = [x for x in (o.get("s") or []) if x in secset][:3]
+            ss = [x for x in dict.fromkeys(o.get("s") or []) if x in secset]
+            outside.update(x for x in (o.get("s") or []) if x not in secset)
             if ss:
-                out[n] = [{"d": "", "s": ss}]
+                dirs = [{"d": "", "s": ss[:3]}]       # 条目级总量截断
+                out.setdefault(n, []).extend(
+                    x for x in dirs if x not in out.get(n, []))
             continue
-        dirs = []
-        for d in o.get("dirs") or []:
+        for d in o.get("dirs") or []:                 # 重复 n 合并而非覆盖
             key = d.get("d")
-            ss = [x for x in (d.get("s") or []) if x in secset]
+            ss = [x for x in dict.fromkeys(d.get("s") or []) if x in secset]
+            outside.update(x for x in (d.get("s") or []) if x not in secset)
             if key in DIRECTIONS and ss:
-                dirs.append({"d": key, "s": ss[:3]})
-        if dirs:
-            out[n] = dirs
-    if not out:
+                out.setdefault(n, []).append({"d": key, "s": ss})
+    # 每条板块总量截断到 3
+    for n, dirs in out.items():
+        flat, keep = [], []
+        for d in dirs:
+            take = [x for x in d["s"] if x not in flat][:3 - len(flat)]
+            if take:
+                keep.append({"d": d["d"], "s": take})
+                flat.extend(take)
+        out[n] = keep
+    if not out or not any(out.values()):
         return None, "无有效条目"
-    return out, ""
+    return out, (f"表外词(已回退丢弃): {chr(59).join(sorted(outside))}" if outside else "")
 
 
 def _render_tags(article: str, items: list, ann_zone: list,
@@ -254,6 +286,17 @@ def _render_tags(article: str, items: list, ann_zone: list,
     lines = article.splitlines()
     by_tag = {it["n"]: it for it in items}
     fail, warn = [], []
+    # 跨方向板块冲突: 整条丢弃(提示词已禁, 此为代码兜底)
+    seen_by_n, conflicts = {}, []
+    for n, dirs in parsed.items():
+        for d in dirs:
+            for x in d["s"]:
+                if seen_by_n.setdefault((n, x), d["d"]) != d["d"]:
+                    conflicts.append(f"#{n} {x}")
+    if conflicts:
+        warn.append(f"跨方向冲突条目被丢弃: {', '.join(conflicts[:5])}")
+        for n in {int(c.split()[0][1:]) for c in conflicts}:
+            parsed.pop(n, None)
     inserts = {}          # line_idx -> [解读行...]
     used_dirs = []
     ann_sector_count = {}
@@ -310,7 +353,17 @@ def _render_tags(article: str, items: list, ann_zone: list,
         bull = used_dirs.count("利好") / n_dir
         if bull > 0.8 or bull < 0.3:
             warn.append(f"方向比例失衡: 利好占 {bull:.0%}, 请人工复核")
-    report = {"tagged": len(inserts), "fail": fail, "warn": warn,
+    # 构造性断言: 每行 ↳ 必须紧跟条目行或 ↳ 行(违反=插行定位 bug, 阻断)
+    out_lines = lines
+    for i, l in enumerate(out_lines):
+        if l.lstrip().startswith(chr(0x21B3)):
+            prev = out_lines[i - 1] if i else ""
+            if not (prev.startswith("- ") or prev.lstrip().startswith(chr(0x21B3))):
+                fail.append(f"解读行悬空于第{i + 1}行")
+    n_summary = 1 if ann_sector_count else 0
+    if conflicts:
+        warn.append(f"跨方向冲突条目被丢弃: {', '.join(conflicts[:5])}")
+    report = {"tagged": max(0, len(inserts) - n_summary), "fail": fail, "warn": warn,
               "ann_summary": "、".join(f"{s}×{c}" for s, c in
                                        sorted(ann_sector_count.items(), key=lambda x: -x[1])[:4])}
     return chr(10).join(lines) + chr(10), report
