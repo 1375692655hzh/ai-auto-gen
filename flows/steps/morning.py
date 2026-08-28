@@ -1,5 +1,6 @@
 """早报汇总步骤:抓四源早报(当日校验) → LLM 汇总分类(素材) → 按产出形式渲染(文章等)。"""
 
+import json
 import re
 import sys
 from pathlib import Path
@@ -104,6 +105,189 @@ def render_morning_article(ctx, wf, params):
     return {"article_path": str(path), "article_chars": len(md),
             "lint": {"items": report["items"], "short": report["short"],
                      "bad_tags": report["bad_tags"]}}
+
+
+# ---------- 解读标签(tag 步): LLM 出 JSON, 代码渲染插行 ----------
+
+DIRECTIONS = ["利好", "利空", "中性", "承压", "关注"]
+
+
+def _load_sectors(pack_dir: Path) -> list:
+    """板块词表: 包内 sectors.yaml(单一来源, 用户可直接改)。"""
+    import yaml
+    f = Path(pack_dir) / "sectors.yaml"
+    if not f.exists():
+        sys.exit(f"缺少板块词表: {f}")
+    groups = (yaml.safe_load(f.read_text(encoding="utf-8")) or {}).get("sectors") or []
+    return [w for g in groups for w in g]
+
+
+@step("tag_morning_items")
+def tag_morning_items(ctx, wf, params):
+    """成品文章 → 逐条「板块×方向」解读标签。
+    LLM 只出结构化 JSON, 解析/校验/插行全部由代码完成(排版是构造性保证)。
+    with: {enabled: true}。产出 tagged_path/tags_path。"""
+    import daily
+    from common import llm_complete
+    if not params.get("enabled", True):
+        print("解读标签未启用(--set tag_lines=false)")
+        return {}
+    article_p = ctx.get("article_path")
+    if not article_p or not Path(article_p).exists():
+        sys.exit("缺少文章产物(先跑 article 步骤)")
+    article = Path(article_p).read_text(encoding="utf-8")
+    material = ""
+    mp = ctx.get("material_path")
+    if mp and Path(mp).exists():
+        material = Path(mp).read_text(encoding="utf-8")
+
+    sectors = _load_sectors(wf.pack_dir)
+    items, ann_zone = _index_items(article)          # 编号条目 + 公告区定位
+    if not items:
+        sys.exit("文章里没找到可打标的条目(格式异常?)")
+
+    tpl = daily.load_prompt("morning_tags")
+    if not tpl:
+        sys.exit("缺少提示词 morning_tags")
+    user = (tpl.replace("<<DATE>>", wf.date)
+               .replace("<<ARTICLE>>", article)
+               .replace("<<MATERIAL>>", material[:12000])
+               .replace("<<SECTORS>>", "、".join(sectors)))
+    system = daily.load_prompt("morning_tags_system",
+                               "你是量化资讯编辑,只输出严格 JSON。")
+    print(f"解读标签: {len(items)} 条正文条目 / 送模型 {len(user)} 字 ...")
+    raw = llm_complete(user, system=system, max_tokens=4000, temperature=0.2)
+    parsed, err = _parse_tags(raw, sectors, items)
+    if err:
+        print(f"⚠ JSON 校验失败({err}), 重试一次 ...")
+        raw = llm_complete(user, system=system, max_tokens=4000, temperature=0.2)
+        parsed, err = _parse_tags(raw, sectors, items)
+    if err:
+        print(f"⚠ 解读标签失败({err}), 降级发布无解读版")
+        return {"tagged_path": article_p, "tag_error": err}
+
+    tagged, report = _render_tags(article, items, ann_zone, parsed, sectors)
+    # 备份无解读原稿 + 覆盖待发版
+    raw_backup = wf.run_dir / f"article-raw-{wf.date}.md"
+    raw_backup.write_text(article, encoding="utf-8")
+    Path(article_p).write_text(tagged, encoding="utf-8")
+    (wf.run_dir / f"tag-{wf.date}.json").write_text(
+        json.dumps({"items": parsed, "lint": report}, ensure_ascii=False, indent=2),
+        encoding="utf-8")
+    print(f"解读标签: {report['tagged']}/{len(items)} 条已标注 | 公告汇总: {report['ann_summary'] or '无'}")
+    if report["fail"]:
+        sys.exit(f"解读标签机检未过: {report['fail']}")
+    return {"tagged_path": article_p, "tags_path": str(wf.run_dir / f"tag-{wf.date}.json"),
+            "tag_report": report}
+
+
+def _index_items(article: str):
+    """给正文六分类条目编号。返回 ([{n,line,tag,text}], 公告区条目n列表)。"""
+    items, ann = [], []
+    zone = None
+    for i, line in enumerate(article.splitlines()):
+        m = re.match(r"^## (.+)", line)
+        if m:
+            zone = m.group(1).strip()
+            continue
+        m = re.match(r"^- \*\*([^*]+)\*\*：(.*)", line)
+        if m and zone and zone != "今日焦点":
+            n = len(items) + 1
+            items.append({"n": n, "line": i, "tag": m.group(1), "text": m.group(2)})
+            if zone == "公司公告":
+                ann.append(n)
+    return items, ann
+
+
+def _parse_tags(raw: str, sectors: list, items: list):
+    """解析+硬校验 LLM JSON。返回 (清理后的 items 映射, 错误)。"""
+    import json as _j
+    raw = raw.strip()
+    m = re.search(r"\{.*\}", raw, re.S)            # 容错: 剥多余文本
+    if not m:
+        return None, "输出里没有 JSON"
+    try:
+        data = _j.loads(m.group(0))
+    except Exception as e:
+        return None, f"JSON 解析失败: {e}"
+    valid_n = {it["n"] for it in items}
+    secset, out = set(sectors), {}
+    for o in data.get("items") or []:
+        n = o.get("n")
+        if not isinstance(n, int) or n not in valid_n:
+            continue                                  # 越界编号直接丢弃
+        dirs = []
+        for d in o.get("dirs") or []:
+            key = d.get("d")
+            ss = [x for x in (d.get("s") or []) if x in secset]
+            if key in DIRECTIONS and ss:
+                dirs.append({"d": key, "s": ss[:3]})
+        if dirs:
+            out[n] = dirs
+    if not out:
+        return None, "无有效条目"
+    return out, ""
+
+
+def _render_tags(article: str, items: list, ann_zone: list,
+                 parsed: dict, sectors: list):
+    """渲染插行(构造性保证格式)。免标规则在此代码侧兜底过滤。"""
+    lines = article.splitlines()
+    by_tag = {it["n"]: it for it in items}
+    fail, warn = [], []
+    inserts = {}          # line_idx -> [解读行...]
+    used_dirs = []
+    ann_sector_count = {}
+    for n, dirs in sorted(parsed.items()):
+        it = by_tag[n]
+        # 免标兜底: 行情条/传闻条不给方向; 地缘条只允许降格词
+        if it["tag"] == "行情":
+            warn.append(f"#{n} 行情条被过滤"); continue
+        if re.search(r"据报|被曝|据报道|消息人士", it["text"]):
+            warn.append(f"#{n} 传闻条被过滤"); continue
+        if it["tag"] == "地缘":
+            dirs = [d for d in dirs if d["d"] in ("中性", "承压", "关注")] or None
+            if dirs is None:
+                continue
+        if it["n"] in ann_zone:
+            for d in dirs:                            # 公告条: 收热度, 非中性才逐条渲染
+                for s in d["s"]:
+                    ann_sector_count[s] = ann_sector_count.get(s, 0) + 1
+                if d["d"] == "中性":
+                    dirs = [x for x in dirs if x["d"] != "中性"]
+            if not dirs:
+                continue
+        rows = [f"  ↳ {d['d']}：{'、'.join(d['s'])}" for d in dirs
+                if d["d"] in DIRECTIONS]
+        if rows:
+            inserts.setdefault(it["line"], []).extend(rows)
+            used_dirs.extend(d["d"] for d in dirs)
+    # 公告区汇总行: 插在公告区最后一条(含其解读行)之后
+    if ann_sector_count:
+        top = sorted(ann_sector_count.items(), key=lambda x: -x[1])[:6]
+        summary = "、".join(f"{s}×{c}" for s, c in top)
+        last_ann = max(by_tag[n]["line"] for n in ann_zone if n in by_tag)
+        inserts.setdefault(last_ann, []).append(f"  ↳ 今日公告热度：{summary}")
+    # 免责升级: 覆盖板块方向归类(合规配套)
+    for i in range(len(lines) - 1, -1, -1):
+        if "投资建议" in lines[i]:
+            lines[i] = ("本文基于公开信息整理,板块影响标注仅为对消息面的客观归类,"
+                        "不代表对任何证券或板块走势的预测,不构成投资建议。"
+                        "市场有风险,投资需谨慎。")
+            break
+    # 倒序插行
+    for idx in sorted(inserts, reverse=True):
+        lines[idx + 1:idx + 1] = inserts[idx]
+    # 比例监控
+    n_dir = len([d for d in used_dirs if d in ("利好", "利空")])
+    if n_dir:
+        bull = used_dirs.count("利好") / n_dir
+        if bull > 0.8 or bull < 0.3:
+            warn.append(f"方向比例失衡: 利好占 {bull:.0%}, 请人工复核")
+    report = {"tagged": len(inserts), "fail": fail, "warn": warn,
+              "ann_summary": "、".join(f"{s}×{c}" for s, c in
+                                       sorted(ann_sector_count.items(), key=lambda x: -x[1])[:4])}
+    return chr(10).join(lines) + chr(10), report
 
 
 # ---------- 校验与机检 ----------

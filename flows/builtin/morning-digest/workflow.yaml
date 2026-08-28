@@ -1,12 +1,13 @@
 id: morning-digest
 title: 早报汇总(四源合成)
 description: 抓取财联社有声早报/华尔街见闻早餐/富途早报/元宝Gangtise四份早报 → 汇总分类成知识素材 → 按产出形式渲染(文章等)
-version: 1.1.0
+version: 1.2.0
 
 params:
   format: article         # 产出形式: article=渲染早报文章(成品进待发队列) / material=只要知识素材
   wscn_count: 2           # 华尔街见闻早餐取几篇(通常当天1篇)
   per_report_chars: 6000  # 每份早报送入模型的最大字数
+  tag_lines: true         # 解读标签开关(板块×方向, 失败自动降级)
 
 steps:
   - id: fetch                    # 四源抓取(免 LLM, gangtise 失败自动元宝兜底)
@@ -15,7 +16,11 @@ steps:
   - id: synth                    # LLM 汇总分类 → 知识素材(存档, 不进队列)
     uses: synthesize_morning
     with: {per_report_chars: "{params.per_report_chars}"}
-  - id: article                  # 素材 → 早报文章(精炼+去来源标注, 进待发队列)  ← 审核点
+  - id: article                  # 素材 → 早报文章(标签:详情格式, 进待发队列)
     uses: render_morning_article
     when: "{params.format}"
+  - id: tag                      # 文章 → 逐条解读标签(板块×方向)+公告热度汇总  ← 审核点(最终产物)
+    uses: tag_morning_items
+    when: "{params.format}"
+    with: {enabled: "{params.tag_lines}"}
     review: true
