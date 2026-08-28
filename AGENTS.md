@@ -15,7 +15,9 @@
 | 命令 | 作用 | 副作用 |
 |---|---|---|
 | `python cli.py doctor [--json]` | 环境体检（密钥/浏览器/队列/账本） | 无 |
-| `python cli.py gen <args>` | 生成模块透传（`workflows`/`run <wf> --auto`/`daily`/`morning`/`fetch`/`llm-status`） | `run` 会调 LLM |
+| `python cli.py sources list/check/fetch <id>` | 来源库（12 源+健康+缓存） | `check/fetch` 会请求外网 |
+| `python cli.py flows list/lint/run <wf>/status/new/export/import` | 生成工作流（断点续跑/审核挂起 exit 2） | `run` 会调 LLM |
+| `python cli.py gen <args>` | 生成模块透传（旧入口，等价 flows） | `run` 会调 LLM |
 | `python cli.py publish status [--json]` | 待发队列 + 发布账本 | 无 |
 | `python cli.py publish login [plat]` | 一键登录平台 | 弹浏览器等人工扫码 |
 | `python cli.py publish run [--draft ...]` | 发全部启用平台 | **真发**！必须先 `--draft` |
@@ -39,7 +41,9 @@ docs/                  方案与操作手册
 | 文件 | 语义 | 谁写 |
 |---|---|---|
 | `autopub/state.json` | 发布账本：`published/failed/uncertain`。**agent 只读**；`uncertain` = 已点发布未确认，禁止自动重试，须人工到平台后台核实 | autopub 写 |
-| `generator/output/workflows/<流>/<日期>/` | 工作流步骤存档（存在即跳过=断点续跑） | 引擎写 |
+| `data/runs/<流>/<日期>/run.json` | 工作流状态机（done/waiting_review/stopped + 产物清单） | 引擎写 |
+| `data/health/sources-health.json` | 来源健康（dead 自动跳过） | 来源库写 |
+| `generator/output/workflows/<流>/<日期>/` | 旧引擎步骤存档（flows 新引擎在 data/runs） | 引擎写 |
 | `autopub/articles/` | 待发队列（md/docx），发完全平台自动归档 `_done/` | 人/生成写 |
 | `generator/output/` | 生成产物（文章/口播/长图/daily JSON） | 生成写 |
 

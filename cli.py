@@ -262,6 +262,33 @@ def flows_cmd(args) -> int:
             return int(e.code) if isinstance(e.code, int) else EXIT_FAIL
         return EXIT_OK
 
+    if args.sub == "export":
+        from flows.engine import export_flow
+        try:
+            export_flow(args.name, args.out or f"{args.name}.zip")
+            return EXIT_OK
+        except SystemExit as e:
+            print(e, file=sys.stderr)
+            return EXIT_CONFIG
+
+    if args.sub == "import":
+        from flows.engine import import_flow
+        try:
+            import_flow(args.zip_path, rename=args.rename)
+            return EXIT_OK
+        except SystemExit as e:
+            print(e, file=sys.stderr)
+            return EXIT_FAIL
+
+    if args.sub == "new":
+        from flows.engine import new_flow
+        try:
+            new_flow(args.from_name, args.new_name)
+            return EXIT_OK
+        except SystemExit as e:
+            print(e, file=sys.stderr)
+            return EXIT_CONFIG
+
     if args.sub == "status":
         import json as _j
         date = args.date
@@ -336,6 +363,15 @@ def main() -> int:
         pf_r.add_argument(a, **kw)
     pf_r.add_argument("--set", action="append", default=[], metavar="k=v", help="覆盖参数(可多次)")
     pf_r.add_argument("name", help="工作流名(flows list 可查)")
+    pf_e = fsub.add_parser("export", help="导出工作流包为 zip(分享给同事)")
+    pf_e.add_argument("name")
+    pf_e.add_argument("-o", "--out", default=None, help="输出 zip 路径(默认 <名>.zip)")
+    pf_x = fsub.add_parser("import", help="导入工作流包 zip")
+    pf_x.add_argument("zip_path")
+    pf_x.add_argument("--rename", default=None, help="安装为指定包名")
+    pf_n = fsub.add_parser("new", help="复制现有包为自定义起点")
+    pf_n.add_argument("new_name")
+    pf_n.add_argument("--from", dest="from_name", default="morning-paper")
     pf_s = fsub.add_parser("status", help="运行状态(读 run.json)")
     pf_s.add_argument("name")
     pf_s.add_argument("--date", default=None)

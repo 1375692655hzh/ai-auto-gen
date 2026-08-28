@@ -59,20 +59,43 @@ def _ngrams(s: str, size: int, step: int = 4):
     return [s[i:i + size] for i in range(0, max(1, len(s) - size + 1), step)]
 
 
-# ---------- 第 2 步:LLM 精排 ----------
+# ---------- 提示词外置(P3): flows/prompts/<名>.md 或工作流包内 prompts/<名>.md 可覆盖 ----------
+
+PROMPTS = {}          # 显式注入优先(工作流包在运行前注入)
+from pathlib import Path as _P
+PROMPT_DIR = _P(__file__).resolve().parent.parent / "flows" / "prompts"
+
+
+def load_prompt(name: str, default: str = "") -> str:
+    if name in PROMPTS:
+        return PROMPTS[name]
+    f = PROMPT_DIR / f"{name}.md"
+    if f.exists():
+        return f.read_text(encoding="utf-8")
+    return default
+
+
+# ---------- 第 2 步:LLM 精选 ----------
 
 def rank_items(items: list, want: int) -> list:
     feed = "\n".join(f"#{i} [{it['time']}](x{it['cross_hits']}) {it['text'][:120]}"
                      for i, it in enumerate(items))
-    raw = llm_complete(
-        f"今天是 {today()}。以下是从快讯池粗筛后的条目((xN)表示有几个来源同时报道):\n\n{feed}\n\n"
+    tpl = load_prompt("rank_user")
+    if tpl:
+        user = (tpl.replace("<<DATE>>", today()).replace("<<FEED>>", feed)
+                .replace("<<WANT>>", str(want)))
+    else:
+        user = f"今天是 {today()}。以下是从快讯池粗筛后的条目((xN)表示有几个来源同时报道):\n\n{feed}\n\n"
         f"请选出最重要的 {want} 条,输出 JSON 数组,每项:\n"
         '{{"id": 编号, "score": 0-10重要性, "category": "宏观政策|公司动态|行业产业|海外市场|大宗商品", '
         '"title": "一行式标题(≤22字)", "reason": "入选理由一句话"}}\n'
         "筛选标准:影响面大(全市场/行业级优先)、主体量级大(权重股/巨头/部委优先)、"
         "关注度高(多源报道优先)、与A股关联紧密、有详情可展开。"
-        f"配额约束:宏观政策≥2条、海外市场≥2条、同一行业相关≤4条。排序按 score 降序。",
-        system="你是财经内容主编,只输出 JSON 数组,不加解释。", max_tokens=3000,
+        f"配额约束:宏观政策≥2条、海外市场≥2条、同一行业相关≤4条。排序按 score 降序。"
+    raw = llm_complete(
+        user,
+        system=load_prompt("rank_system", "你是财经内容主编,只输出 JSON 数组,不加解释。"),
+        max_tokens=3000,
     )
     ranked = parse_llm_list(raw)
     if not ranked:
@@ -160,7 +183,7 @@ def expand_item(item: dict, ev: dict) -> dict:
         ' "sectors": ["从候选里选0-3个"], "concepts": ["从候选里选0-3个"],\n'
         ' "direction": "利好|利空|中性", "impact": "一句话解读(≤40字,如:利好固态电池产业链短期情绪)"}\n'
         f"候选板块/概念(只能从中选,没有合适的给空数组):{concept_list}",
-        system=SYS_EXPAND, max_tokens=3000,
+        system=load_prompt("expand", SYS_EXPAND), max_tokens=3000,
     )
     m = re.search(r"\{.*\}", raw, re.DOTALL)
     if not m:
@@ -202,7 +225,7 @@ def gen_voiceovers(entries: list) -> None:
         f"今天是 {today()},共 {len(entries)} 条。逐条口播词 60-90 字(约15秒/条):\n"
         + "\n".join(lines)
         + '\n\n输出 JSON 数组:[{"id": 1, "text": "口播词"}]。串场词要有变化,分类切换时用"接下来看海外市场"这类过渡。',
-        system=SYS_VOICE, max_tokens=4000,
+        system=load_prompt("voice", SYS_VOICE), max_tokens=4000,
     )
     vo = {v.get("id"): v.get("text", "") for v in parse_llm_list(raw)}
     for i, e in enumerate(entries):
@@ -217,8 +240,8 @@ def gen_voiceovers(entries: list) -> None:
 
 # ---------- 第 6 步:组装输出 ----------
 
-def build_md(entries: list, refs: list) -> str:
-    L = [f"# AI财经日报 | {today()}", "", "## 今日概览", ""]
+def build_md(entries: list, refs: list, date: str | None = None) -> str:
+    L = [f"# AI财经日报 | {date or today()}", "", "## 今日概览", ""]
     for i, e in enumerate(entries, 1):
         L.append(f"{i}. **[{e['category']}]** {e['title']}")
     L.append("\n---\n")

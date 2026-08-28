@@ -44,6 +44,32 @@ CAT_COLORS = {  # 分类主题色(RGB)
 }
 DEFAULT_COLOR = (60, 60, 67)
 
+# ---------- 图片模板外置(P3): flows/templates/image/morning-card.yaml 或工作流包注入 ----------
+IMG_TMPL = {}          # 工作流包运行前注入(优先)
+_TMPL_FILE = Path(__file__).resolve().parent.parent / "flows" / "templates" / "image" / "morning-card.yaml"
+
+
+def _load_img_tmpl() -> dict:
+    """图片版式参数: title/subtitle/footer/cat_colors。包注入 > 模板文件 > 内置默认。"""
+    t = dict(IMG_TMPL)
+    if not t and _TMPL_FILE.exists():
+        try:
+            import yaml
+            t = yaml.safe_load(_TMPL_FILE.read_text(encoding="utf-8")) or {}
+        except Exception:
+            t = {}
+    t.setdefault("title", "AI 财经早报")
+    t.setdefault("subtitle", "{date} · 今日 {n} 条要闻")
+    t.setdefault("footer1", "内容基于公开信息由 AI 整理，不构成投资建议")
+    t.setdefault("footer2", "AI财经日报 · 每天几分钟看懂财经")
+    colors = t.get("cat_colors") or {}
+    out_colors = {}
+    for k, v in colors.items():
+        if isinstance(v, (list, tuple)) and len(v) == 3:
+            out_colors[k] = tuple(v)
+    t["_colors"] = out_colors
+    return t
+
 
 # ---------- ② 群发模板(固定格式,直接可发微信群/QQ群) ----------
 
@@ -206,8 +232,12 @@ def render_long_image(entries: list, date: str | None = None, extras: dict | Non
 
     # 头部
     d.rectangle([0, 0, W, head_h], fill=(17, 34, 64))
-    d.text((PAD, 56), "AI 财经早报", font=_font(64, True), fill=(255, 255, 255))
-    d.text((PAD, 152), f"{date} · 今日 {len(entries)} 条要闻", font=_font(36), fill=(185, 200, 225))
+    _tmpl = _load_img_tmpl()
+    if _tmpl["_colors"]:
+        CAT_COLORS.update(_tmpl["_colors"])
+    d.text((PAD, 56), _tmpl["title"], font=_font(64, True), fill=(255, 255, 255))
+    d.text((PAD, 152), _tmpl["subtitle"].format(date=date, n=len(entries)),
+           font=_font(36), fill=(185, 200, 225))
     for i, ln in enumerate(top3_lines):
         d.text((PAD, 240 + i * 44), ln, font=_font(30), fill=(150, 172, 205))
 
@@ -249,10 +279,8 @@ def render_long_image(entries: list, date: str | None = None, extras: dict | Non
         y += h + 24
 
     # 尾部
-    d.text((PAD, H - foot_h + 30), "内容基于公开信息由 AI 整理，不构成投资建议",
-           font=_font(28), fill=(130, 130, 138))
-    d.text((PAD, H - foot_h + 80), "AI财经日报 · 每天几分钟看懂财经",
-           font=_font(28, True), fill=(17, 34, 64))
+    d.text((PAD, H - foot_h + 30), _tmpl["footer1"], font=_font(28), fill=(130, 130, 138))
+    d.text((PAD, H - foot_h + 80), _tmpl["footer2"], font=_font(28, True), fill=(17, 34, 64))
     img.save(out_path)
     return out_path
 

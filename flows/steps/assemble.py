@@ -11,7 +11,7 @@ def assemble_daily(ctx, wf, params):
     import daily
     from common import out_dir, save_text, GEN_ROOT
     entries, date = ctx["entries"], wf.date
-    md = daily.build_md(entries, ctx.get("refs", []))
+    md = daily.build_md(entries, ctx.get("refs", []), date=date)
     md_path = save_text(out_dir("articles_dir") / f"AI财经日报-{date}.md", md)
 
     voice_path = None

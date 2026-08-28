@@ -156,7 +156,36 @@ class YamlWorkflow(WorkflowBase):
     def _on_review_pause(self, step_name: str) -> None:
         self._write_run("waiting_review", f"审核点 {step_name} 等待人工确认(改产物后重跑续跑)")
 
+    def _inject_pack_prompts(self) -> None:
+        """包内 prompts/*.md 覆盖全局提示词(文件名=提示词名, 如 rank_user.md)。"""
+        pdir = self.pack_dir / "prompts"
+        if not pdir.exists():
+            return
+        try:
+            import daily
+            for f in sorted(pdir.glob("*.md")):
+                daily.PROMPTS[f.stem] = f.read_text(encoding="utf-8")
+                print(f"[{self.name}] 提示词覆盖: {f.stem}")
+        except Exception as e:
+            print(f"⚠ 提示词注入失败(忽略): {e}")
+
+    def _inject_pack_templates(self) -> None:
+        """包内 templates/image/*.yaml 覆盖图片版式参数。"""
+        tdir = self.pack_dir / "templates" / "image"
+        if not tdir.exists():
+            return
+        try:
+            import formats
+            import yaml
+            for f in sorted(tdir.glob("*.yaml")):
+                formats.IMG_TMPL.update(yaml.safe_load(f.read_text(encoding="utf-8")) or {})
+                print(f"[{self.name}] 图片模板覆盖: {f.name}")
+        except Exception as e:
+            print(f"⚠ 图片模板注入失败(忽略): {e}")
+
     def run(self, auto=False, from_step=None, fresh=False, only=None):
+        self._inject_pack_prompts()
+        self._inject_pack_templates()
         try:
             ctx = super().run(auto=auto, from_step=from_step, fresh=fresh, only=only)
         except SystemExit as e:
@@ -165,6 +194,74 @@ class YamlWorkflow(WorkflowBase):
             raise
         self._write_run("done")
         return ctx
+
+
+# ---------- 工作流包导入/导出/复制 ----------
+
+def export_flow(name: str, out_zip: str | Path) -> Path:
+    """把工作流包打成 zip(只含定义与模板, 绝不含产物/密钥)。"""
+    import zipfile
+    packs = discover()
+    if name not in packs:
+        raise SystemExit(f"未知工作流: {name}")
+    src = packs[name]
+    out = Path(out_zip)
+    with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as z:
+        for f in sorted(src.rglob("*")):
+            if f.is_file() and "output" not in f.parts and f.suffix != ".pyc":
+                z.write(f, f.relative_to(src.parent))
+    print(f"已导出: {out} ({sum(1 for _ in zipfile.ZipFile(out).namelist())} 个文件)")
+    return out
+
+
+def import_flow(zip_path: str | Path, rename: str | None = None) -> str:
+    """导入工作流包 zip → flows/imports/<包名>。第一版包只含 YAML/模板/提示词, 无代码执行。"""
+    import zipfile
+    zp = Path(zip_path)
+    if not zp.exists():
+        raise SystemExit(f"文件不存在: {zp}")
+    with zipfile.ZipFile(zp) as z:
+        names = [n for n in z.namelist() if not n.endswith("/")]
+        # zip 内顶层目录 = 包名
+        top = sorted({n.split("/")[0] for n in names})
+        if len(top) != 1:
+            raise SystemExit(f"zip 里应有且只有一个包目录, 实际: {top}")
+        pkg_name = rename or top[0]
+        dst = FLOWS_ROOT / "imports" / pkg_name
+        if dst.exists():
+            raise SystemExit(f"已存在同名包: {dst} (可 import --rename 换名)")
+        code_files = [n for n in names if n.endswith(".py")]
+        if code_files:
+            raise SystemExit(f"包内含 Python 代码({code_files}), 当前引擎不支持导入可执行代码, 拒绝安装")
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        z.extractall(dst.parent)
+        if rename:
+            (FLOWS_ROOT / "imports" / top[0]).rename(dst)
+    errs = lint(dst)
+    if errs:
+        print("⚠ 导入后 lint 未过(包可能不兼容当前引擎):")
+        for e in errs:
+            print(f"  - {e}")
+    else:
+        print(f"✅ 已导入: {pkg_name} (cli flows run {pkg_name})")
+    return pkg_name
+
+
+def new_flow(from_name: str, new_name: str) -> Path:
+    """复制现有包为自定义起点(改 id, 不动原件)。"""
+    import shutil
+    packs = discover()
+    if from_name not in packs:
+        raise SystemExit(f"未知工作流: {from_name}")
+    dst = FLOWS_ROOT / "imports" / new_name
+    if dst.exists():
+        raise SystemExit(f"已存在: {dst}")
+    shutil.copytree(packs[from_name], dst)
+    wf = dst / "workflow.yaml"
+    wf.write_text(wf.read_text(encoding="utf-8").replace(
+        f"id: {from_name}", f"id: {new_name}"), encoding="utf-8")
+    print(f"✅ 已创建: {dst} (从 {from_name} 复制, 可随意改 prompts/templates/workflow.yaml)")
+    return dst
 
 
 def run_flow(name: str, date=None, auto=False, from_step=None, fresh=False,
