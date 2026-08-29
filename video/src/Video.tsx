@@ -44,11 +44,15 @@ export const Video: React.FC = () => {
 				}
 				return (
 					<Sequence key={frame.id} from={from} durationInFrames={frame.durationInFrames} name={frame.id}>
-						{frame.audio ? <Audio src={staticFile(frame.audio)} /> : null}
+						{frame.audio ? (
+							<Sequence from={frame.leadFrames ?? 0}>
+								<Audio src={staticFile(frame.audio)} />
+							</Sequence>
+						) : null}
 						<Comp
 							scene={ACTIVE.story.scenes[index]}
 							duration={frame.durationInFrames}
-							caption={frame.caption}
+							caption={frame.cues ?? frame.caption}
 						/>
 					</Sequence>
 				);

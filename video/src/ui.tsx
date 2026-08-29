@@ -7,6 +7,7 @@ import {
 	useCurrentFrame,
 	useVideoConfig,
 } from "remotion";
+import type { CaptionCue } from "./story-types";
 import type { ColorKey, Rich as RichParts } from "./story-types";
 
 export const COLORS = {
@@ -104,10 +105,13 @@ export const Backdrop: React.FC = () => {
 export const SceneShell: React.FC<{
 	children: React.ReactNode;
 	duration: number;
-	caption?: string;
+	caption?: string | CaptionCue[] | null;
 	padding?: number;
 }> = ({ children, duration, caption, padding = 90 }) => {
 	const frame = useCurrentFrame();
+	const captionText = Array.isArray(caption)
+		? (caption.find((c) => frame >= c.start && frame < c.end) ?? caption[caption.length - 1])?.t ?? ""
+		: caption;
 	const fade = interpolate(
 		frame,
 		[0, 10, duration - 10, duration],
@@ -121,13 +125,13 @@ export const SceneShell: React.FC<{
 				paddingTop: padding,
 				paddingLeft: padding,
 				paddingRight: padding,
-				paddingBottom: caption ? 200 : padding,
+				paddingBottom: captionText ? 200 : padding,
 				fontFamily: FONT,
 				color: COLORS.text,
 			}}
 		>
 			{children}
-			{caption ? (
+			{captionText ? (
 				<div
 					style={{
 						position: "absolute",
@@ -150,7 +154,7 @@ export const SceneShell: React.FC<{
 							textAlign: "center",
 						}}
 					>
-						{caption}
+						{captionText}
 					</div>
 				</div>
 			) : null}

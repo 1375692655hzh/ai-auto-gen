@@ -90,6 +90,12 @@ export interface CardsData {
 	question?: Rich;
 }
 
+export interface CaptionCue {
+	t: string;
+	start: number;
+	end: number;
+}
+
 export interface StatData {
 	value: string;
 	unit?: string;
@@ -145,6 +151,7 @@ export interface StoryScene {
 	template: string;
 	narration: string;
 	caption?: string;
+	captions?: CaptionCue[];
 	data: Record<string, unknown>;
 }
 
@@ -174,5 +181,5 @@ export interface Story {
 export interface SceneProps {
 	scene: StoryScene;
 	duration: number;
-	caption: string;
+	caption: string | CaptionCue[] | null | undefined;
 }

@@ -239,7 +239,7 @@ export const ConclusionTpl: React.FC<SceneProps> = ({ scene, duration, caption }
 export const EnrichedRowsTpl: React.FC<SceneProps> = ({ scene, duration, caption }) => {
 	const d = scene.data as unknown as RowsData;
 	const ent = d.entrances ?? {};
-	const at = (k: string, i: number) => ent[k] ?? 26 + i * 26;
+	const at = (k: string, i: number) => ent[k] ?? 2 + i * 3;
 	const tags = d.tags ?? [];
 	return (
 		<SceneShell duration={duration} caption={caption}>

@@ -15,8 +15,20 @@ from flows.steps import step
 
 FPS = 30
 SPEED = 4.2          # 与 script.py/build.mjs 同口径
+LEAD_S = 0.7         # 音频前置静默: 语音开始时动画已展开(与 build.mjs 一致)
 ROW_ACCENTS = {"背景": "blue", "进展": "green", "影响": "amber", "展望": "purple",
                "详情": "blue", "指标": "red"}
+
+
+def _cues(text: str) -> list:
+    """口播正文 → 同步字幕轨(按句切, 起止帧按字数比例, +前置静默偏移)。"""
+    parts = [p for p in re.split(r"(?<=[。；！？])", text) if p.strip()]
+    cues, cum, lead = [], 0, int(LEAD_S * FPS)
+    for p in parts:
+        start = lead + int(cum / SPEED * FPS)
+        cum += len(p)
+        cues.append({"t": p, "start": start, "end": lead + int(cum / SPEED * FPS)})
+    return cues
 
 
 @step("render_video")
@@ -137,34 +149,28 @@ def _build_story(intro, outro, blocks, date: str) -> dict:
     vt = f"{_cut(blocks[0]['headline'], 22)}【财经早报】"
     scenes = [{
         "id": "opening", "template": "title",
-        "narration": intro, "caption": vt,
+        "narration": intro, "caption": "", "captions": _cues(intro),
         "data": {"kicker": "财经早报", "kickerColor": "blue",
                  "titlePre": vt.replace("【财经早报】", ""),
                  "subtitle1": _r(f"今日 {len(blocks)} 条要闻", True),
                  "subtitle2": _r(f"重点关注:{' / '.join(b['headline'] for b in blocks[:3])}")},
     }]
     for i, b in enumerate(blocks, 1):
-        # 画面结构: 概括区 + 指标行也进 rows(口播叙事流), stat 卡另立视觉锤
         rows = []
         for l in b["lines"]:
             rows.append({"accent": ROW_ACCENTS.get(l["label"], "blue"),
                          "label": _r(l["label"], True), "body": _r(l["text"])})
-        # 入场时刻(帧): 按累计字数÷语速推算, 念到哪行亮哪行(-0.4s 偏置让行略早)
-        ent = {}
-        cum = 4 + len(b["headline"]) // 2                    # "第N条," + 标题带入口播头
-        if b["summary"]:
-            ent["summary"] = max(10, int(cum / SPEED * FPS - 0.4 * FPS))
-            cum += len(b["summary"])
-        if b["stat"]:
-            ent["stat"] = max(10, int(cum / SPEED * FPS - 0.4 * FPS))
-        for j, l in enumerate(b["lines"]):
-            ent[f"row{j}"] = max(10, int(cum / SPEED * FPS - 0.4 * FPS))
-            cum += len(l["text"])
-        ent["tags"] = max(10, int(cum / SPEED * FPS))
+        narr = f"第{i}条,{b['summary']}{''.join(l['text'] for l in b['lines'])}"
+        # 动画全部在前置静默(0.7s=21帧)内展开: 语音起播时画面已就位
+        ent = {"summary": 4, "stat": 6}
+        for j in range(len(rows)):
+            ent[f"row{j}"] = 7 + int(j * 1.2)
+        ent["tags"] = 9 + int(len(rows) * 1.2)
         scenes.append({
             "id": f"news-{i:02d}", "template": "rows",
-            "narration": f"第{i}条,{b['summary']}{''.join(l['text'] for l in b['lines'])}",
+            "narration": narr,
             "caption": "",
+            "captions": _cues(narr),
             "data": {"kicker": b["kicker"], "headline": _r(b["headline"], True),
                      "summary": _r(b["summary"]) if b["summary"] else None,
                      "stat": b["stat"], "tags": b.get("sectors") or [],
@@ -172,7 +178,7 @@ def _build_story(intro, outro, blocks, date: str) -> dict:
         })
     scenes.append({
         "id": "closing", "template": "conclusion",
-        "narration": outro, "caption": "关注不迷路",
+        "narration": outro, "caption": "", "captions": _cues(outro),
         "data": {"kicker": "免责声明",
                  "statements": [{"who": "风险提示", "body": _r("内容基于公开信息整理, 不构成任何投资建议")}],
                  "tagline": _r("每天几分钟, 看懂财经", True)},

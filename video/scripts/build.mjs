@@ -65,6 +65,7 @@ if (project.status !== "reviewed" && !FORCE && !ESTIMATE) {
 const meta = story.meta;
 const fps = meta.fps ?? 30;
 const pad = meta.padSeconds ?? 0.8;
+const LEAD_S = 0.7;                    // 音频前置静默: 语音开始时画面动画已展开
 const audioDir = path.join(projDir, "audio");
 mkdirSync(audioDir, { recursive: true });
 
@@ -190,12 +191,14 @@ for (const s of story.scenes) {
 		dur = probeDuration(file);
 		audio = `audio/${s.id}.mp3`;
 	}
-	const f = Math.ceil((dur + pad) * fps);
+	const f = Math.ceil((dur + pad + LEAD_S) * fps);
 	frames.push({
 		id: s.id,
 		template: s.template,
 		audio,
-		caption: s.caption ?? s.narration,
+		caption: s.caption ?? null,
+		cues: s.captions ?? null,          // 同步字幕轨(帧级起止)
+		leadFrames: Math.round(LEAD_S * fps),
 		audioDuration: Number(dur.toFixed(3)),
 		durationInFrames: f,
 	});
@@ -215,7 +218,9 @@ export interface ActiveFrame {
 	id: string;
 	template: string;
 	audio: string | null;
-	caption: string;
+	caption: string | null;
+	cues?: { t: string; start: number; end: number }[] | null;
+	leadFrames?: number;
 	audioDuration: number;
 	durationInFrames: number;
 }
