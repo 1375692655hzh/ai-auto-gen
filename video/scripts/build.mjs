@@ -7,7 +7,8 @@
 import msedgeTtsPkg from "msedge-tts";
 const { MsEdgeTTS, OUTPUT_FORMAT } = msedgeTtsPkg;
 import { execFileSync } from "node:child_process";
-import { existsSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync, mkdirSync, rmSync } from "node:fs";
+import { createHash } from "node:crypto";
 import path from "node:path";
 
 const COMPOSITOR_PKG = {
@@ -133,9 +134,20 @@ async function synth(text, outFile) {
 
 if (!ESTIMATE) {
 	console.log(`TTS 引擎: ${ttsConf.engine} · 音色 ${ttsConf.voice}`);
+	// 音频缓存清单: {sceneId: narration哈希}, 文本变了只重合成变的场景
+	const manifestPath = path.join(audioDir, "manifest.json");
+	const manifest = existsSync(manifestPath)
+		? JSON.parse(readFileSync(manifestPath, "utf-8"))
+		: {};
 	let synthesized = 0;
 	for (const s of story.scenes) {
 		const outFile = path.join(audioDir, `${s.id}.mp3`);
+		// 音频缓存按 narration 内容哈希失效: 改稿后复用旧音频会音画错位
+		const hash = createHash("sha1").update(s.narration).digest("hex").slice(0, 10);
+		if (existsSync(outFile) && manifest[s.id] !== hash) {
+			rmSync(outFile);
+			console.log(`文本已改, 旧音频失效: ${s.id}`);
+		}
 		if (!existsSync(outFile)) {
 			process.stdout.write(`合成语音: ${s.id} ... `);
 			if (await synth(s.narration, outFile)) {
@@ -146,7 +158,9 @@ if (!ESTIMATE) {
 				process.exit(1);
 			}
 		}
+		manifest[s.id] = hash;
 	}
+	writeFileSync(manifestPath, JSON.stringify(manifest, null, 2));
 	if (synthesized === 0) console.log("语音已全部存在，跳过 TTS");
 }
 
