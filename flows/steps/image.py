@@ -34,8 +34,10 @@ def _fetch_indices() -> list:
             intraday = wd < 5 and 9.5 <= h < 15
         elif group == "美股":                       # 夏令时口径(冬令时顺延1h, 仅影响凌晨窗口)
             intraday = wd < 5 and (h >= 21.5 or h < 4.5)
-        else:                                       # 日韩
+        else:                                       # 日韩(北京08:00开盘): 08:30跑批=今晨开盘方向
             intraday = wd < 5 and 8.0 <= h < 15
+        if group == "日韩":
+            return "日韩·今晨" if intraday else "日韩·昨收"
         return f"{group}·盘中" if intraday else f"{group}·昨收"
 
     try:
