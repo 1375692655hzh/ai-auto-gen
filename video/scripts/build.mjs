@@ -69,7 +69,7 @@ mkdirSync(audioDir, { recursive: true });
 
 /* ---- TTS：补齐缺失音频 ---- */
 
-/** 引擎一：Edge TTS（免费，voice 如 zh-CN-YunxiNeural） */
+/** 引擎一：Edge TTS（免费，voice 如 zh-CN-XiaoxiaoNeural） */
 async function synthEdge(text, voice, outFile) {
 	const tts = new MsEdgeTTS();
 	await tts.setMetadata(voice, OUTPUT_FORMAT.AUDIO_24KHZ_48KBITRATE_MONO_MP3);
@@ -112,7 +112,7 @@ async function synthDashscope(text, voice, outFile) {
 const ttsConf =
 	story.meta.tts && story.meta.tts.provider === "dashscope"
 		? { engine: "dashscope", voice: story.meta.tts.voice ?? "longanlufeng" }
-		: { engine: "edge", voice: story.meta.voice ?? "zh-CN-YunxiNeural" };
+		: { engine: "edge", voice: story.meta.voice ?? "zh-CN-XiaoxiaoNeural" };
 
 async function synth(text, outFile) {
 	for (let attempt = 1; attempt <= 8; attempt++) {

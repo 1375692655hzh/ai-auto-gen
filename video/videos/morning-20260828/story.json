@@ -1,0 +1,559 @@
+{
+  "meta": {
+    "title": "特朗普政府无意重启6月协议【财经早报】",
+    "voice": "zh-CN-XiaoxiaoNeural",
+    "fps": 30,
+    "width": 1920,
+    "height": 1080,
+    "padSeconds": 0.8
+  },
+  "scenes": [
+    {
+      "id": "opening",
+      "template": "title",
+      "narration": "早上好,今天是8月28日,财经早报,14条要闻。今天重点事件:特朗普政府无意重启6月协议。",
+      "caption": "特朗普政府无意重启6月协议【财经早报】",
+      "data": {
+        "kicker": "财经早报",
+        "kickerColor": "blue",
+        "titlePre": "特朗普政府无意重启6月协议",
+        "subtitle1": [
+          {
+            "t": "今日 14 条要闻",
+            "b": true
+          }
+        ],
+        "subtitle2": [
+          {
+            "t": "重点关注:特朗普政府无意重启6月协议 / 伊朗允许船只临时过海峡 / 美国7月贸易逆差飙17.2%"
+          }
+        ]
+      }
+    },
+    {
+      "id": "news-01",
+      "template": "rows",
+      "narration": "第1条,特朗普政府无意重启6月协议。据报特朗普政府多次表示无意重新接受6月谅解备忘录条款。",
+      "caption": "特朗普政府无意重启6月协议",
+      "data": {
+        "kicker": "01 · 宏观政策",
+        "headline": [
+          {
+            "t": "特朗普政府无意重启6月协议",
+            "b": true
+          }
+        ],
+        "rows": [
+          {
+            "accent": "blue",
+            "label": [
+              {
+                "t": "详情",
+                "b": true
+              }
+            ],
+            "body": [
+              {
+                "t": "据报特朗普政府多次表示无意重新接受6月谅解备忘录条款"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "news-02",
+      "template": "rows",
+      "narration": "第2条,伊朗允许船只临时过海峡。已允许船只临时通过霍尔木兹海峡中间特定航道。板块上看,值得关注原油。",
+      "caption": "伊朗允许船只临时过海峡",
+      "data": {
+        "kicker": "02 · 宏观政策",
+        "headline": [
+          {
+            "t": "伊朗允许船只临时过海峡",
+            "b": true
+          }
+        ],
+        "rows": [
+          {
+            "accent": "blue",
+            "label": [
+              {
+                "t": "详情",
+                "b": true
+              }
+            ],
+            "body": [
+              {
+                "t": "已允许船只临时通过霍尔木兹海峡中间特定航道"
+              }
+            ]
+          }
+        ],
+        "footnote": [
+          {
+            "t": "AI解读|关注:原油",
+            "b": true
+          }
+        ]
+      }
+    },
+    {
+      "id": "news-03",
+      "template": "rows",
+      "narration": "第3条,美国7月贸易逆差飙17.2%。美国7月商品贸易逆差环比飙升17.2%至1188亿美元。板块上看,利好AI、算力。",
+      "caption": "美国7月贸易逆差飙17.2%",
+      "data": {
+        "kicker": "03 · 宏观政策",
+        "headline": [
+          {
+            "t": "美国7月贸易逆差飙17.2%",
+            "b": true
+          }
+        ],
+        "rows": [
+          {
+            "accent": "blue",
+            "label": [
+              {
+                "t": "详情",
+                "b": true
+              }
+            ],
+            "body": [
+              {
+                "t": "美国7月商品贸易逆差环比飙升17.2%至1188亿美元"
+              }
+            ]
+          }
+        ],
+        "footnote": [
+          {
+            "t": "AI解读|利好:AI/算力",
+            "b": true
+          }
+        ]
+      }
+    },
+    {
+      "id": "news-04",
+      "template": "rows",
+      "narration": "第4条,赛富时涨超22%创六年最佳。软件股集体冲高，赛富时涨超22%并宣布与Anthropic合作。板块上看,利好软件、AI。",
+      "caption": "赛富时涨超22%创六年最佳",
+      "data": {
+        "kicker": "04 · 软件",
+        "headline": [
+          {
+            "t": "赛富时涨超22%创六年最佳",
+            "b": true
+          }
+        ],
+        "rows": [
+          {
+            "accent": "blue",
+            "label": [
+              {
+                "t": "详情",
+                "b": true
+              }
+            ],
+            "body": [
+              {
+                "t": "软件股集体冲高，赛富时涨超22%并宣布与Anthropic合作"
+              }
+            ]
+          }
+        ],
+        "footnote": [
+          {
+            "t": "AI解读|利好:软件/AI",
+            "b": true
+          }
+        ]
+      }
+    },
+    {
+      "id": "news-05",
+      "template": "rows",
+      "narration": "第5条,智谱认领神秘模型牛来。定价为Claude Opus 4.8的1/40。板块上看,利好AI。",
+      "caption": "智谱认领神秘模型牛来",
+      "data": {
+        "kicker": "05 · AI",
+        "headline": [
+          {
+            "t": "智谱认领神秘模型牛来",
+            "b": true
+          }
+        ],
+        "rows": [
+          {
+            "accent": "blue",
+            "label": [
+              {
+                "t": "详情",
+                "b": true
+              }
+            ],
+            "body": [
+              {
+                "t": "定价为Claude Opus 4.8的1/40"
+              }
+            ]
+          }
+        ],
+        "footnote": [
+          {
+            "t": "AI解读|利好:AI",
+            "b": true
+          }
+        ]
+      }
+    },
+    {
+      "id": "news-06",
+      "template": "rows",
+      "narration": "第6条,软银洽购1X，估值60亿美元。软银正洽谈收购1X多数股权，估值约60亿美元。",
+      "caption": "软银洽购1X，估值60亿美元",
+      "data": {
+        "kicker": "06 · 机器人",
+        "headline": [
+          {
+            "t": "软银洽购1X，估值60亿美元",
+            "b": true
+          }
+        ],
+        "rows": [
+          {
+            "accent": "blue",
+            "label": [
+              {
+                "t": "详情",
+                "b": true
+              }
+            ],
+            "body": [
+              {
+                "t": "软银正洽谈收购1X多数股权，估值约60亿美元"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "news-07",
+      "template": "rows",
+      "narration": "第7条,AnthropicIPO进展。预测市场显示10月前IPO概率升至86%。",
+      "caption": "AnthropicIPO进展",
+      "data": {
+        "kicker": "07 · AI",
+        "headline": [
+          {
+            "t": "AnthropicIPO进展",
+            "b": true
+          }
+        ],
+        "rows": [
+          {
+            "accent": "blue",
+            "label": [
+              {
+                "t": "详情",
+                "b": true
+              }
+            ],
+            "body": [
+              {
+                "t": "预测市场显示10月前IPO概率升至86%"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "news-08",
+      "template": "rows",
+      "narration": "第8条,中国移动智算集采达33.5亿。中国移动呼和浩特智算中心两期AI超节点集采累计33.5亿元。板块上看,利好算力、芯片。",
+      "caption": "中国移动智算集采达33.5亿",
+      "data": {
+        "kicker": "08 · 算力",
+        "headline": [
+          {
+            "t": "中国移动智算集采达33.5亿",
+            "b": true
+          }
+        ],
+        "rows": [
+          {
+            "accent": "blue",
+            "label": [
+              {
+                "t": "详情",
+                "b": true
+              }
+            ],
+            "body": [
+              {
+                "t": "中国移动呼和浩特智算中心两期AI超节点集采累计33.5亿元"
+              }
+            ]
+          }
+        ],
+        "footnote": [
+          {
+            "t": "AI解读|利好:算力/芯片",
+            "b": true
+          }
+        ]
+      }
+    },
+    {
+      "id": "news-09",
+      "template": "rows",
+      "narration": "第9条,交换芯片需求提升5至10倍。超节点架构交换芯片配比升至1:3至1:2，速率升级51.2T。板块上看,利好芯片、算力。",
+      "caption": "交换芯片需求提升5至10倍",
+      "data": {
+        "kicker": "09 · 芯片",
+        "headline": [
+          {
+            "t": "交换芯片需求提升5至10倍",
+            "b": true
+          }
+        ],
+        "rows": [
+          {
+            "accent": "blue",
+            "label": [
+              {
+                "t": "详情",
+                "b": true
+              }
+            ],
+            "body": [
+              {
+                "t": "超节点架构交换芯片配比升至1:3至1:2，速率升级51.2T"
+              }
+            ]
+          }
+        ],
+        "footnote": [
+          {
+            "t": "AI解读|利好:芯片/算力",
+            "b": true
+          }
+        ]
+      }
+    },
+    {
+      "id": "news-10",
+      "template": "rows",
+      "narration": "第10条,AI硬件迭代高等级覆铜板。电子树脂占覆铜板成本约20%至30%。板块上看,利好PCB。",
+      "caption": "AI硬件迭代高等级覆铜板",
+      "data": {
+        "kicker": "10 · PCB",
+        "headline": [
+          {
+            "t": "AI硬件迭代高等级覆铜板",
+            "b": true
+          }
+        ],
+        "rows": [
+          {
+            "accent": "blue",
+            "label": [
+              {
+                "t": "详情",
+                "b": true
+              }
+            ],
+            "body": [
+              {
+                "t": "电子树脂占覆铜板成本约20%至30%"
+              }
+            ]
+          }
+        ],
+        "footnote": [
+          {
+            "t": "AI解读|利好:PCB",
+            "b": true
+          }
+        ]
+      }
+    },
+    {
+      "id": "news-11",
+      "template": "rows",
+      "narration": "第11条,美股三大指数集体收涨。道指涨0.20%报53596.44点，纳指涨1.57%。板块上看,利好芯片。",
+      "caption": "美股三大指数集体收涨",
+      "data": {
+        "kicker": "11 · 美股",
+        "headline": [
+          {
+            "t": "美股三大指数集体收涨",
+            "b": true
+          }
+        ],
+        "rows": [
+          {
+            "accent": "blue",
+            "label": [
+              {
+                "t": "详情",
+                "b": true
+              }
+            ],
+            "body": [
+              {
+                "t": "道指涨0.20%报53596.44点，纳指涨1.57%"
+              }
+            ]
+          }
+        ],
+        "footnote": [
+          {
+            "t": "AI解读|利好:芯片",
+            "b": true
+          }
+        ]
+      }
+    },
+    {
+      "id": "news-12",
+      "template": "rows",
+      "narration": "第12条,A股放量扬升沪指涨1.13%。沪指涨1.13%报3956.57点，科创50涨3.77%领涨。板块上看,利好芯片、算力、PCB。",
+      "caption": "A股放量扬升沪指涨1.13%",
+      "data": {
+        "kicker": "12 · A股",
+        "headline": [
+          {
+            "t": "A股放量扬升沪指涨1.13%",
+            "b": true
+          }
+        ],
+        "rows": [
+          {
+            "accent": "blue",
+            "label": [
+              {
+                "t": "详情",
+                "b": true
+              }
+            ],
+            "body": [
+              {
+                "t": "沪指涨1.13%报3956.57点，科创50涨3.77%领涨"
+              }
+            ]
+          }
+        ],
+        "footnote": [
+          {
+            "t": "AI解读|利好:芯片/算力/PCB",
+            "b": true
+          }
+        ]
+      }
+    },
+    {
+      "id": "news-13",
+      "template": "rows",
+      "narration": "第13条,布伦特原油上涨2.1%。10月布伦特原油涨2.1%收89.70美元，WTI涨1.6%。板块上看,利好原油。",
+      "caption": "布伦特原油上涨2.1%",
+      "data": {
+        "kicker": "13 · 原油",
+        "headline": [
+          {
+            "t": "布伦特原油上涨2.1%",
+            "b": true
+          }
+        ],
+        "rows": [
+          {
+            "accent": "blue",
+            "label": [
+              {
+                "t": "详情",
+                "b": true
+              }
+            ],
+            "body": [
+              {
+                "t": "10月布伦特原油涨2.1%收89.70美元，WTI涨1.6%"
+              }
+            ]
+          }
+        ],
+        "footnote": [
+          {
+            "t": "AI解读|利好:原油",
+            "b": true
+          }
+        ]
+      }
+    },
+    {
+      "id": "news-14",
+      "template": "rows",
+      "narration": "第14条,布伦特原油本周跌超6%。霍尔木兹海峡运输量恢复至战前75%，布伦特本周跌超6%。板块上看,利空原油。",
+      "caption": "布伦特原油本周跌超6%",
+      "data": {
+        "kicker": "14 · 原油",
+        "headline": [
+          {
+            "t": "布伦特原油本周跌超6%",
+            "b": true
+          }
+        ],
+        "rows": [
+          {
+            "accent": "blue",
+            "label": [
+              {
+                "t": "详情",
+                "b": true
+              }
+            ],
+            "body": [
+              {
+                "t": "霍尔木兹海峡运输量恢复至战前75%，布伦特本周跌超6%"
+              }
+            ]
+          }
+        ],
+        "footnote": [
+          {
+            "t": "AI解读|利空:原油",
+            "b": true
+          }
+        ]
+      }
+    },
+    {
+      "id": "closing",
+      "template": "conclusion",
+      "narration": "以上就是今天的财经早报,内容基于公开信息整理,不构成投资建议。关注我,每天几分钟看懂财经。",
+      "caption": "关注不迷路",
+      "data": {
+        "kicker": "免责声明",
+        "statements": [
+          {
+            "who": "风险提示",
+            "body": [
+              {
+                "t": "内容基于公开信息由 AI 整理,不构成任何投资建议"
+              }
+            ]
+          }
+        ],
+        "tagline": [
+          {
+            "t": "每天几分钟,看懂财经",
+            "b": true
+          }
+        ]
+      }
+    }
+  ]
+}

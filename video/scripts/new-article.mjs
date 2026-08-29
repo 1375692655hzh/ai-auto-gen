@@ -44,7 +44,7 @@ writeFileSync(
 		{
 			meta: {
 				title: projectId,
-				voice: "zh-CN-YunxiNeural",
+				voice: "zh-CN-XiaoxiaoNeural",
 				fps: 30,
 				width: 1920,
 				height: 1080,

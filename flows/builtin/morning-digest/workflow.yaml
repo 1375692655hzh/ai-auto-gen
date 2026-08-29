@@ -12,6 +12,8 @@ params:
   tag_model: ark:kimi-k3   # 打标模型(11模型横评定选, 见 docs/打标模型选型.md): 空=默认GLM / ark:<模型名>=方舟订阅; 失败自动回落
   with_image: false       # 长图产物(按需; 图片是文章的额外产物类别)
   image_top: 16           # 图条上限(配额内截断)
+  with_video: false       # 视频产物(按需; 依赖 with_image, 口播稿复用图条卡片, 女声晓晓≈3分钟)
+  video_top: 14           # 视频条数上限
 
 steps:
   - id: fetch                    # 四源抓取(免 LLM, gangtise 失败自动元宝兜底)
@@ -32,3 +34,7 @@ steps:
     uses: render_morning_image
     when: "{params.with_image}"
     with: {top: "{params.image_top}"}
+  - id: video                    # 图条卡片 → 口播视频(按需, MP4 不进待发队列; Remotion+edge女声)
+    uses: render_morning_video
+    when: "{params.with_video}"
+    with: {top: "{params.video_top}"}
