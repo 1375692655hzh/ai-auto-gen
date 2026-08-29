@@ -1,7 +1,8 @@
 """视频步骤: daily 流程沿用 generator/video; morning-digest 从过稿口播稿出片(零 LLM)。
 
-render_morning_video: 解析 口播稿-{date}.md(人工可能已改) → 复检机检 → story.json
-→ Remotion 出片。音画一致构造保证: narration(去「第N条,」前缀) == rows body 逐字相等。
+render_morning_video: 解析 口播稿-{date}.md(人工可能已改, 含 [概括]/[指标]/[背景] 标签行)
+→ 模块化 story(EnrichedRowsTpl) → Remotion 出片。
+音画一致构造断言: narration(去「第N条,」前缀) == 概括+各行文本拼接(标签不入音)。
 """
 
 import json
@@ -11,6 +12,11 @@ import sys
 from pathlib import Path
 
 from flows.steps import step
+
+FPS = 30
+SPEED = 4.2          # 与 script.py/build.mjs 同口径
+ROW_ACCENTS = {"背景": "blue", "进展": "green", "影响": "amber", "展望": "purple",
+               "详情": "blue", "指标": "red"}
 
 
 @step("render_video")
@@ -68,58 +74,101 @@ def render_morning_video(ctx, wf, params):
 
 
 def _parse_script_md(md: str):
-    """口播稿 md → (intro, outro, [(kicker, headline, text)])。人可删段落/改正文。"""
+    """口播稿 md → (intro, outro, [block])。block={"kicker","headline","summary","stat","lines"}。
+    人可删段落/改正文/删行; 无标签行则整段进 lines[详情]。"""
     intro, outro, blocks = "", "", []
-    zone, headline = None, ""
+
+    def _new_block(kicker, headline):
+        blocks.append({"kicker": kicker, "headline": headline,
+                       "summary": "", "stat": None, "lines": []})
+
+    zone = None
     for line in md.splitlines():
         m = re.match(r"^## (.+)", line)
         if m:
             head = m.group(1).strip()
             if head == "开场":
-                zone, headline = "intro", ""
+                zone = "intro"
             elif head == "收尾":
-                zone, headline = "outro", ""
+                zone = "outro"
             else:
                 zone = "item"
                 kicker, _, headline = head.partition("|")
-                blocks.append([kicker.strip(), headline.strip(), ""])
+                _new_block(kicker.strip(), headline.strip())
             continue
-        if line.startswith("#") or line.startswith("<!--"):
+        if line.startswith("#") or line.startswith("<!--") or not line.strip():
             continue
         t = line.strip()
-        if not t:
-            continue
         if zone == "intro":
-            intro = (intro + t) if not intro else intro + t
+            intro += t
         elif zone == "outro":
-            outro = (outro or "") + t
+            outro += t
         elif zone == "item" and blocks:
-            blocks[-1][2] = (blocks[-1][2] + t) if blocks[-1][2] else t
-    return intro, outro, [tuple(b) for b in blocks if b[2]]
+            b = blocks[-1]
+            lm = re.match(r"^\[([^|\]]+)(?:\|([^\]]+))?\]\s*(.+)$", t)
+            if lm:
+                label, tail, text = lm.group(1).strip(), lm.group(2), lm.group(3).strip()
+                if label == "概括":
+                    b["summary"] = text
+                elif label == "指标":
+                    # [指标] 1188亿美元（贸易逆差） → stat 值+单位+标签
+                    sm = re.match(r"^([\d.]+)([^（\s]*)(?:（([^）]*)）)?$", text)
+                    b["stat"] = {"value": sm.group(1), "unit": sm.group(2) or "",
+                                 "label": sm.group(3) or ""} if sm else None
+                else:
+                    b["lines"].append({"label": label, "text": text})
+            else:
+                # 无标签行: 并入上一行或作为详情行
+                if b["lines"] and not b["summary"] and len(b["lines"]) == 1:
+                    b["lines"][0]["text"] += t
+                elif b["summary"] and not b["lines"]:
+                    b["summary"] += t
+                elif b["lines"]:
+                    b["lines"][-1]["text"] += t
+                else:
+                    b["lines"].append({"label": "详情", "text": t})
+    return intro, outro, [b for b in blocks if b["summary"] or b["lines"]]
 
 
 def _build_story(intro, outro, blocks, date: str) -> dict:
     def _r(t, b=False):
         return [{"t": t, **({"b": True} if b else {})}]
 
-    first_headline = blocks[0][1]
-    vt = f"{_cut(first_headline, 22)}【财经早报】"
+    vt = f"{_cut(blocks[0]['headline'], 22)}【财经早报】"
     scenes = [{
         "id": "opening", "template": "title",
         "narration": intro, "caption": vt,
         "data": {"kicker": "财经早报", "kickerColor": "blue",
                  "titlePre": vt.replace("【财经早报】", ""),
                  "subtitle1": _r(f"今日 {len(blocks)} 条要闻", True),
-                 "subtitle2": _r(f"重点关注:{' / '.join(b[1] for b in blocks[:3])}")},
+                 "subtitle2": _r(f"重点关注:{' / '.join(b['headline'] for b in blocks[:3])}")},
     }]
-    for i, (kicker, headline, text) in enumerate(blocks, 1):
+    for i, b in enumerate(blocks, 1):
+        # 画面结构: 概括区 + 指标行也进 rows(口播叙事流), stat 卡另立视觉锤
+        rows = []
+        for l in b["lines"]:
+            rows.append({"accent": ROW_ACCENTS.get(l["label"], "blue"),
+                         "label": _r(l["label"], True), "body": _r(l["text"])})
+        # 入场时刻(帧): 按累计字数÷语速推算, 念到哪行亮哪行(-0.4s 偏置让行略早)
+        ent = {}
+        cum = 4 + len(b["headline"]) // 2                    # "第N条," + 标题带入口播头
+        if b["summary"]:
+            ent["summary"] = max(10, int(cum / SPEED * FPS - 0.4 * FPS))
+            cum += len(b["summary"])
+        if b["stat"]:
+            ent["stat"] = max(10, int(cum / SPEED * FPS - 0.4 * FPS))
+        for j, l in enumerate(b["lines"]):
+            ent[f"row{j}"] = max(10, int(cum / SPEED * FPS - 0.4 * FPS))
+            cum += len(l["text"])
+        ent["tags"] = max(10, int(cum / SPEED * FPS))
         scenes.append({
             "id": f"news-{i:02d}", "template": "rows",
-            "narration": f"第{i}条,{text}",       # 前缀不入画面
-            "caption": "",                        # 详情即字幕, 关底部条
-            "data": {"kicker": kicker,
-                     "headline": _r(headline, True),
-                     "rows": [{"accent": "blue", "label": _r("详情", True), "body": _r(text)}]},
+            "narration": f"第{i}条,{b['summary']}{''.join(l['text'] for l in b['lines'])}",
+            "caption": "",
+            "data": {"kicker": b["kicker"], "headline": _r(b["headline"], True),
+                     "summary": _r(b["summary"]) if b["summary"] else None,
+                     "stat": b["stat"], "tags": b.get("sectors") or [],
+                     "rows": rows, "entrances": ent},
         })
     scenes.append({
         "id": "closing", "template": "conclusion",
@@ -129,7 +178,7 @@ def _build_story(intro, outro, blocks, date: str) -> dict:
                  "tagline": _r("每天几分钟, 看懂财经", True)},
     })
     return {"meta": {"title": vt, "voice": "zh-CN-XiaoxiaoNeural",
-                     "fps": 30, "width": 1920, "height": 1080, "padSeconds": 0.8},
+                     "fps": FPS, "width": 1920, "height": 1080, "padSeconds": 0.8},
             "scenes": scenes}
 
 
@@ -138,10 +187,12 @@ def _assert_consistency(story: dict):
     for s in story["scenes"]:
         if s["template"] != "rows":
             continue
-        body = "".join(x["t"] for row in s["data"]["rows"] for x in row["body"])
+        d = s["data"]
+        shown = "".join(x["t"] for x in (d.get("summary") or [])) + \
+                "".join(x["t"] for row in d["rows"] for x in row["body"])
         prefix = f"第{s['id'].split('-')[1].lstrip('0')}条,"
-        assert s["narration"].replace(prefix, "", 1) == body, f"{s['id']} 音画不一致"
-        k = s["data"]["kicker"]
+        assert s["narration"].replace(prefix, "", 1) == shown, f"{s['id']} 音画不一致"
+        k = d["kicker"]
         assert not re.search(r"利好|利空|承压|看多|看空|AI解读|AI整理|AI生成|AI播报", k), \
             f"{s['id']} kicker 违规: {k}"
 

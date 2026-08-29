@@ -9,13 +9,15 @@ import type {
 	StackedData,
 	VersusData,
 } from "./story-types";
-import { Backdrop, colorOf, COLORS, FadeUp, Kicker, Panel, Rich, RichTitle, SceneShell } from "./ui";
+import { Backdrop, Chip, colorOf, COLORS, FadeUp, Kicker, Panel, Rich, RichTitle, SceneShell } from "./ui";
 import { ComparePanel } from "./templates-core";
 
 /* ---------------- rows：证据行列表 ---------------- */
 
-export const RowsTpl: React.FC<SceneProps> = ({ scene, duration, caption }) => {
-	const d = scene.data as unknown as RowsData;
+export const RowsTpl: React.FC<SceneProps> = (props) => {
+	const d = props.scene.data as unknown as RowsData;
+	if (d.summary) return <EnrichedRowsTpl {...props} />;   // 丰富详情六区
+	const { duration, caption } = props;
 	return (
 		<SceneShell duration={duration} caption={caption}>
 			<Backdrop />
@@ -38,7 +40,7 @@ export const RowsTpl: React.FC<SceneProps> = ({ scene, duration, caption }) => {
 									<div style={{ fontSize: 36, fontWeight: 700, whiteSpace: "nowrap" }}>
 										<Rich parts={r.label} />
 									</div>
-									<div style={{ fontSize: 34, textAlign: "right", lineHeight: 1.5 }}>
+									<div style={{ fontSize: 34, textAlign: "left", flex: 1, lineHeight: 1.5 }}>
 										<Rich parts={r.body} />
 									</div>
 								</div>
@@ -227,6 +229,71 @@ export const ConclusionTpl: React.FC<SceneProps> = ({ scene, duration, caption }
 						</div>
 					) : null}
 				</div>
+			</div>
+		</SceneShell>
+	);
+};
+
+/* ---------------- enriched rows：概括+数字卡+标签分行+板块chips(早报视频) ---------------- */
+
+export const EnrichedRowsTpl: React.FC<SceneProps> = ({ scene, duration, caption }) => {
+	const d = scene.data as unknown as RowsData;
+	const ent = d.entrances ?? {};
+	const at = (k: string, i: number) => ent[k] ?? 26 + i * 26;
+	const tags = d.tags ?? [];
+	return (
+		<SceneShell duration={duration} caption={caption}>
+			<Backdrop />
+			<div style={{ display: "flex", flexDirection: "column", height: "100%", gap: 26 }}>
+				<Kicker text={d.kicker ?? ""} delay={2} />
+				<RichTitle parts={d.headline} delay={8} size={66} marginTop={14} />
+				{d.summary ? (
+					<FadeUp delay={at("summary", 0)}>
+						<div style={{ fontSize: 36, lineHeight: 1.55, color: COLORS.text, textAlign: "left" }}>
+							<Rich parts={d.summary} />
+						</div>
+					</FadeUp>
+				) : null}
+				{d.stat ? (
+					<FadeUp delay={at("stat", 1)}>
+						<div style={{ display: "flex", alignItems: "baseline", gap: 18 }}>
+							<span style={{ fontSize: 96, fontWeight: 800, color: COLORS.nvidia, fontVariantNumeric: "tabular-nums" }}>
+								{d.stat.value}
+							</span>
+							{d.stat.unit ? <span style={{ fontSize: 44, fontWeight: 700, color: COLORS.nvidia }}>{d.stat.unit}</span> : null}
+							{d.stat.label ? <span style={{ fontSize: 26, color: COLORS.sub }}>{d.stat.label}</span> : null}
+						</div>
+					</FadeUp>
+				) : null}
+				<div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
+					{d.rows.map((r, i) => (
+						<FadeUp key={i} delay={at(`row${i}`, 2 + i)}>
+							<div style={{ display: "flex", alignItems: "flex-start", gap: 18 }}>
+								<span
+									style={{
+										fontSize: 28, fontWeight: 700, color: colorOf(r.accent),
+										backgroundColor: `${colorOf(r.accent)}18`, borderRadius: 8,
+										padding: "6px 16px", whiteSpace: "nowrap", marginTop: 4,
+									}}
+								>
+									<Rich parts={r.label} />
+								</span>
+								<div style={{ fontSize: 32, lineHeight: 1.55, color: COLORS.text, textAlign: "left", flex: 1 }}>
+									<Rich parts={r.body} />
+								</div>
+							</div>
+						</FadeUp>
+					))}
+				</div>
+				{tags.length ? (
+					<FadeUp delay={at("tags", d.rows.length + 2)}>
+						<div style={{ display: "flex", gap: 18, marginTop: "auto", paddingBottom: 8 }}>
+							{tags.map((t) => (
+								<Chip key={t} color={COLORS.sub} style={{ fontSize: 26, padding: "10px 22px" }}>{t}</Chip>
+							))}
+						</div>
+					</FadeUp>
+				) : null}
 			</div>
 		</SceneShell>
 	);

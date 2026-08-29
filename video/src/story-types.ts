@@ -90,11 +90,22 @@ export interface CardsData {
 	question?: Rich;
 }
 
+export interface StatData {
+	value: string;
+	unit?: string;
+	label?: string;
+}
+
 export interface RowsData {
 	kicker?: string;
 	headline: Rich;
 	rows: { accent?: ColorKey; label: Rich; body: Rich }[];
 	footnote?: Rich;
+	// 丰富详情版(enrich 产物投影): 概括区+数字大卡+板块chips+入场时刻(帧)
+	summary?: Rich;
+	stat?: StatData;
+	tags?: string[];
+	entrances?: Record<string, number>;
 }
 
 export interface StackedData {

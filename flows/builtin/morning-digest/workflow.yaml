@@ -13,7 +13,8 @@ params:
   with_image: false       # 长图产物(按需; 图片是文章的额外产物类别)
   image_top: 16           # 图条上限(配额内截断)
   with_video: false       # 视频产物(按需; 依赖 with_image, 独立口播稿+原文详情, 女声晓晓)
-  video_top: 10           # 口播条数上限(每条~22秒, 总长3-5分钟)
+  video_top: 7            # 口播条数上限(3重200字+4轻130字, ~5分钟)
+  enrich_model: ark:kimi-k3  # 扩写模型(空=默认GLM; 订阅额度, 约6.6k tokens/天)
 
 steps:
   - id: fetch                    # 四源抓取(免 LLM, gangtise 失败自动元宝兜底)
@@ -34,7 +35,11 @@ steps:
     uses: render_morning_image
     when: "{params.with_image}"
     with: {top: "{params.image_top}"}
-  - id: script                   # 文章来龙去脉 → 口播稿(单一文本源, 零LLM)  ← 审核点(过稿才出片)
+  - id: enrich                   # 文章选中条+素材 → 结构化口播内容(概括/指标卡/背景进展影响) ← LLM
+    uses: enrich_video_details
+    when: "{params.with_video}"
+    with: {top: "{params.video_top}", model: "{params.enrich_model}"}
+  - id: script                   # 口播稿装配(单一文本源, 零LLM)  ← 审核点(过稿才出片)
     uses: render_morning_script
     when: "{params.with_video}"
     with: {top: "{params.video_top}"}
