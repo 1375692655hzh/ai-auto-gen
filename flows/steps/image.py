@@ -10,6 +10,39 @@ from flows.steps import step
 # 分类配额(v1): 图条上限 image_top 在此配额内截断
 QUOTA = {"宏观政策": 3, "公司动态": 4, "行业产业": 3, "海外市场": 2, "大宗商品": 2, "公司公告": 2}
 
+# 头部行情速览: 前一交易日收盘指数(新浪免费接口, s_/int_/znb_ 三系列)
+INDEX_FEED = [
+    ("A股", [("上证指数", "s_sh000001"), ("深证成指", "s_sz399001"), ("创业板指", "s_sz399006")]),
+    ("美股", [("道琼斯", "int_dji"), ("纳斯达克", "int_nasdaq"), ("标普500", "int_sp500")]),
+    ("日韩", [("日经225", "int_nikkei"), ("韩国KOSPI", "znb_KOSPI")]),
+]
+
+
+def _fetch_indices() -> list:
+    """新浪指数行情 → [{group, name, pct}]; 失败返回 [](头部行情区静默跳过)。"""
+    import requests
+    codes = [c for _, items in INDEX_FEED for _, c in items]
+    try:
+        r = requests.get("https://hq.sinajs.cn/list=" + ",".join(codes),
+                         headers={"Referer": "https://finance.sina.com.cn"}, timeout=8)
+        r.encoding = "gbk"
+        vals = dict(re.findall(r'hq_str_(\w+)="([^"]*)"', r.text))
+        out = []
+        for group, items in INDEX_FEED:
+            row = []
+            for name, code in items:
+                parts = (vals.get(code) or "").split(",")
+                if len(parts) >= 4:                    # 名称,点位,涨跌额,涨跌幅
+                    row.append({"name": name, "pct": parts[3].strip()})
+            if row:
+                out.append({"group": group, "items": row})
+        if not out:
+            print("⚠ 指数行情接口无有效数据, 头部行情区跳过")
+        return out
+    except Exception as e:
+        print(f"⚠ 指数行情获取失败({e}), 头部行情区跳过")
+        return []
+
 
 @step("render_morning_image")
 def render_morning_image(ctx, wf, params):
@@ -97,8 +130,8 @@ def render_morning_image(ctx, wf, params):
     focus = _focus_lines(article)
 
     ann_summary = sorted(ann_count.items(), key=lambda x: -x[1])[:8]
-    payload = {"date": date, "degraded": degraded, "focus": focus,
-               "cards": cards, "ann_summary": ann_summary}
+    payload = {"date": date, "degraded": degraded, "indices": _fetch_indices(),
+               "focus": focus, "cards": cards, "ann_summary": ann_summary}
 
     # ---- 机检: 字数/数字保真/禁词 ----
     report = _lint_lines(payload, {it["n"]: it["text"] for it in sel})

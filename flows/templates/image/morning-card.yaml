@@ -1,9 +1,9 @@
 # 早报长图版式参数(默认值; 工作流包内 templates/image/morning-card.yaml 同名键覆盖)
 # cat_colors: 分类主题色 [R, G, B]
-title: "AI 财经早报"
+title: "财经早报"
 subtitle: "{date} · 今日 {n} 条要闻"
 footer1: "内容基于公开信息由 AI 整理，不构成投资建议"
-footer2: "AI财经日报 · 每天几分钟看懂财经"
+footer2: "财经日报 · 每天几分钟看懂财经"
 cat_colors:
   宏观政策: [31, 78, 121]
   公司动态: [0, 122, 87]

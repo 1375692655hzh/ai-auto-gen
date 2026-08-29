@@ -71,19 +71,20 @@ def render_digest_image(payload: dict, date: str, out_path: str):
     cats = ("宏观政策", "公司动态", "行业产业", "海外市场", "大宗商品", "公司公告")
     sections = [(cat, [c for c in cards if c["cat"] == cat]) for cat in cats]
     sections = [(cat, cs) for cat, cs in sections if cs]
-    focus_h = len(focus) * 34
-    head_h = 20 + 56 + 8 + focus_h + 14 + 16
+    head_h = 20 + 56 + 24                             # 主标行+下留白(无焦点区)
+    idx = payload.get("indices") or []
+    idx_h = 16 + 40 * len(idx) + 14 if idx else 0      # 行情速览: 每组一行
     body = sum(SEC_HEAD + len(cs) * ITEM_H + 10 for _, cs in sections)
     gaps = SEC_GAP * max(0, len(sections) - 1)
     ann_rows = (min(len(ann), 8) + 1) // 2
     ann_h = SEC_HEAD + ann_rows * 38 + 14 if ann else 0
     foot_h = 100
-    H = head_h + 16 + body + gaps + (ann_h + 14 if ann else 0) + foot_h
+    H = head_h + idx_h + 16 + body + gaps + (ann_h + 14 if ann else 0) + foot_h
 
     img = Image.new("RGB", (W, H), BG)
     d = ImageDraw.Draw(img)
 
-    # ---- 头部: 主标+右侧突出日期(金色) / 今日焦点(标签内联) ----
+    # ---- 头部: 主标+右侧突出日期(金色) ----
     d.rectangle([0, 0, W, head_h], fill=HEAD)
     d.text((M, 20), tmpl["title"], font=_font(46, True), fill=(255, 255, 255))
     try:
@@ -98,16 +99,30 @@ def render_digest_image(payload: dict, date: str, out_path: str):
     d.text((dx, 28), date_str, font=d_font, fill=(255, 215, 80))
     d.text((dx + probe.textlength(date_str, font=d_font), 38), n_str,
            font=_font(24), fill=(150, 168, 196))
-    fy = 20 + 56 + 8
-    d.text((M, fy), "今日焦点", font=_font(24, True), fill=(255, 215, 80))
-    fx = M + probe.textlength("今日焦点", font=_font(24, True)) + 14
-    for i, f in enumerate(focus):
-        d.text((fx if i == 0 else M, fy + i * 34),
-               _truncate(probe, f, _font(24), W - M - (fx if i == 0 else M)),
-               font=_font(24), fill=(214, 224, 240))
+
+    # ---- 行情速览: 前一交易日收盘(A股/美股/日韩 红涨绿跌) ----
+    y = head_h
+    if idx:
+        d.rounded_rectangle([M, y, W - M, y + idx_h], radius=12, fill=(255, 255, 255))
+        iy = y + 16
+        for g in idx:
+            d.text((M + 24, iy + 6), g["group"], font=_font(26, True), fill=(75, 85, 110))
+            x = M + 24 + probe.textlength(g["group"], font=_font(26, True)) + 34
+            for it in g["items"]:
+                pct = it["pct"]
+                up = not pct.startswith("-")
+                mark, mc = ("▲", (216, 64, 52)) if up else ("▼", (30, 158, 90))
+                txt = f"{it['name']} {pct}%"
+                nf, pf = _font(24), _font(26, True)
+                d.text((x, iy + 8), it["name"], font=nf, fill=TXT_GREY)
+                x += probe.textlength(it["name"], font=nf) + 10
+                d.text((x, iy + 5), f"{mark}{pct}%", font=pf, fill=mc)
+                x += probe.textlength(f"{mark}{pct}%", font=pf) + 34
+            iy += 40
+        y += idx_h
 
     # ---- 分类节容器 + 等高条目 ----
-    y = head_h + 16
+    y += 16
     for cat, cs in sections:
         color = CAT_COLORS.get(cat, DEFAULT_COLOR)
         sh = SEC_HEAD + len(cs) * ITEM_H + 10
