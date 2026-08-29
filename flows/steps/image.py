@@ -51,7 +51,8 @@ def _fetch_indices() -> list:
             for name, code in items:
                 parts = (vals.get(code) or "").split(",")
                 if len(parts) >= 4:                    # 名称,点位,涨跌额,涨跌幅
-                    row.append({"name": name, "pct": parts[3].strip()})
+                    price = f"{float(parts[1]):.2f}" if parts[1].strip() else ""
+                    row.append({"name": name, "price": price, "pct": parts[3].strip()})
             if row:
                 out.append({"group": _label(group), "items": row})
         if not out:

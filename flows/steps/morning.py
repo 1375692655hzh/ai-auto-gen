@@ -97,6 +97,7 @@ def render_morning_article(ctx, wf, params):
     print(f"渲染文章: 素材 {len(content)} 字 → 精炼改写 ...")
     md = llm_complete(user, system=system, max_tokens=6500, temperature=0.3)
     _check_complete(md, "文章")
+    md = _inject_indices(md)                       # 开头行情速览(接口数据, 块引用行)
     report = _lint_article(md)
     path = save_text(out_dir("articles_dir") / f"早报文章-{date}.md", md)
     print(f"早报文章: {path} ({len(md)}字)")
@@ -416,6 +417,29 @@ def _render_tags(article: str, items: list, ann_zone: list,
               "ann_summary": "、".join(f"{s}×{c}" for s, c in
                                        sorted(ann_sector_count.items(), key=lambda x: -x[1])[:4])}
     return chr(10).join(lines) + chr(10), report
+
+
+def _inject_indices(md: str) -> str:
+    """文章标题下插行情速览(前收数据; 接口失败不阻断, 行情区不出现)。
+    块引用行格式, 避开 lint 的条目正则。"""
+    from flows.steps.image import _fetch_indices
+    import time
+    groups = _fetch_indices()
+    if not groups:                                   # 接口抖动: 间隔3s重试一次
+        time.sleep(3)
+        groups = _fetch_indices()
+        if not groups:
+            print("⚠ 行情接口两次均失败, 文章不含行情速览区")
+            return md
+    rows = ["## 行情速览", ""]
+    for g in groups:
+        seg = "｜".join(f"{i['name']} {i.get('price','')}点({i['pct']}%)" for i in g["items"])
+        rows.append(f"> {g['group']}：{seg}")
+    block = chr(10).join(rows) + chr(10) * 2
+    m = re.match("^# [^" + chr(10) + "]+", md)         # 首个一级标题后插入(不带$)
+    if m:
+        return md[:m.end()] + chr(10) * 2 + block + md[m.end():].lstrip(chr(10))
+    return block + md
 
 
 # ---------- 校验与机检 ----------

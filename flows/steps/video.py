@@ -50,13 +50,13 @@ def render_morning_video(ctx, wf, params):
     if not script_p or not Path(script_p).exists():
         sys.exit("视频依赖过稿口播稿: 需先跑 script 步骤(--set with_video=true)")
     md = Path(script_p).read_text(encoding="utf-8")
-    intro, outro, blocks = _parse_script_md(md)
+    intro, outro, blocks, indices, anns = _parse_script_md(md)
     if len(blocks) < 3:
         sys.exit(f"口播稿条目过少({len(blocks)}), 疑似格式损坏")
 
     from common import GEN_ROOT
     video_root = GEN_ROOT.parent / "video"
-    story = _build_story(intro, outro, blocks, date)
+    story = _build_story(intro, outro, blocks, date, indices, anns)
     _assert_consistency(story)                       # 音画一致构造断言
 
     proj_id = f"morning-{date.replace('-', '')}"
@@ -89,6 +89,8 @@ def _parse_script_md(md: str):
     """口播稿 md → (intro, outro, [block])。block={"kicker","headline","summary","stat","lines"}。
     人可删段落/改正文/删行; 无标签行则整段进 lines[详情]。"""
     intro, outro, blocks = "", "", []
+    indices, anns = [], []
+    ann_re = re.compile(r"^公告")
 
     def _new_block(kicker, headline):
         blocks.append({"kicker": kicker, "headline": headline,
@@ -103,6 +105,10 @@ def _parse_script_md(md: str):
                 zone = "intro"
             elif head == "收尾":
                 zone = "outro"
+            elif head == "行情速览":
+                zone = "idx"
+            elif ann_re.match(head):
+                zone = "ann"
             else:
                 zone = "item"
                 kicker, _, headline = head.partition("|")
@@ -115,6 +121,18 @@ def _parse_script_md(md: str):
             intro += t
         elif zone == "outro":
             outro += t
+        elif zone == "idx" and t.startswith("-"):
+            seg = t.lstrip("- ")
+            grp, _, rest = seg.partition(" | ")
+            its = []
+            for one in rest.split("｜"):
+                m2 = re.match(r"^(.+?)\s+([\d.]+)点\(([+-]?[\d.]+)%\)$", one.strip())
+                if m2:
+                    its.append({"name": m2.group(1), "price": m2.group(2), "pct": m2.group(3)})
+            if its:
+                indices.append({"group": grp.strip(), "items": its})
+        elif zone == "ann" and t.startswith("-"):
+            anns.append(t.lstrip("- ").strip())
         elif zone == "item" and blocks:
             b = blocks[-1]
             lm = re.match(r"^\[([^|\]]+)(?:\|([^\]]+))?\]\s*(.+)$", t)
@@ -139,10 +157,10 @@ def _parse_script_md(md: str):
                     b["lines"][-1]["text"] += t
                 else:
                     b["lines"].append({"label": "详情", "text": t})
-    return intro, outro, [b for b in blocks if b["summary"] or b["lines"]]
+    return intro, outro, [b for b in blocks if b["summary"] or b["lines"]], indices, anns
 
 
-def _build_story(intro, outro, blocks, date: str) -> dict:
+def _build_story(intro, outro, blocks, date: str, indices=None, anns=None) -> dict:
     def _r(t, b=False):
         return [{"t": t, **({"b": True} if b else {})}]
 
@@ -155,6 +173,27 @@ def _build_story(intro, outro, blocks, date: str) -> dict:
                  "subtitle1": _r(f"今日 {len(blocks)} 条要闻", True),
                  "subtitle2": _r(f"重点关注:{' / '.join(b['headline'] for b in blocks[:3])}")},
     }]
+    # 行情速览场景(开场之后): 三组指数 rows
+    if indices:
+        idx_rows = []
+        for gi, g in enumerate(indices):
+            seg = "　".join(f"{i['name']} {i.get('price','')}点 "
+                            f"{'▲' if not i['pct'].startswith('-') else '▼'}{i['pct'].lstrip('-')}%"
+                            for i in g["items"])
+            idx_rows.append({"accent": ("red", "blue", "amber")[gi % 3],
+                             "label": _r(g["group"], True), "body": _r(seg)})
+        idx_narr = "先看行情速览。" + "。".join(
+            f"{g['group'].replace('·', '')}方面:" + "、".join(
+                f"{i['name']}{i.get('price','')}点,{'涨' if not i['pct'].startswith('-') else '跌'}"
+                f"{i['pct'].lstrip('-')}%" for i in g["items"])
+            for g in indices) + "。"
+        scenes.append({
+            "id": "indices", "template": "rows",
+            "narration": idx_narr, "caption": "", "captions": _cues(idx_narr),
+            "data": {"kicker": "行情速览", "headline": _r("前一交易日收盘与今晨日韩", True),
+                     "summary": None, "stat": None, "tags": [],
+                     "rows": idx_rows, "entrances": {"row0": 4, "row1": 6, "row2": 8}},
+        })
     for i, b in enumerate(blocks, 1):
         rows = []
         for l in b["lines"]:
@@ -176,6 +215,32 @@ def _build_story(intro, outro, blocks, date: str) -> dict:
                      "stat": b["stat"], "tags": b.get("sectors") or [],
                      "rows": rows, "entrances": ent},
         })
+    if anns:                                   # 公告: 一句引言 + 分页静默(每页5条5秒)
+        scenes.append({
+            "id": "ann-intro", "template": "rows",
+            "narration": "接下来是公司公告速览。", "caption": "", "captions": _cues("接下来是公司公告速览。"),
+            "data": {"kicker": "公司公告", "headline": _r(f"今日公告 {len(anns)} 条", True),
+                     "summary": _r("以下为今日重点公司公告, 逐页浏览。", True),
+                     "stat": {"value": str(len(anns)), "unit": "条", "label": "今日公司公告"},
+                     "tags": [], "rows": [], "entrances": {"summary": 4, "stat": 6}},
+        })
+        PER_PAGE = 5
+        for pi in range(0, len(anns), PER_PAGE):
+            page = anns[pi:pi + PER_PAGE]
+            rows = []
+            for j, t in enumerate(page):
+                rows.append({"accent": "blue",
+                             "label": _r(f"{pi + j + 1:02d}", True),
+                             "body": _r(_cut(t, 68))})
+            scenes.append({
+                "id": f"ann-p{pi // PER_PAGE + 1}", "template": "rows",
+                "narration": "", "silent": True, "durationS": 5,
+                "caption": "",
+                "data": {"kicker": f"公司公告 · {pi // PER_PAGE + 1}/{(len(anns) + PER_PAGE - 1) // PER_PAGE}",
+                         "headline": _r("公司公告速览", True),
+                         "summary": None, "stat": None, "tags": [],
+                         "rows": rows, "entrances": {"row0": 2, "row1": 4, "row2": 6, "row3": 8, "row4": 10}},
+            })
     scenes.append({
         "id": "closing", "template": "conclusion",
         "narration": outro, "caption": "", "captions": _cues(outro),
@@ -191,8 +256,8 @@ def _build_story(intro, outro, blocks, date: str) -> dict:
 def _assert_consistency(story: dict):
     """音画一致 + 板块词卫兵(构造性保证, 违反即停)。"""
     for s in story["scenes"]:
-        if s["template"] != "rows":
-            continue
+        if s["template"] != "rows" or not s["id"].startswith("news-"):
+            continue                          # 只对条目场景断言(公告分页/行情页规则不同)
         d = s["data"]
         shown = "".join(x["t"] for x in (d.get("summary") or [])) + \
                 "".join(x["t"] for row in d["rows"] for x in row["body"])

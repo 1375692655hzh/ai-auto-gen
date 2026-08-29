@@ -62,6 +62,9 @@ def render_morning_script(ctx, wf, params):
     except ValueError:
         date_cn = date
 
+    # 行情口播段(接口数据, 零LLM保真) + 公告区(静默展示, 不配音)
+    indices = payload.get("indices") or []
+    ann_items = [it for it in items if it.get("cat") == "公司公告"]
     intro = (f"早上好,今天是{date_cn},财经早报,今天共{len(sel)}条要闻,"
              f"先看头版:{sel[0]['title']}。")
     outro = "以上就是今天的财经早报,内容基于公开信息整理,不构成投资建议。关注我,每天几分钟看懂财经。"
@@ -89,7 +92,7 @@ def render_morning_script(ctx, wf, params):
     if est > MAX_SECONDS:
         sys.exit(f"口播稿预估 {est:.0f}s 超 {MAX_SECONDS}s 硬顶, 请降 video_top 后重跑")
 
-    md = _render_md(date, intro, outro, blocks, est, report, n_enriched)
+    md = _render_md(date, intro, outro, blocks, est, report, n_enriched, ann_items, indices)
     out = wf.run_dir / f"口播稿-{date}.md"
     out.write_text(md, encoding="utf-8")
     print(f"口播稿: {out} ({len(blocks)}条[扩写{n_enriched}], 正文{total_chars}字, 预估{est:.0f}s ≈ {est/60:.1f}分钟)")
@@ -139,7 +142,7 @@ def _lint_script(intro, outro, blocks, text_of):
     return {"fail": fail, "warn": warn}
 
 
-def _render_md(date, intro, outro, blocks, est, report, n_enriched):
+def _render_md(date, intro, outro, blocks, est, report, n_enriched, ann_items=None, indices=None):
     from datetime import datetime
     try:
         wd = "一二三四五六日"[datetime.strptime(date, '%Y-%m-%d').weekday()]
@@ -158,6 +161,12 @@ def _render_md(date, intro, outro, blocks, est, report, n_enriched):
         intro,
         "",
     ]
+    if indices:                                # 行情速览(结构化行, 视频画面数据源)
+        lines += ["## 行情速览", ""]
+        for g in indices:
+            seg = "｜".join(f"{i['name']} {i.get('price','')}点({i['pct']}%)" for i in g["items"])
+            lines.append(f"- {g['group']} | {seg}")
+        lines.append("")
     for b in blocks:
         lines.append(f"## {b['kicker']} | {b['headline']}")
         if b["summary"]:
@@ -169,4 +178,9 @@ def _render_md(date, intro, outro, blocks, est, report, n_enriched):
             lines.append(f"[{l['label']}] {l['text']}")
         lines.append("")
     lines += ["## 收尾", outro, ""]
-    return "\n".join(lines)
+    if ann_items:                              # 静默公告区(视频分页展示, 不配音; 人可删条)
+        lines += ["## 公告(静默展示, 每页5条, 每页5秒, 不配音)", ""]
+        for it in ann_items:
+            lines.append(f"- {it['text'].strip()}")
+        lines.append("")
+    return chr(10).join(lines)

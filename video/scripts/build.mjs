@@ -184,7 +184,9 @@ let totalFrames = 0;
 for (const s of story.scenes) {
 	let dur;
 	let audio = null;
-	if (ESTIMATE) {
+	if (s.silent) {                      // 静默场景: 固定时长(公告每页5s)
+		dur = s.durationS ?? 5;
+	} else if (ESTIMATE) {
 		dur = Math.max(4, s.narration.length / 4.2);
 	} else {
 		const file = path.join(audioDir, `${s.id}.mp3`);
