@@ -19,9 +19,25 @@ INDEX_FEED = [
 
 
 def _fetch_indices() -> list:
-    """新浪指数行情 → [{group, name, pct}]; 失败返回 [](头部行情区静默跳过)。"""
+    """新浪指数行情 → [{group, name, pct}]; 失败返回 [](头部行情区静默跳过)。
+    组标签按抓取时刻判定盘中/昨收(标签随 payload 固化, 复跑历史不漂移):
+    早报常规 08:30 跑 → A股/美股=昨收, 日韩(北京08:00开盘)=今晨盘中。"""
+    import datetime
     import requests
     codes = [c for _, items in INDEX_FEED for _, c in items]
+    now = datetime.datetime.now()
+    h = now.hour + now.minute / 60
+    wd = now.weekday()
+
+    def _label(group: str) -> str:
+        if group == "A股":
+            intraday = wd < 5 and 9.5 <= h < 15
+        elif group == "美股":                       # 夏令时口径(冬令时顺延1h, 仅影响凌晨窗口)
+            intraday = wd < 5 and (h >= 21.5 or h < 4.5)
+        else:                                       # 日韩
+            intraday = wd < 5 and 8.0 <= h < 15
+        return f"{group}·盘中" if intraday else f"{group}·昨收"
+
     try:
         r = requests.get("https://hq.sinajs.cn/list=" + ",".join(codes),
                          headers={"Referer": "https://finance.sina.com.cn"}, timeout=8)
@@ -35,7 +51,7 @@ def _fetch_indices() -> list:
                 if len(parts) >= 4:                    # 名称,点位,涨跌额,涨跌幅
                     row.append({"name": name, "pct": parts[3].strip()})
             if row:
-                out.append({"group": group, "items": row})
+                out.append({"group": _label(group), "items": row})
         if not out:
             print("⚠ 指数行情接口无有效数据, 头部行情区跳过")
         return out
