@@ -9,7 +9,7 @@ params:
   per_report_chars: 6000  # 每份早报送入模型的最大字数
   tag_lines: true         # 解读标签开关(失败自动降级为无解读版)
   tag_mode: direction     # direction=板块×方向(利好/利空/中性) / sectors=只写板块不写多空
-  tag_model: ""           # 打标模型: 空=默认 / ark:kimi-k3 等走 arkcli 订阅(失败自动回落)
+  tag_model: ark:kimi-k3   # 打标模型(11模型横评定选, 见 docs/打标模型选型.md): 空=默认GLM / ark:<模型名>=方舟订阅; 失败自动回落
   with_image: false       # 长图产物(按需; 图片是文章的额外产物类别)
   image_top: 16           # 图条上限(配额内截断)
 
