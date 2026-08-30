@@ -421,3 +421,209 @@ def _cn_idx(conf):
         ttl_min=60, default_enabled=True)
 def _sector(conf):
     return gs.sector_board_text(gs.fetch_em_sector_board())
+
+
+# ---------- MOA 四市场快讯源收录(土耳其/台湾/美股/港股, 2026-08-31) ----------
+# grok+gemini+codex 三代理独立全角度调研交叉裁决, 候选 35 端点本机逐一 curl 实测:
+# 33 通过全量收录(不做质量门槛, 选取权在用户); 5 个跑不通(缺key/被断)占位待恢复。
+# 弃选记录见 docs/add-a-source.md(新浪roll频道错配/AASTOCKS与Yahoo港股同源/智通500/finviz已收等)。
+
+# ===== 土耳其 =====
+
+@source("tcmb_fx", "market", "土耳其中行每日汇率牌价(USD/EUR等现汇买卖价, 官方XML零key, 交易日一更)",
+        ttl_min=720, default_enabled=True)
+def _tcmb_fx(conf):
+    return gs.fetch_tcmb_fx()
+
+
+@source("dailysabah_rss", "flash", "Daily Sabah商业新闻流(土耳其英文财经, 日内高频)",
+        ttl_min=30, default_enabled=True)
+def _dailysabah(conf):
+    return gs.fetch_dailysabah_rss(int(conf.get("page_size", 30)))
+
+
+@source("hurriyet_rss", "flash", "Hürriyet Daily News商业新闻流(土耳其英文, 带全文摘要)",
+        ttl_min=30, default_enabled=True)
+def _hurriyet(conf):
+    return gs.fetch_hurriyet_rss(int(conf.get("page_size", 30)))
+
+
+@source("dunya_rss", "flash", "Dünya世界报(土耳其主流财经日报, 土语, 5分钟刷新)",
+        ttl_min=15, default_enabled=True)
+def _dunya(conf):
+    return gs.fetch_dunya_rss(int(conf.get("page_size", 30)))
+
+
+@source("tcmb_evds", "market", "备用|土耳其央行EVDS2宏观序列API(利率/通胀/汇率, 免费key即申即得)",
+        auth="key", ttl_min=1440, default_enabled=False)
+def _tcmb_evds(conf):
+    return gs.fetch_tcmb_evds(str(conf.get("series", "TP.DK.USD.A")),
+                              str(conf.get("key", "")))
+
+
+# ===== 台湾 =====
+
+@source("cna_flash", "flash", "中央社财经快讯(台湾官方通讯社JSON API, 產經分类零key)",
+        ttl_min=10, default_enabled=True)
+def _cna(conf):
+    return gs.fetch_cna_flash(int(conf.get("page_size", 30)))
+
+
+@source("twse_news", "announcement", "台湾证交所官方新闻+法说会日历(OpenAPI零key, 民国年日期已转换)",
+        ttl_min=120, default_enabled=True)
+def _twse(conf):
+    return gs.fetch_twse_news(int(conf.get("page_size", 20)))
+
+
+@source("udn_rss", "flash", "经济日报即时新闻(台湾主流财经纸媒RSS零key)",
+        ttl_min=30, default_enabled=True)
+def _udn(conf):
+    return gs.fetch_udn_rss(int(conf.get("page_size", 30)))
+
+
+@source("ltn_rss", "flash", "自由时报财经新闻RSS(台湾, 零key)",
+        ttl_min=30, default_enabled=True)
+def _ltn(conf):
+    return gs.fetch_ltn_rss(int(conf.get("page_size", 30)))
+
+
+@source("technews_rss", "flash", "TechNews科技新报(台湾半导体/供应链视角, 台积电链素材)",
+        ttl_min=60, default_enabled=True)
+def _technews(conf):
+    return gs.fetch_technews_rss(int(conf.get("page_size", 20)))
+
+
+@source("moneydj_flash", "flash", "MoneyDJ新闻中心(台股盘口快讯, SSR HTML解析; 其RSS已退化空壳)",
+        ttl_min=15, default_enabled=True)
+def _moneydj(conf):
+    return gs.fetch_moneydj_flash(int(conf.get("page_size", 20)))
+
+
+@source("tw_cbc_stats", "market", "备用|台湾央行金融统计API(官方零key; 2026-08-31本机出口TLS被重置, 待部署环境复测)",
+        ttl_min=1440, default_enabled=False)
+def _tw_cbc(conf):
+    return gs.fetch_tw_cbc_stats(str(conf.get("filename", "BP01D01")))
+
+
+@source("finmind_news", "flash", "备用|FinMind台股个股新闻API(50+dataset, 免费token即申即得)",
+        auth="key", ttl_min=30, default_enabled=False)
+def _finmind(conf):
+    return gs.fetch_finmind_news(str(conf.get("key", "")), int(conf.get("page_size", 20)))
+
+
+# ===== 美股 =====
+
+@source("fed_press", "announcement", "美联储理事会新闻稿(FOMC/监管执法, 最高权威源RSS零key)",
+        ttl_min=60, default_enabled=True)
+def _fed_press(conf):
+    return gs.fetch_fed_press(int(conf.get("page_size", 20)))
+
+
+@source("marketwatch_rt", "flash", "MarketWatch实时电头流(道琼斯分钟级, 零key)",
+        ttl_min=5, default_enabled=True)
+def _mw_rt(conf):
+    return gs.fetch_marketwatch_rt(int(conf.get("page_size", 30)))
+
+
+@source("prnewswire", "announcement", "PR Newswire上市公司新闻稿原稿流(财报/公告第一落点)",
+        ttl_min=15, default_enabled=True)
+def _prnews(conf):
+    return gs.fetch_prnewswire(int(conf.get("page_size", 30)))
+
+
+@source("sec_press", "announcement", "SEC新闻稿(执法行动/规则制定, 与EDGAR申报流不同)",
+        ttl_min=120, default_enabled=True)
+def _sec_press(conf):
+    return gs.fetch_sec_press(int(conf.get("page_size", 20)))
+
+
+@source("treasury_press", "announcement", "美国财政部新闻稿RSS(仅/rss.xml有效路径)",
+        ttl_min=120, default_enabled=True)
+def _treasury_press(conf):
+    return gs.fetch_treasury_press(int(conf.get("page_size", 20)))
+
+
+@source("foxbusiness_rss", "flash", "Fox Business最新新闻流(英文零key)",
+        ttl_min=30, default_enabled=True)
+def _foxbiz(conf):
+    return gs.fetch_foxbusiness_rss(int(conf.get("page_size", 30)))
+
+
+@source("benzinga_rss", "flash", "Benzinga美股个股快讯+分析流(英文; 夹杂加密/预测类内容下游粗筛)",
+        ttl_min=15, default_enabled=True)
+def _benzinga(conf):
+    return gs.fetch_benzinga_rss(int(conf.get("page_size", 30)))
+
+
+@source("eia_energy", "peer_article", "EIA美国能源署Today in Energy(能源大宗基本面日报, 工作日每日)",
+        ttl_min=720, default_enabled=True)
+def _eia(conf):
+    return gs.fetch_eia_energy(int(conf.get("page_size", 10)))
+
+
+@source("finviz_news", "flash", "Finviz全市场新闻聚合(Bloomberg/Reuters/WSJ/CNBC等, 纯SSR零key带来源链接)",
+        ttl_min=15, default_enabled=True)
+def _finviz(conf):
+    return gs.fetch_finviz_news(int(conf.get("page_size", 40)))
+
+
+@source("nyfed_rates", "market", "纽约联储SOFR/EFFR/OBFR/TGCR官方利率最新值(Markets API零key)",
+        ttl_min=720, default_enabled=True)
+def _nyfed(conf):
+    return gs.fetch_nyfed_rates()
+
+
+@source("bls_macro", "market", "BLS美国CPI/非农/失业率最新值(公共API v1零key日限25次)",
+        ttl_min=1440, default_enabled=True)
+def _bls(conf):
+    return gs.fetch_bls_macro()
+
+
+@source("fiscal_debt", "market", "美国财政部国债总额日更(Fiscal Data零key免注册, T+1)",
+        ttl_min=720, default_enabled=True)
+def _fiscal_debt(conf):
+    return gs.fetch_fiscal_debt()
+
+
+@source("globenewswire", "announcement", "备用|GlobeNewswire上市公司稿流(2026-08-31本机出口IP多次ReadTimeout, 疑IDC段限制待复测)",
+        ttl_min=15, default_enabled=False)
+def _globenw(conf):
+    return gs.fetch_globenewswire(int(conf.get("page_size", 30)))
+
+
+# ===== 港股 =====
+
+@source("hkexnews", "announcement", "港交所披露易公告检索API(上市公司法定披露一手源, 零key含代码+PDF直链)",
+        ttl_min=15, default_enabled=True)
+def _hkexnews(conf):
+    return gs.fetch_hkexnews(int(conf.get("days", 3)), int(conf.get("page_size", 30)))
+
+
+@source("mingpao_rss", "flash", "明报即时财经RSS(港股IPO/中报/本地宏观, 盘中高频零key)",
+        ttl_min=15, default_enabled=True)
+def _mingpao(conf):
+    return gs.fetch_mingpao_rss(int(conf.get("page_size", 30)))
+
+
+@source("yahoo_hk_rss", "flash", "Yahoo香港财经新闻流(AASTOCKS AAFN快讯内容, 繁体带代码零key)",
+        ttl_min=15, default_enabled=True)
+def _yahoo_hk(conf):
+    return gs.fetch_yahoo_hk_rss(int(conf.get("page_size", 30)))
+
+
+@source("scmp_biz_rss", "flash", "SCMP南华早报Business频道(英文港股/中国财经视角, 标题摘要免费)",
+        ttl_min=60, default_enabled=True)
+def _scmp(conf):
+    return gs.fetch_scmp_biz_rss(int(conf.get("page_size", 20)))
+
+
+@source("eastmoney_hkus", "flash", "东财7×24快讯港美股频道(fastColumn=104, 与焦点102不同栏目)",
+        ttl_min=10, default_enabled=True)
+def _em_hkus(conf):
+    return gs.fetch_eastmoney_hkus(int(conf.get("page_size", 50)))
+
+
+@source("hkma_press", "announcement", "备用|香港金管局新闻稿Open API(官方零key; 2026-08-31本机出口TLS被重置, 待部署环境复测)",
+        ttl_min=120, default_enabled=False)
+def _hkma(conf):
+    return gs.fetch_hkma_press(int(conf.get("page_size", 20)))

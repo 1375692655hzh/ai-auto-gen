@@ -1187,3 +1187,446 @@ def sector_board_text(board: dict) -> list:
             seg = "、".join(f"{r['name']}{r['chg_pct']}" for r in rows)
             out.append({"time": today, "text": f"{label[key]}: {seg}", "source": "东财板块榜"})
     return out
+
+
+# ---------- MOA 四市场快讯源(土耳其/台湾/美股/港股, 2026-08-31 grok+gemini+codex 交叉调研+本机实测) ----------
+
+
+def _rss_titles(url: str, source: str, page_size: int, referer: str = "") -> list:
+    """通用 RSS 标题流解析: CDATA 标题 + pubDate(任意时区)→北京时间; 单条日期解析失败保留原串头16字符。"""
+    from email.utils import parsedate_to_datetime
+    r = requests.get(url, headers={"User-Agent": UA, "Referer": referer or url}, timeout=15)
+    r.raise_for_status()
+    r.encoding = r.apparent_encoding or r.encoding
+    out = []
+    for it in re.findall(r"<item\b[^>]*>(.*?)</item>", r.text, flags=re.S):
+        def g(tag_, s=it):
+            m = re.search(rf"<{tag_}>(.*?)</{tag_}>", s, flags=re.S)
+            if not m:
+                return ""
+            v = re.sub(r"<!\[CDATA\[(.*?)\]\]>", r"\1", m.group(1), flags=re.S)
+            return html.unescape(v).strip()
+        title = _strip_html(g("title"))
+        pub = g("pubDate")
+        try:
+            t = parsedate_to_datetime(pub).astimezone(_BJ).strftime("%Y-%m-%d %H:%M")
+        except (TypeError, ValueError):
+            try:  # ISO 8601(如 Yahoo 香港 2026-08-30T18:53:49Z)
+                t = datetime.datetime.fromisoformat(
+                    pub.replace("Z", "+00:00")).astimezone(_BJ).strftime("%Y-%m-%d %H:%M")
+            except (TypeError, ValueError):
+                t = pub[:16]
+        if title:
+            out.append({"time": t, "text": title[:200], "source": source, "url": g("link")})
+        if len(out) >= int(page_size):
+            break
+    return out
+
+
+# ===== 土耳其 =====
+
+def fetch_tcmb_fx() -> list:
+    """土耳其中央银行(TCMB)每日汇率牌价(官方XML零key, 交易日约15:30 TRT 更新一期)。"""
+    r = requests.get("https://www.tcmb.gov.tr/kurlar/today.xml",
+                     headers={"User-Agent": UA}, timeout=15)
+    r.raise_for_status()
+    r.encoding = "utf-8"
+    dm = re.search(r'Tarih="(\d{2})\.(\d{2})\.(\d{4})"', r.text)
+    if not dm:
+        return []  # 非交易日无新牌价(正常空数据)
+    when = f"{dm.group(3)}-{dm.group(2)}-{dm.group(1)} 15:30"
+    out = []
+    for m in re.finditer(r'<Currency[^>]*CurrencyCode="(USD|EUR|GBP|JPY|CNY)"[^>]*?>(.*?)</Currency>',
+                         r.text, re.S):
+        fb = re.search(r"<ForexBuying>([\d.]+)</ForexBuying>", m.group(2))
+        fs = re.search(r"<ForexSelling>([\d.]+)</ForexSelling>", m.group(2))
+        if fb and fs:
+            out.append({"time": when, "source": "土耳其中行汇率",
+                        "text": f"{m.group(1)}/TRY 现汇买入 {fb.group(1)} / 卖出 {fs.group(1)}"})
+    if not out:
+        raise RuntimeError("TCMB 牌价 XML 有日期头但未解析到币种, 疑格式改版")
+    return out
+
+
+def fetch_dailysabah_rss(page_size: int = 30) -> list:
+    """Daily Sabah 商业新闻流(英文, 土耳其财经/经济政策, 日内高频滚动, 零key)。"""
+    return _rss_titles("https://www.dailysabah.com/rssfeed/business", "DailySabah",
+                       page_size, "https://www.dailysabah.com/business")
+
+
+def fetch_hurriyet_rss(page_size: int = 30) -> list:
+    """Hürriyet Daily News 新闻流(英文土耳其)。注意: /rss/business 2026-04 起停更(死feed),
+    根 /rss 是空壳, 实测只有 /rss/news 活跃(含财经条目, 下游粗筛过滤时政)。"""
+    return _rss_titles("https://www.hurriyetdailynews.com/rss/news", "Hürriyet",
+                       page_size, "https://www.hurriyetdailynews.com/")
+
+
+def fetch_dunya_rss(page_size: int = 30) -> list:
+    """Dünya Gazetesi 世界报(土耳其主流财经日报, 土语, ttl=5分钟刷新)。"""
+    return _rss_titles("https://www.dunya.com/rss", "Dünya", page_size, "https://www.dunya.com/")
+
+
+def fetch_tcmb_evds(series: str = "TP.DK.USD.A", key: str = "") -> list:
+    """土耳其央行 EVDS2 宏观时间序列(利率/通胀/汇率全序列)。key 免费即申即得: evds2.tcmb.gov.tr。"""
+    if not key:
+        raise RuntimeError("tcmb_evds 需要免费 key: https://evds2.tcmb.gov.tr 注册即得")
+    today = datetime.datetime.now(_BJ)
+    start = (today - datetime.timedelta(days=10)).strftime("%d-%m-%Y")
+    r = requests.get("https://evds2.tcmb.gov.tr/service/evds/",
+                     params={"series": series, "startDate": start, "type": "json", "key": key},
+                     headers={"User-Agent": UA}, timeout=15)
+    r.raise_for_status()
+    items = (r.json() or {}).get("items") or []
+    col = series.replace(".", "_")
+    out = []
+    for it in items[-5:]:
+        v = it.get(col)
+        if v:
+            out.append({"time": str(it.get("TARIH", "")), "source": "TCMB-EVDS",
+                        "text": f"{series} = {v}"})
+    return out
+
+
+# ===== 台湾 =====
+
+def fetch_cna_flash(page_size: int = 30) -> list:
+    """中央社财经快讯(台湾官方通讯社, WNewsList JSON API 零key, 產經分类含要闻/产业/金融/币汇)。"""
+    r = requests.post("https://www.cna.com.tw/cna2018api/api/WNewsList",
+                      headers={"User-Agent": UA, "Referer": "https://www.cna.com.tw/list/aie.aspx"},
+                      data={"action": "0", "category": "aie", "pageidx": "1"}, timeout=15)
+    r.raise_for_status()
+    d = r.json()
+    if d.get("Result") != "Y":
+        raise RuntimeError(f"中央社 WNewsList Result={d.get('Result')!r}")
+    out = []
+    for it in ((d.get("ResultData") or {}).get("Items") or [])[:int(page_size)]:
+        title = (it.get("HeadLine") or "").strip()
+        t = (it.get("CreateTime") or "").replace("/", "-")[:16]
+        if title:
+            out.append({"time": t, "text": title, "source": "中央社",
+                        "url": it.get("PageUrl") or ""})
+    return out
+
+
+def _roc_date(d: str) -> str:
+    """民国年日期 '1150828' → '2026-08-28'。"""
+    d = (d or "").strip()
+    if len(d) == 7 and d.isdigit():
+        return f"{int(d[:3]) + 1911}-{d[3:5]}-{d[5:7]}"
+    return d
+
+
+def fetch_twse_news(page_size: int = 20) -> list:
+    """台湾证交所 OpenAPI: 官方新闻列表+活动日历(法说会/业绩发表会), 零key。"""
+    out = []
+    r = requests.get("https://openapi.twse.com.tw/v1/news/newsList",
+                     headers={"User-Agent": UA}, timeout=15)
+    r.raise_for_status()
+    for it in (r.json() or [])[:int(page_size)]:
+        title = (it.get("Title") or "").strip()
+        if title:
+            out.append({"time": _roc_date(it.get("Date", "")), "text": title,
+                        "source": "台湾证交所", "url": it.get("Url") or ""})
+    r2 = requests.get("https://openapi.twse.com.tw/v1/news/eventList",
+                      headers={"User-Agent": UA}, timeout=15)
+    r2.raise_for_status()
+    for it in (r2.json() or [])[:5]:
+        title = (it.get("Title") or "").strip()
+        if title:
+            out.append({"time": _roc_date(it.get("Date", "")), "text": "[活动] " + title,
+                        "source": "台湾证交所", "url": it.get("Details") or ""})
+    return out
+
+
+def fetch_udn_rss(page_size: int = 30) -> list:
+    """经济日报(台湾)即时新闻 RSS, 零key。"""
+    return _rss_titles("https://money.udn.com/rssfeed/news/1001/5588?ch=money", "经济日报(台)",
+                       page_size, "https://money.udn.com/")
+
+
+def fetch_ltn_rss(page_size: int = 30) -> list:
+    """自由时报财经新闻 RSS(台湾), 零key。"""
+    return _rss_titles("https://news.ltn.com.tw/rss/business.xml", "自由财经",
+                       page_size, "https://ec.ltn.com.tw/")
+
+
+def fetch_technews_rss(page_size: int = 20) -> list:
+    """TechNews 科技新报(台湾半导体/供应链视角, 台积电链早报素材), 零key。"""
+    return _rss_titles("https://technews.tw/feed", "TechNews(台)",
+                       page_size, "https://technews.tw/")
+
+
+def fetch_moneydj_flash(page_size: int = 20) -> list:
+    """MoneyDJ 新闻中心(台股盘口快讯, SSR HTML 列表页; 其 RSS 已退化为空壳故解析 HTML)。"""
+    r = requests.get("https://www.moneydj.com/kmdj/news/newshome.aspx",
+                     headers={"User-Agent": UA}, timeout=15)
+    r.raise_for_status()
+    r.encoding = r.apparent_encoding or r.encoding
+    today = datetime.datetime.now(_BJ).strftime("%Y-%m-%d")
+    out = []
+    for t, title, href in re.findall(
+            r'<span class="listDate">(\d{2}:\d{2})</span>\s*<span><a title="([^"]+)" href="([^"]+)"',
+            r.text):
+        title = html.unescape(title).strip().rstrip("…").rstrip(".")
+        if title:
+            out.append({"time": f"{today} {t}", "text": title, "source": "MoneyDJ",
+                        "url": "https://www.moneydj.com" + href})
+        if len(out) >= int(page_size):
+            break
+    return out
+
+
+def fetch_tw_cbc_stats(filename: str = "BP01D01") -> list:
+    """台湾央行金融统计 API(官方零key)。2026-08-31 起本机出口对该域名 TLS 层被重置, 在册待复测。"""
+    r = requests.get("https://cpx.cbc.gov.tw/API/DataAPI/Get",
+                     params={"FileName": filename}, headers={"User-Agent": UA}, timeout=15)
+    r.raise_for_status()
+    d = r.json()
+    rows = d.get("Data") or d if isinstance(d, list) else d.get("Data") or []
+    out = []
+    for it in rows[-5:]:
+        out.append({"time": str(it.get("TIME") or it.get("Date") or ""), "source": "台湾央行",
+                    "text": json.dumps(it, ensure_ascii=False)[:180]})
+    return out
+
+
+def fetch_finmind_news(key: str = "", page_size: int = 20) -> list:
+    """FinMind 台股个股新闻 API(50+ dataset)。key 免费即申即得: finmindtrade.com 注册。"""
+    if not key:
+        raise RuntimeError("finmind_news 需要免费 token: https://finmindtrade.com 注册即得")
+    r = requests.get("https://api.finmindtrade.com/api/v4/data",
+                     params={"dataset": "TaiwanStockNews", "token": key},
+                     headers={"User-Agent": UA}, timeout=15)
+    r.raise_for_status()
+    out = []
+    for it in (r.json().get("data") or [])[-int(page_size):]:
+        title = (it.get("title") or "").strip()
+        if title:
+            out.append({"time": str(it.get("date", "")), "text": title,
+                        "source": "FinMind", "url": it.get("link") or ""})
+    return out
+
+
+# ===== 美股 =====
+
+def fetch_fed_press(page_size: int = 20) -> list:
+    """美联储理事会新闻稿 RSS(FOMC/监管执法/贴现率, 最高权威源, 零key)。"""
+    return _rss_titles("https://www.federalreserve.gov/feeds/press_all.xml", "美联储",
+                       page_size, "https://www.federalreserve.gov/newsevents/pressreleases.htm")
+
+
+def fetch_marketwatch_rt(page_size: int = 30) -> list:
+    """MarketWatch 突发快讯(道琼斯 CDN, TTL 60s, 零key)。
+    注意: 旧 realtimeheadlines feed 2025-06 起停更(死feed), 实测只有 content.dowjones.io 系活跃。"""
+    return _rss_titles("https://feeds.content.dowjones.io/public/rss/mw_bulletins",
+                       "MarketWatch", page_size, "https://www.marketwatch.com/")
+
+
+def fetch_prnewswire(page_size: int = 30) -> list:
+    """PR Newswire 上市公司新闻稿原稿流(财报/公告第一落点, 零key)。"""
+    return _rss_titles("https://www.prnewswire.com/rss/news-releases-list.rss", "PRNewswire",
+                       page_size, "https://www.prnewswire.com/news-releases/")
+
+
+def fetch_sec_press(page_size: int = 20) -> list:
+    """SEC 自身新闻稿(执法行动/规则制定, 与 EDGAR 申报流不同), 零key。"""
+    return _rss_titles("https://www.sec.gov/news/pressreleases.rss", "SEC新闻稿",
+                       page_size, "https://www.sec.gov/news/pressreleases")
+
+
+def fetch_treasury_press(page_size: int = 20) -> list:
+    """美国财政部新闻稿 RSS(仅 /rss.xml 有效, /rss/press.xml 均 404), 零key。"""
+    return _rss_titles("https://home.treasury.gov/rss.xml", "美财政部",
+                       page_size, "https://home.treasury.gov/news/press-releases")
+
+
+def fetch_foxbusiness_rss(page_size: int = 30) -> list:
+    """Fox Business 最新新闻流(英文, 零key)。"""
+    return _rss_titles("https://moxie.foxbusiness.com/feedburner/latest.xml", "FoxBusiness",
+                       page_size, "https://www.foxbusiness.com/")
+
+
+def fetch_benzinga_rss(page_size: int = 30) -> list:
+    """Benzinga 美股个股快讯+分析流(英文; 夹杂加密/预测类内容, 下游粗筛过滤)。"""
+    return _rss_titles("https://www.benzinga.com/feed", "Benzinga",
+                       page_size, "https://www.benzinga.com/")
+
+
+def fetch_eia_energy(page_size: int = 10) -> list:
+    """EIA Today in Energy(美国能源署能源大宗基本面日报/分析, 工作日每日, 零key)。"""
+    return _rss_titles("https://www.eia.gov/rss/todayinenergy.xml", "EIA能源",
+                       page_size, "https://www.eia.gov/todayinenergy/")
+
+
+def fetch_finviz_news(page_size: int = 40) -> list:
+    """Finviz 全市场新闻聚合(聚合 Bloomberg/Reuters/WSJ/CNBC 等, 纯 SSR 零key, 带来源链接)。"""
+    r = requests.get("https://finviz.com/news.ashx",
+                     headers={"User-Agent": UA}, timeout=20)
+    r.raise_for_status()
+    now = datetime.datetime.now(_BJ)
+    out = []
+    for tm, link, title in re.findall(
+            r'<td[^>]*>\s*(\d{1,2}:\d{2}[ap]m|\w{3}-\d{2})\s*</td>\s*<td[^>]*>.*?'
+            r'<a[^>]+href="([^"]+)"[^>]*>([^<]{6,160})</a>', r.text, re.S):
+        title = _strip_html(title)
+        if re.match(r"\d{1,2}:\d{2}[ap]m$", tm):
+            hhmm = datetime.datetime.strptime(tm, "%I:%M%p").strftime("%H:%M")
+            t = f"{now.strftime('%Y-%m-%d')} {hhmm}"
+        else:
+            t = datetime.datetime.strptime(f"{now.year}-{tm}", "%Y-%b-%d").strftime("%Y-%m-%d")
+        if title:
+            out.append({"time": t, "text": title, "source": "Finviz聚合", "url": link})
+        if len(out) >= int(page_size):
+            break
+    return out
+
+
+def fetch_nyfed_rates() -> list:
+    """纽约联储 Markets API: SOFR/EFFR/OBFR/TGCR 官方利率最新值(零key, 与 Liberty 博客不同端点)。"""
+    r = requests.get("https://markets.newyorkfed.org/api/rates/all/latest.json",
+                     headers={"User-Agent": UA}, timeout=15)
+    r.raise_for_status()
+    rates = (r.json() or {}).get("refRates") or []
+    parts, when = [], ""
+    for it in rates:
+        t, v = it.get("type"), it.get("percentRate")
+        when = when or str(it.get("effectiveDate", ""))
+        if t in ("SOFR", "EFFR", "OBFR", "TGCR") and v is not None:
+            parts.append(f"{t} {v}%")
+    if not parts:
+        raise RuntimeError("纽约联储利率 API 返回无 percentRate 条目")
+    return [{"time": when, "source": "纽约联储利率", "text": " / ".join(parts)}]
+
+
+def fetch_bls_macro() -> list:
+    """BLS 劳工统计局公共 API v1(零key日限25次): CPI/非农/失业率最新值。"""
+    series = [("CUUR0000SA0", "美国CPI-U"), ("CES0000000001", "美国非农就业(千人)"),
+              ("LNS14000000", "美国失业率")]
+    out = []
+    for sid, name in series:
+        r = requests.get(f"https://api.bls.gov/publicAPI/v1/timeseries/data/{sid}",
+                         headers={"User-Agent": UA}, timeout=15)
+        r.raise_for_status()
+        d = r.json()
+        if d.get("status") != "REQUEST_SUCCEEDED":
+            raise RuntimeError(f"BLS {sid} status={d.get('status')}")
+        data = ((d.get("Results") or {}).get("series") or [{}])[0].get("data") or []
+        if data:
+            p = data[0]
+            out.append({"time": f"{p.get('year')}-{p.get('period', '').lstrip('M')}",
+                        "source": "BLS",
+                        "text": f"{name} {p.get('periodName')} {p.get('value')}"})
+    return out
+
+
+def fetch_fiscal_debt() -> list:
+    """美国财政部 Fiscal Data: 国债总额日更(T+1, 零key免注册)。"""
+    r = requests.get("https://api.fiscaldata.treasury.gov/services/api/fiscal_service/"
+                     "v2/accounting/od/debt_to_penny",
+                     params={"sort": "-record_date", "page[size]": 1},
+                     headers={"User-Agent": UA}, timeout=15)
+    r.raise_for_status()
+    data = (r.json() or {}).get("data") or []
+    if not data:
+        return []
+    d = data[0]
+    amt = float(d.get("tot_pub_debt_out_amt") or 0)
+    return [{"time": str(d.get("record_date", "")), "source": "美财政部",
+             "text": f"美国国债总额 ${amt / 1e12:.2f} 万亿"}]
+
+
+def fetch_globenewswire(page_size: int = 30) -> list:
+    """GlobeNewswire 上市公司稿流。2026-08-31 起本机出口 IP 多次 ReadTimeout(疑 IDC 段限制), 在册待复测。"""
+    return _rss_titles("https://www.globenewswire.com/RssFeed/orgclass/1/feedTitle/"
+                       "GlobeNewswire%20-%20News%20about%20Public%20Companies",
+                       "GlobeNewswire", page_size, "https://www.globenewswire.com/")
+
+
+# ===== 港股 =====
+
+def fetch_hkexnews(days: int = 3, page_size: int = 30) -> list:
+    """港交所披露易公告检索 API(上市公司法定披露一手源, 零key, 含股票代码+PDF直链)。"""
+    now = datetime.datetime.now(_BJ)
+    frm = (now - datetime.timedelta(days=int(days))).strftime("%Y%m%d")
+    r = requests.get("https://www1.hkexnews.hk/search/titleSearchServlet.do",
+                     params={"sortDir": "0", "sortByOptions": "DateTime", "category": "0",
+                             "market": "SEHK", "stockId": "-1", "documentType": "-1",
+                             "fromDate": frm, "toDate": now.strftime("%Y%m%d"), "title": "",
+                             "searchType": "1", "t1code": "-2", "t2Gcode": "-2", "t2code": "-2",
+                             "rowRange": str(int(page_size)), "lang": "zh"},
+                     headers={"User-Agent": UA,
+                              "Referer": "https://www1.hkexnews.hk/search/titlesearch.xhtml?lang=zh"},
+                     timeout=20)
+    r.raise_for_status()
+    inner = json.loads((r.json() or {}).get("result") or "[]")
+    out = []
+    for it in inner[:int(page_size)]:
+        m = re.match(r"(\d{2})/(\d{2})/(\d{4}) (\d{2}:\d{2})", it.get("DATE_TIME", ""))
+        when = f"{m.group(3)}-{m.group(2)}-{m.group(1)} {m.group(4)}" if m else it.get("DATE_TIME", "")
+        title = _strip_html(it.get("TITLE", ""))
+        cat = _strip_html(it.get("LONG_TEXT") or "")
+        text = f"[{it.get('STOCK_CODE', '')} {it.get('STOCK_NAME', '')}] {title}"
+        if title:
+            out.append({"time": when, "text": text + (f"({cat})" if cat else ""),
+                        "source": "披露易",
+                        "url": "https://www1.hkexnews.hk" + (it.get("FILE_LINK") or "")})
+    return out
+
+
+def fetch_mingpao_rss(page_size: int = 30) -> list:
+    """明报即时财经 RSS(港股 IPO/中报/本地宏观, 盘中高频, 零key)。"""
+    return _rss_titles("https://news.mingpao.com/rss/ins/s00002.xml", "明报财经",
+                       page_size, "https://news.mingpao.com/ins/")
+
+
+def fetch_yahoo_hk_rss(page_size: int = 30) -> list:
+    """Yahoo 香港财经新闻流(AASTOCKS AAFN 快讯内容, 繁体带股票代码, 零key)。"""
+    return _rss_titles("https://hk.finance.yahoo.com/news/rssindex", "Yahoo港股",
+                       page_size, "https://hk.finance.yahoo.com/news/")
+
+
+def fetch_scmp_biz_rss(page_size: int = 20) -> list:
+    """SCMP 南华早报 Business 频道(英文港股/中国财经视角, 标题摘要免费; /rss/92/feed 实测为 Business)。"""
+    return _rss_titles("https://www.scmp.com/rss/92/feed", "SCMP",
+                       page_size, "https://www.scmp.com/business")
+
+
+def fetch_eastmoney_hkus(page_size: int = 50) -> list:
+    """东财 7×24 快讯港美股频道(fastColumn=104, 与 eastmoney_fast 焦点102 不同栏目)。"""
+    r = requests.get(
+        "https://np-listapi.eastmoney.com/comm/web/getFastNewsList",
+        params={"client": "web", "biz": "web_724", "fastColumn": "104",
+                "sortEnd": "", "pageSize": page_size, "req_trace": int(time.time() * 1000)},
+        headers={"User-Agent": UA, "Referer": "https://kuaixun.eastmoney.com/"},
+        timeout=15,
+    )
+    r.raise_for_status()
+    d = r.json()
+    if d.get("code") != "1":
+        raise RuntimeError(f"东财港美股 code={d.get('code')}")
+    out = []
+    for it in ((d.get("data") or {}).get("fastNewsList") or [])[:int(page_size)]:
+        text = _strip_html((it.get("title") or "") + " " + (it.get("summary") or "")).strip()
+        t = (it.get("showTime") or "").strip()[:16]
+        if text:
+            out.append({"time": t, "text": text[:260], "source": "东财港美股"})
+    return out
+
+
+def fetch_hkma_press(page_size: int = 20) -> list:
+    """香港金管局新闻稿 Open API(官方零key)。2026-08-31 起本机出口 TLS 层被重置, 在册待复测。"""
+    r = requests.get("https://api.hkma.gov.hk/public/press-releases",
+                     params={"lang": "tc", "pagesize": int(page_size)},
+                     headers={"User-Agent": UA}, timeout=15)
+    r.raise_for_status()
+    d = r.json()
+    records = ((d.get("result") or {}).get("records") or d.get("records")
+               or (d.get("header") or {}) and d.get("result", {}).get("records") or [])
+    out = []
+    for it in records[:int(page_size)]:
+        title = (it.get("title") or it.get("TITLE") or "").strip()
+        if title:
+            out.append({"time": str(it.get("release_date") or it.get("date") or ""),
+                        "text": title, "source": "香港金管局",
+                        "url": it.get("link") or it.get("url") or ""})
+    return out

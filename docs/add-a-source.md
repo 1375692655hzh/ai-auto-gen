@@ -100,6 +100,69 @@
 
 历史回查（同轮用户要求）：此前因"观点流/范围外"判断被排除且**跑得通却被拦下**的，只有本轮 StockTwits/Reddit/Polymarket 三个（已纠正）。分析类轮落的雪球今日话题（阿里云 WAF）、Kobeissi Letter（Substack 404）、X 分析师 RSS 桥（nitter/RSSHub 公共实例均死）都是**跑不通**而非观点流判断，维持落选。范围外冻结清单（印度/欧洲/拉美/澳新/中东其他/加密）未解冻——用户本轮只点名了预测市场与观点流。
 
+### MOA 四市场快讯源收录（土耳其/台湾/美股/港股，2026-08-31）
+
+grok+gemini+codex 三代理**各自独立覆盖全部四市场**（不按市场分工），交叉裁决后 35 个候选端点全部经本机 curl 逐一复测：33 通过，其中 27 个收录启用（不做质量门槛，选取权在用户 `--set flash_sources=`），另 5 个缺 key/网络层被断占位待恢复。grok 两轮均未返回有效输出（如实记录），裁决基于 gemini/codex 双家+本机实测。
+
+**土耳其（4 启用 + 1 占位）**
+| 源 id | 给什么信息 | 形态 | 作息 | 启用条件 |
+|---|---|---|---|---|
+| `tcmb_fx` | 土耳其中行每日汇率牌价：USD/EUR/GBP/JPY/CNY 现汇买卖价 | 数据(market) | 交易日 15:30 TRT 一更 | 无 key，已在册可用 |
+| `dailysabah_rss` | Daily Sabah 商业新闻流（英文，土财经/经济政策） | 快讯(flash) | 日内高频 | 无 key，已在册可用 |
+| `hurriyet_rss` | Hürriyet Daily News 新闻流（英文；**注意 /rss/business 2026-04 起停更是死 feed**，实际接 /rss/news，含财经条目下游粗筛） | 快讯(flash) | 日内多次 | 无 key，已在册可用 |
+| `dunya_rss` | Dünya 世界报（土主流财经日报，土语，ttl=5 分钟刷新） | 快讯(flash) | 5 分钟 | 无 key，已在册可用 |
+| `tcmb_evds` | 土耳其央行 EVDS2 宏观序列（利率/通胀/汇率全序列 JSON） | 数据(market) | 按指标发布 | 需免费 key（evds2.tcmb.gov.tr 即申即得），配好翻开 |
+
+**台湾（6 启用 + 2 占位）**
+| 源 id | 给什么信息 | 形态 | 作息 | 启用条件 |
+|---|---|---|---|---|
+| `cna_flash` | 中央社财经快讯（台官方通讯社 WNewsList JSON API，產經分类含要闻/产业/金融/币汇，单页 100 条） | 快讯(flash) | 日内高频 | 无 key，已在册可用 |
+| `twse_news` | 台湾证交所官方新闻+法说会日历（OpenAPI 零 key，民国年日期已转公元） | 公告(announcement) | 交易日发布 | 无 key，已在册可用 |
+| `udn_rss` | 经济日报即时新闻（台主流财经纸媒；频道含非财经条目，下游粗筛） | 快讯(flash) | 日内高频 | 无 key，已在册可用 |
+| `ltn_rss` | 自由时报财经新闻 RSS | 快讯(flash) | 日内滚动 | 无 key，已在册可用 |
+| `technews_rss` | TechNews 科技新报（半导体/供应链视角，台积电链素材） | 快讯(flash) | 日内滚动 | 无 key，已在册可用 |
+| `moneydj_flash` | MoneyDJ 新闻中心（台股盘口快讯，SSR HTML 列表页；其 RSS 已退化空壳故解析 HTML） | 快讯(flash) | 日内滚动 | 无 key，已在册可用 |
+| `tw_cbc_stats` | 台湾央行金融统计 API（官方零 key） | 数据(market) | 按月发布 | **暂不启用**：2026-08-31 本机出口 TLS 层被重置（与 HKMA 同症，疑网络干扰），待部署环境复测 |
+| `finmind_news` | FinMind 台股个股新闻 API（50+ dataset） | 快讯(flash) | 滚动 | 需免费 token（finmindtrade.com 注册即得），配好翻开 |
+
+**美股（12 启用 + 1 占位）**
+| 源 id | 给什么信息 | 形态 | 作息 | 启用条件 |
+|---|---|---|---|---|
+| `fed_press` | 美联储理事会新闻稿（FOMC/监管执法/贴现率，最高权威源） | 公告(announcement) | 发布即更 | 无 key，已在册可用 |
+| `marketwatch_rt` | MarketWatch 突发快讯（道琼斯 CDN，TTL 60s；**旧 realtimeheadlines feed 2025-06 起停更**，接的是 content.dowjones.io 活跃端点） | 快讯(flash) | 分钟级 | 无 key，已在册可用 |
+| `prnewswire` | PR Newswire 上市公司新闻稿原稿流（财报/公告第一落点） | 公告(announcement) | 分钟级 | 无 key，已在册可用 |
+| `sec_press` | SEC 自身新闻稿（执法行动/规则制定，与 EDGAR 申报流不同） | 公告(announcement) | 发布即更 | 无 key，已在册可用 |
+| `treasury_press` | 美国财政部新闻稿（仅 /rss.xml 有效，/rss/press*.xml 均 404） | 公告(announcement) | 发布即更 | 无 key，已在册可用 |
+| `foxbusiness_rss` | Fox Business 最新新闻流（英文） | 快讯(flash) | 分钟级 | 无 key，已在册可用 |
+| `benzinga_rss` | Benzinga 美股个股快讯+分析流（英文，夹杂加密/预测类内容下游粗筛） | 快讯(flash) | 分钟级 | 无 key，已在册可用 |
+| `eia_energy` | EIA Today in Energy（能源大宗基本面日报/分析） | 成篇(peer_article) | 工作日每日 | 无 key，已在册可用 |
+| `finviz_news` | Finviz 全市场新闻聚合（Bloomberg/Reuters/WSJ/CNBC 等，纯 SSR 零 key 带来源链接） | 快讯(flash) | 秒~分钟级 | 无 key，已在册可用 |
+| `nyfed_rates` | 纽约联储 SOFR/EFFR/OBFR/TGCR 官方利率最新值（与 Liberty 博客不同端点） | 数据(market) | 交易日日更 | 无 key，已在册可用 |
+| `bls_macro` | BLS 美国 CPI/非农/失业率最新值（公共 API v1 零 key 日限 25 次，v2 key 免费提到 500） | 数据(market) | 月度发布日 | 无 key，已在册可用 |
+| `fiscal_debt` | 美国财政部国债总额（Fiscal Data API，T+1） | 数据(market) | 工作日 T+1 | 无 key，已在册可用 |
+| `globenewswire` | GlobeNewswire 上市公司稿流 | 公告(announcement) | 分钟级 | **暂不启用**：2026-08-31 本机出口 IP 多次 ReadTimeout（疑 IDC 段限制），代码在册待复测 |
+
+**港股（5 启用 + 1 占位）**
+| 源 id | 给什么信息 | 形态 | 作息 | 启用条件 |
+|---|---|---|---|---|
+| `hkexnews` | 港交所披露易公告检索 API：上市公司法定披露一手源（股票代码+标题+分类+PDF 直链，近 3 日窗口） | 公告(announcement) | 实时随发随更 | 无 key，已在册可用 |
+| `mingpao_rss` | 明报即时财经（港股 IPO 聆讯/中报/本地宏观） | 快讯(flash) | 盘中高频 | 无 key，已在册可用 |
+| `yahoo_hk_rss` | Yahoo 香港财经新闻流（AASTOCKS AAFN 快讯内容，繁体带代码；与美股 Yahoo RSS 不同端点） | 快讯(flash) | 分钟级 | 无 key，已在册可用 |
+| `scmp_biz_rss` | SCMP 南华早报 Business 频道（英文港股/中国财经视角，标题摘要免费；/rss/92/feed 实测为 Business） | 快讯(flash) | 日内滚动 | 无 key，已在册可用 |
+| `eastmoney_hkus` | 东财 7×24 快讯港美股频道（fastColumn=104，与焦点 102 不同栏目） | 快讯(flash) | 7×24 秒级 | 无 key，已在册可用 |
+| `hkma_press` | 香港金管局新闻稿 Open API（官方零 key） | 公告(announcement) | 发布即更 | **暂不启用**：2026-08-31 本机出口 TLS 层被重置，待部署环境复测 |
+
+弃选/失败记录（如实）：
+- **新浪滚动 API 两个频道均错配**：gemini 给的 pageid=153&lid=2515 实测是科技企业新闻、codex 给的 pageid=155&lid=1686 实测是社会新闻，都不是港股频道——**代理提名的参数必须本机验证内容**，不接。
+- **AASTOCKS 直抓**：264KB SSR 可解析，但 `yahoo_hk_rss` 已是同内容（AAFN 流）的零解析成本路径，不接直抓。
+- **智通财经**：首页 482KB 可解析但快讯页 `/kuaixun/` 500，首页 banner 结构价值低，不接。
+- **KAP 公开披露平台**（土耳其上市公司公告唯一入口）：官方 REST 需与 Borsa Istanbul 签约，新站 API 藏 JS chunk 需浏览器逆向，不接。
+- **MOPS 公开资讯观测站**（台）：带 cookie+referer 仍被安全页拦截，需浏览器/打码，不接。
+- **TWSE/TPEx 月营收等 opendata 数据集**：全量结构化数据非快讯流，对早报边际价值低，暂不接（后续做台股复盘工作流时再说）。
+- **亚特兰大联储 GDPNow**：无 JSON API 只有 Excel 直链，可用 pandas 读，暂不接。
+- **死 feed 确认**：TRT Haber /rss/ekonomi 404、CNN Money RSS 停在 2018、CNA 旧 RSS 全 404、工商时报无 RSS、信报 HKEJ 付费墙+403、RTHK feed 主机不可达、香港政府新闻处 GIA RSS 本机 TLS 被断（未收录，待复测）。
+- **系统性网络提醒**：本机出口对 `.gov.hk`/`cbc.gov.tw`/GlobeNewswire 存在 TLS/IP 层阻断（curl exit 35 与 ReadTimeout 双确认），HKMA/台湾央行/GlobeNewswire 三个官方源在港/海外节点很可能可用，占位待复测。
+
 ## 其余来源
 
 `python cli.py sources list` 查看全部（类型/启用/健康）。
