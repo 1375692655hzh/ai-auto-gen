@@ -1,0 +1,23 @@
+id: market-review
+title: 大盘复盘
+description: "盘后复盘: 指数明细+板块风向+近三日快讯线索 → LLM 盘面信号分数/明日观察/风险提示(结构移植自 daily_stock_analysis, 只写观察不做买卖建议)。独立于早报两条工作流, 盘后跑: A股15:30后/港股16:30后/美股在北京次日凌晨"
+version: 1.0.0
+
+params:
+  region: cn              # 复盘市场: cn(A股) / hk / us / jp / all
+  flash_sources: ""       # 近三日线索的快讯源选取: 空=全部启用; 逗号分隔源id=只抓指定
+  review_model: ark:kimi-k3   # 复盘合成模型: 空=生成链默认(kimi-k3)
+
+steps:
+  - id: fetch                      # 快讯池 = 近三日线索素材(复盘不用同行早报, only 未命中即全跳)
+    uses: fetch_news
+    with: {peer_sources: "无", flash_sources: "{params.flash_sources}"}
+  - id: data                       # 指数明细 + 板块涨跌榜 + 近三日线索
+    uses: review_data
+    with: {region: "{params.region}"}
+  - id: synth                      # LLM 复盘合成(数字逐字来自素材, 无买卖建议)
+    uses: review_synth
+    with: {model: "{params.review_model}"}
+  - id: render                     # 成品落盘待发 ← 审核点(人工确认后重跑续跑)
+    uses: review_render
+    review: true

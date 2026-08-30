@@ -34,3 +34,4 @@ from flows.steps import script as _script        # noqa: E402,F401
 from flows.steps import video as _video          # noqa: E402,F401
 from flows.steps import morning as _morning      # noqa: E402,F401
 from flows.steps import image as _image            # noqa: E402,F401
+from flows.steps import review as _review          # noqa: E402,F401  大盘复盘(market-review)

@@ -1076,3 +1076,114 @@ def fetch_polymarket_sentiment(page_size: int = 10) -> list:
         if len(out) >= int(page_size):
             break
     return out
+
+
+# ---------- 大盘复盘工作流数据(market-review, 2026-08-31) ----------
+
+CN_INDICES = {"sh000001": "上证指数", "sz399001": "深证成指",
+              "sz399006": "创业板指", "sh000688": "科创50"}
+
+
+def fetch_cn_index_snapshot() -> list:
+    """A股指数快照(新浪 hq 零鉴权): 名称/最新/涨跌幅。A股格式 parts[1]=今开 [2]=昨收 [3]=最新。"""
+    r = requests.get(f"https://hq.sinajs.cn/list={','.join(CN_INDICES)}",
+                     headers={"User-Agent": UA, "Referer": "https://finance.sina.com.cn/"},
+                     timeout=15)
+    r.raise_for_status()
+    body = r.content.decode("gbk", "ignore")
+    out = []
+    for m in re.finditer(r'hq_str_(\w+)="([^"]*)"', body):
+        code, raw = m.group(1), m.group(2)
+        if code not in CN_INDICES or not raw:
+            continue
+        parts = raw.split(",")
+        try:
+            price, prev = float(parts[3]), float(parts[2])
+            chg = (price - prev) / prev * 100 if prev else 0.0
+        except (IndexError, ValueError):
+            continue
+        out.append({"name": CN_INDICES[code], "price": f"{price:.2f}",
+                    "chg_pct": f"{chg:+.2f}%"})
+    if not out:
+        raise RuntimeError("A股指数快照解析为空(新浪 hq 结构改版?)")
+    return out
+
+
+def _em_board(fs: str, po: int, pz: int) -> list:
+    """东财板块榜单次拉取: fs 选板块池, po=1 降序(领涨)/0 升序(领跌)。"""
+    r = requests.get("https://17.push2.eastmoney.com/api/qt/clist/get",
+                     params={"pn": 1, "pz": pz, "po": po, "np": 1,
+                             "ut": "bd1d9ddb04089700cf9c27f6f7426281",
+                             "fltt": 2, "invt": 2, "fid": "f3", "fs": fs,
+                             "fields": "f12,f14,f3,f104,f105"},
+                     headers={"User-Agent": UA, "Referer": "https://quote.eastmoney.com/"},
+                     timeout=15)
+    r.raise_for_status()
+    out = []
+    for it in (((r.json().get("data") or {}).get("diff")) or []):
+        name, pct = it.get("f14"), it.get("f3")
+        if not name or not isinstance(pct, (int, float)):
+            continue
+        up, down = it.get("f104"), it.get("f105")
+        out.append({"name": name, "chg_pct": f"{pct:+.2f}%",
+                    "up_down": f"{up}涨/{down}跌" if isinstance(up, int) and isinstance(down, int) else ""})
+    return out
+
+
+def _sina_industry_board(top: int) -> tuple:
+    """新浪行业板块(零鉴权, 东财风控面外备胎): newSinaHy.php var 声明;
+    字段[5]=涨跌幅(已是百分数, 不要再乘100——2026-08-31 实测 农药化肥 2.4159=+2.42%)。
+    返回 (领涨 list, 领跌 list)。"""
+    r = requests.get("https://vip.stock.finance.sina.com.cn/q/view/newSinaHy.php",
+                     headers={"User-Agent": UA, "Referer": "https://finance.sina.com.cn/"},
+                     timeout=15)
+    r.raise_for_status()
+    body = r.content.decode("gbk", "ignore")
+    m = re.search(r"=\s*(\{.*\})\s*;?\s*$", body, re.S)
+    if not m:
+        raise RuntimeError("新浪行业板块响应结构改版")
+    rows = []
+    for v in json.loads(m.group(1)).values():
+        parts = str(v).split(",")
+        try:
+            rows.append({"name": parts[1], "chg": float(parts[5]),
+                         "up_down": f"{parts[2]}只成分股"})
+        except (IndexError, ValueError):
+            continue
+    rows.sort(key=lambda x: x["chg"], reverse=True)
+    fmt = [{"name": x["name"], "chg_pct": f"{x['chg']:+.2f}%", "up_down": x["up_down"]}
+           for x in rows]
+    return fmt[:top], fmt[-top:][::-1] if len(fmt) > top else []
+
+
+def fetch_em_sector_board(top: int = 5) -> dict:
+    """板块涨跌榜(零鉴权): 主=东财行业/概念各 TopN 领涨+领跌(akshare 同源);
+    东财 push2 集群失联(2026-08-31 实测风控/网络成片掉线)降级新浪行业榜(不同风控面, 概念榜置空);
+    两路全灭才抛错(异常纪律: 故障冒泡)。"""
+    try:
+        board = {"industry_top": _em_board("m:90 t:2 f:!50", 1, top),
+                 "industry_bottom": _em_board("m:90 t:2 f:!50", 0, top),
+                 "concept_top": _em_board("m:90 t:3 f:!50", 1, top),
+                 "concept_bottom": _em_board("m:90 t:3 f:!50", 0, top)}
+        if any(board.values()):
+            return board
+    except Exception as e:
+        print(f"  ⚠ 东财板块榜失败({type(e).__name__}), 降级新浪行业榜")
+    it, ib = _sina_industry_board(top)
+    if not it and not ib:
+        raise RuntimeError("东财+新浪板块榜两路全灭")
+    return {"industry_top": it, "industry_bottom": ib,
+            "concept_top": [], "concept_bottom": []}
+
+
+def sector_board_text(board: dict) -> list:
+    """板块榜结构化 dict → 源库文本条目。"""
+    label = {"industry_top": "行业领涨", "industry_bottom": "行业领跌",
+             "concept_top": "概念领涨", "concept_bottom": "概念领跌"}
+    out = []
+    today = datetime.datetime.now(_BJ).strftime("%Y-%m-%d %H:%M")
+    for key, rows in board.items():
+        if rows:
+            seg = "、".join(f"{r['name']}{r['chg_pct']}" for r in rows)
+            out.append({"time": today, "text": f"{label[key]}: {seg}", "source": "东财板块榜"})
+    return out

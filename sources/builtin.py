@@ -9,6 +9,7 @@ kind: flash 快讯 | peer_article 同行早报 | calendar 日历 | market 行情
 
 import sys
 import importlib.util
+from datetime import datetime
 from pathlib import Path
 
 _GEN = Path(__file__).resolve().parent.parent / "generator"
@@ -405,3 +406,18 @@ def _stocktwits(conf):
         auth="oauth", ttl_min=15, default_enabled=False)
 def _reddit(conf):
     return gs.fetch_reddit_hot(str(conf.get("subreddit", "stocks")), int(conf.get("page_size", 25)))
+
+
+# ---------- 大盘复盘工作流数据源(market-review, 2026-08-31) ----------
+
+@source("cn_index_snapshot", "market", "A股指数快照(上证/深成/创业板/科创50, 新浪hq零key)",
+        ttl_min=15, default_enabled=True)
+def _cn_idx(conf):
+    return [{"time": datetime.now().strftime("%Y-%m-%d %H:%M"), "source": "A股指数",
+             "text": f"{x['name']} {x['price']} ({x['chg_pct']})"} for x in gs.fetch_cn_index_snapshot()]
+
+
+@source("em_sector_board", "market", "东财板块涨跌榜(行业/概念 领涨+领跌各Top5, 零key)",
+        ttl_min=60, default_enabled=True)
+def _sector(conf):
+    return gs.sector_board_text(gs.fetch_em_sector_board())
