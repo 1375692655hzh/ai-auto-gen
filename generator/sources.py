@@ -1630,3 +1630,169 @@ def fetch_hkma_press(page_size: int = 20) -> list:
                         "text": title, "source": "香港金管局",
                         "url": it.get("link") or it.get("url") or ""})
     return out
+
+
+# ---------- MOA grok 迟到补充轮(2026-08-31, 全部本机复测后收录) ----------
+
+
+def fetch_kap_disclosures(days: int = 3, page_size: int = 30) -> list:
+    """KAP 公开披露平台(土耳其上市公司法定公告一手源, Borsa Istanbul 官方)。
+    关键坑: 旧 GET /tr/api/disclosure/list 已 404, 必须 POST JSON 到 byCriteria。"""
+    now = datetime.datetime.now(_BJ)
+    body = {"fromDate": (now - datetime.timedelta(days=int(days))).strftime("%Y-%m-%d"),
+            "toDate": now.strftime("%Y-%m-%d"), "member": "", "disclosureClass": ""}
+    r = requests.post("https://www.kap.org.tr/tr/api/disclosure/members/byCriteria",
+                      headers={"User-Agent": UA, "Content-Type": "application/json",
+                               "Referer": "https://www.kap.org.tr/tr/"},
+                      json=body, timeout=20)
+    r.raise_for_status()
+    arr = r.json()
+    if not isinstance(arr, list):
+        raise RuntimeError(f"KAP byCriteria 返回非数组: {str(arr)[:100]}")
+    out = []
+    for it in arr[:int(page_size)]:
+        m = re.match(r"(\d{2})\.(\d{2})\.(\d{4}) (\d{2}:\d{2})", it.get("publishDate", ""))
+        when = f"{m.group(3)}-{m.group(2)}-{m.group(1)} {m.group(4)}" if m else it.get("publishDate", "")
+        code = (it.get("stockCodes") or "").strip()
+        company = (it.get("kapTitle") or "").strip()
+        subject = (it.get("subject") or "").strip()
+        if subject:
+            out.append({"time": when, "source": "KAP披露",
+                        "text": f"[{code} {company}] {subject}"})
+    return out
+
+
+def fetch_cnbce_rss(page_size: int = 30) -> list:
+    """CNBC-e 快讯(土耳其, ttl=5分钟单次约250条, 土语)。"""
+    return _rss_titles("https://www.cnbce.com/rss", "CNBC-e",
+                       page_size, "https://www.cnbce.com/")
+
+
+def fetch_foreks_rss(page_size: int = 30) -> list:
+    """Foreks 快讯(土耳其本土财经数据商, 土语, 零key; /haberleri 页面已死只留 /rss/)。"""
+    return _rss_titles("https://www.foreks.com/rss/", "Foreks",
+                       page_size, "https://www.foreks.com/")
+
+
+def fetch_sabah_rss(page_size: int = 20) -> list:
+    """Sabah 经济频道(土耳其宏观日程/政策, 早报语境, 日更约10条)。"""
+    return _rss_titles("https://www.sabah.com.tr/rss/ekonomi.xml", "Sabah经济",
+                       page_size, "https://www.sabah.com.tr/ekonomi")
+
+
+def fetch_tcmb_press(page_size: int = 20) -> list:
+    """土耳其中行新闻稿 Atom(利率决议/流动性操作; Content-Type 标 text/html 但 body 是合法 Atom)。"""
+    r = requests.get("https://www.tcmb.gov.tr/wps/wcm/connect/EN/TCMB+EN/Bottom+Menu/Other/RSS/Press+Releases",
+                     headers={"User-Agent": UA}, timeout=15)
+    r.raise_for_status()
+    r.encoding = "utf-8"
+    out = []
+    for it in re.findall(r"<entry>(.*?)</entry>", r.text, flags=re.S):
+        def g(tag_, s=it):
+            m = re.search(rf"<{tag_}[^>]*>(.*?)</{tag_}>", s, flags=re.S)
+            if not m:
+                return ""
+            v = re.sub(r"<!\[CDATA\[(.*?)\]\]>", r"\1", m.group(1), flags=re.S)
+            return html.unescape(v).strip()
+        title = _strip_html(g("title"))
+        t = g("published") or g("updated")
+        try:  # "Aug 28, 2026, 5:23:07 PM" 土耳其本地时间(UTC+3)
+            dt = datetime.datetime.strptime(t, "%b %d, %Y, %I:%M:%S %p")
+            t = dt.replace(tzinfo=datetime.timezone(datetime.timedelta(hours=3))
+                           ).astimezone(_BJ).strftime("%Y-%m-%d %H:%M")
+        except (TypeError, ValueError):
+            t = t[:16]
+        if title:
+            out.append({"time": t, "text": title[:200], "source": "土耳其中行"})
+        if len(out) >= int(page_size):
+            break
+    return out
+
+
+def fetch_yahoo_tw_rss(page_size: int = 30) -> list:
+    """Yahoo 奇摩股市 RSS(台股盘面快讯, ttl=5; 可按个股 ?s=2330.TW 订阅)。"""
+    return _rss_titles("https://tw.stock.yahoo.com/rss?category=tw-market", "Yahoo奇摩股市",
+                       page_size, "https://tw.stock.yahoo.com/")
+
+
+def _tw_mops(url: str, code_field: str, source_name: str, page_size: int) -> list:
+    """台湾上市/上柜公司每日重大讯息 OpenAPI 共用解析(民国年日期转换)。"""
+    r = requests.get(url, headers={"User-Agent": UA}, timeout=15)
+    r.raise_for_status()
+    out = []
+    for it in (r.json() or [])[:int(page_size)]:
+        # TWSE 端点键名带尾部空格("主旨 "), TPEx 不带——两个都试
+        subject = (it.get("主旨") or it.get("主旨 ") or "").strip()
+        when = _roc_date(it.get("出表日期") or it.get("Date") or "")
+        code = it.get("公司代號") or it.get("SecuritiesCompanyCode") or ""
+        name = it.get("公司名稱") or it.get("CompanyName") or ""
+        if subject:
+            out.append({"time": when, "text": f"[{code} {name}] {subject}",
+                        "source": source_name})
+    return out
+
+
+def fetch_twse_mops(page_size: int = 30) -> list:
+    """台湾上市公司每日重大讯息(证交所 OpenAPI t187ap04_L, 日更出表, 零key)。"""
+    return _tw_mops("https://openapi.twse.com.tw/v1/opendata/t187ap04_L",
+                    "公司代號", "TWSE重大讯息", page_size)
+
+
+def fetch_tpex_mops(page_size: int = 30) -> list:
+    """台湾上柜公司每日重大讯息(柜买中心 OpenAPI t187ap04_O, 与上市端点互补, 零key)。"""
+    return _tw_mops("https://www.tpex.org.tw/openapi/v1/mopsfin_t187ap04_O",
+                    "SecuritiesCompanyCode", "TPEx重大讯息", page_size)
+
+
+def fetch_fsc_press(page_size: int = 20) -> list:
+    """台湾金管会新闻稿 RSS(证期局每日新闻/财报申报/裁罚)。2026-08-31 本机出口 TLS 被重置, 在册待复测。"""
+    return _rss_titles("https://www.fsc.gov.tw/RSS/Messages?serno=201202290009&language=chinese",
+                       "台湾金管会", page_size, "https://www.fsc.gov.tw/")
+
+
+def fetch_bea_rss(page_size: int = 10) -> list:
+    """BEA 美国经济分析局新闻稿(GDP/PCE 发布, 通常 08:30 ET; 注意 www.bea.gov/rss.xml 是 404)。"""
+    return _rss_titles("https://apps.bea.gov/rss/rss.xml", "BEA",
+                       page_size, "https://www.bea.gov/news/current-releases")
+
+
+def fetch_seekingalpha_rt(page_size: int = 30) -> list:
+    """Seeking Alpha 突发快讯流(分钟级带ticker; feed 自述限 personal/non-commercial, 注意 ToS)。"""
+    return _rss_titles("https://seekingalpha.com/market_currents.xml", "SeekingAlpha",
+                       page_size, "https://seekingalpha.com/market-news")
+
+
+def fetch_gdpnow_rss(page_size: int = 5) -> list:
+    """亚特兰大联储 GDPNow 预测更新 RSS(无需解析 xlsx, 发布即推)。"""
+    return _rss_titles("https://www.atlantafed.org/rss/GDPNow", "GDPNow",
+                       page_size, "https://www.atlantafed.org/cqer/research/gdpnow")
+
+
+def fetch_finra_press(page_size: int = 10) -> list:
+    """FINRA 美国金融业监管局新闻稿(执法/纪律处分; 注意 https 握手失败必须走 http)。"""
+    return _rss_titles("http://feeds.finra.org/FINRANews", "FINRA",
+                       page_size, "https://www.finra.org/newsroom")
+
+
+def fetch_hkex_press(page_size: int = 20) -> list:
+    """香港交易所自身新闻稿 RSS(规则/产品/市场动态, 与披露易公司公告不同), 零key。"""
+    return _rss_titles("https://www.hkex.com.hk/Services/RSS-Feeds/News-Releases?sc_lang=zh-HK",
+                       "港交所", page_size, "https://www.hkex.com.hk/News/News-Release?sc_lang=zh-HK")
+
+
+def fetch_sfc_press(page_size: int = 20) -> list:
+    """香港证监会新闻稿 RSS(执法/互联互通/季报; description 常为空, 以标题为准)。"""
+    return _rss_titles("https://www.sfc.hk/TC/RSS-Feeds/Press-releases", "香港证监会",
+                       page_size, "https://www.sfc.hk/TC/News-and-announcements")
+
+
+def fetch_rthk_finance(page_size: int = 30) -> list:
+    """香港电台财经即时快讯(ttl=10, 近7×24, 周末有ADR/金油汇; 301跳 rthk9 后 200)。"""
+    return _rss_titles("https://rthk.hk/rthk/news/rss/c_expressnews_cfinance.xml", "RTHK财经",
+                       page_size, "https://news.rthk.hk/rthk/ch/")
+
+
+def fetch_hkgov_finance(page_size: int = 20) -> list:
+    """香港政府新闻网财经 RSS(财政司司长网志/宏观政策)。2026-08-31 本机出口 TLS 被重置, 在册待复测。"""
+    return _rss_titles("https://www.news.gov.hk/tc/categories/finance/html/articlelist.rss.xml",
+                       "香港政府财经", page_size, "https://www.news.gov.hk/tc/categories/finance/")

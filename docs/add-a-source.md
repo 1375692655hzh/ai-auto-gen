@@ -163,6 +163,32 @@ grok+gemini+codex 三代理**各自独立覆盖全部四市场**（不按市场�
 - **死 feed 确认**：TRT Haber /rss/ekonomi 404、CNN Money RSS 停在 2018、CNA 旧 RSS 全 404、工商时报无 RSS、信报 HKEJ 付费墙+403、RTHK feed 主机不可达、香港政府新闻处 GIA RSS 本机 TLS 被断（未收录，待复测）。
 - **系统性网络提醒**：本机出口对 `.gov.hk`/`cbc.gov.tw`/GlobeNewswire 存在 TLS/IP 层阻断（curl exit 35 与 ReadTimeout 双确认），HKMA/台湾央行/GlobeNewswire 三个官方源在港/海外节点很可能可用，占位待复测。
 
+#### grok 迟到补充轮（同日复测收录 +17）
+
+grok 报告在首轮提交后才返回（前两轮被服务端取消），带来一批双家未覆盖的增量，全部经本机复测后收录：**KAP 披露是本批最重**——土耳其上市公司法定公告一手源，codex 实测旧 GET 端点 404 判了死刑，grok 给出必须 POST JSON 的 `byCriteria` 端点，本机复测 433KB 真实公告 JSON，证实 grok 对、codex 的"已消失"结论错。
+
+| 源 id | 给什么信息 | 市场/形态 | 作息 | 启用条件 |
+|---|---|---|---|---|
+| `kap_disclosures` | KAP 公开披露平台：土上市公司法定公告（ODA/财报，含代码/公司/主旨） | 土耳其 / 公告 | 近实时，周末亦有披露 | 无 key（必须 POST JSON），已在册可用 |
+| `cnbce_rss` | CNBC-e 快讯（ttl=5，单次约 250 条） | 土耳其 / 快讯(flash) | 分钟级 | 无 key，已在册可用 |
+| `foreks_rss` | Foreks 快讯（本土财经数据商，/haberleri 页面已死只留 /rss/） | 土耳其 / 快讯(flash) | 小时级 | 无 key，已在册可用 |
+| `sabah_rss` | Sabah 经济频道（宏观日程/政策，早报语境） | 土耳其 / 快讯(flash) | 日更约 10 条 | 无 key，已在册可用 |
+| `tcmb_press` | 土耳其中行新闻稿 Atom（利率决议/流动性操作；日期格式 "Aug 28, 2026, 5:23:07 PM" 按 UTC+3 转北京） | 土耳其 / 公告 | 事件驱动 | 无 key，已在册可用 |
+| `yahoo_tw_rss` | Yahoo 奇摩股市 RSS（ttl=5，可按个股 ?s=2330.TW 订阅；codex"无公开 RSS"结论有误） | 台湾 / 快讯(flash) | 分钟级 | 无 key，已在册可用 |
+| `twse_mops` | 台湾**上市**公司每日重大讯息（OpenAPI t187ap04_L；**键名"主旨 "带尾部空格**是解析坑） | 台湾 / 公告 | 日更出表 | 无 key，已在册可用 |
+| `tpex_mops` | 台湾**上柜**公司每日重大讯息（OpenAPI t187ap04_O，与上市互补） | 台湾 / 公告 | 日更出表 | 无 key，已在册可用 |
+| `bea_rss` | BEA 经济分析局新闻稿（GDP/PCE，08:30 ET；www.bea.gov/rss.xml 是 404，须用 apps.bea.gov） | 美股 / 公告 | 发布日 | 无 key，已在册可用 |
+| `seekingalpha_rt` | Seeking Alpha 突发快讯流（分钟级带 ticker；feed 自述限 personal/non-commercial，注意 ToS） | 美股 / 快讯(flash) | 分钟级 | 无 key，已在册可用 |
+| `gdpnow_rss` | 亚特兰大联储 GDPNow 预测更新 RSS（gemini 说"只有 xlsx"，grok 找到 RSS，本机复测 200） | 美股 / 数据(market) | 发布即推 | 无 key，已在册可用 |
+| `finra_press` | FINRA 金融业监管局新闻稿（执法/纪律处分；**https 握手失败必须走 http**） | 美股 / 公告 | 不定期 | 无 key，已在册可用 |
+| `hkex_press` | 港交所自身新闻稿（规则/产品/市场动态，与披露易公司公告互补） | 港股 / 公告 | 不定期 | 无 key，已在册可用 |
+| `sfc_press` | 香港证监会新闻稿（执法/互联互通；description 常为空以标题为准） | 港股 / 公告 | 工作日不定期 | 无 key，已在册可用 |
+| `rthk_finance` | 香港电台财经即时快讯（ttl=10 近 7×24，周末有 ADR/金油汇；301 跳 rthk9 本机可达） | 港股 / 快讯(flash) | 近 7×24 | 无 key，已在册可用 |
+| `fsc_press` | 台湾金管会新闻稿（证期局每日新闻/裁罚） | 台湾 / 公告 | 工作日 | **暂不启用**：本机出口 TLS 被重置（gov.tw 同症），待复测 |
+| `hkgov_finance` | 香港政府新闻网财经（财政司司长网志/宏观政策） | 港股 / 公告 | 不定期 | **暂不启用**：本机出口 TLS 被重置（gov.hk 同症），待复测 |
+
+弃选（本批）：CNA feedburner RSS（与已收 cna_flash JSON API 同源且条目更少）；TreasuryDirect 发行公告（太细分）；Alpha Vantage demo（已有 `alphavantage_news` 占位）。grok 亦有两处错误已在复测中拦下：声称"披露易无免登录 GET JSON"（`hkexnews` 首轮已实测收录）、"PR Newswire 时 200 时 404 不稳定"（本机两次 200，已在册）。
+
 ## 其余来源
 
 `python cli.py sources list` 查看全部（类型/启用/健康）。

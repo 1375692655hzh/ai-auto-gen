@@ -627,3 +627,109 @@ def _em_hkus(conf):
         ttl_min=120, default_enabled=False)
 def _hkma(conf):
     return gs.fetch_hkma_press(int(conf.get("page_size", 20)))
+
+
+# ---------- MOA grok 迟到补充轮(2026-08-31): 双家未覆盖的增量, 全部本机复测后收录 ----------
+# 最重增量: KAP 披露(土耳其版披露易, 必须POST JSON, 旧GET端点404是codex误判原因)、
+# TWSE/TPEx 重大讯息 OpenAPI(台股法定公告)。fsc/hkgov 本机TLS被断占位待复测。
+
+@source("kap_disclosures", "announcement", "KAP公开披露平台(土耳其上市公司法定公告一手源, POST JSON零key)",
+        ttl_min=15, default_enabled=True)
+def _kap(conf):
+    return gs.fetch_kap_disclosures(int(conf.get("days", 3)), int(conf.get("page_size", 30)))
+
+
+@source("cnbce_rss", "flash", "CNBC-e快讯(土耳其, ttl=5分钟单次约250条, 土语)",
+        ttl_min=10, default_enabled=True)
+def _cnbce(conf):
+    return gs.fetch_cnbce_rss(int(conf.get("page_size", 30)))
+
+
+@source("foreks_rss", "flash", "Foreks快讯(土耳其本土财经数据商, 土语)",
+        ttl_min=30, default_enabled=True)
+def _foreks(conf):
+    return gs.fetch_foreks_rss(int(conf.get("page_size", 30)))
+
+
+@source("sabah_rss", "flash", "Sabah经济频道(土耳其宏观日程/政策, 早报语境日更)",
+        ttl_min=120, default_enabled=True)
+def _sabah(conf):
+    return gs.fetch_sabah_rss(int(conf.get("page_size", 20)))
+
+
+@source("tcmb_press", "announcement", "土耳其中行新闻稿Atom(利率决议/流动性操作, 事件驱动)",
+        ttl_min=120, default_enabled=True)
+def _tcmb_press(conf):
+    return gs.fetch_tcmb_press(int(conf.get("page_size", 20)))
+
+
+@source("yahoo_tw_rss", "flash", "Yahoo奇摩股市RSS(台股盘面快讯, ttl=5, 可按个股订阅)",
+        ttl_min=10, default_enabled=True)
+def _yahoo_tw(conf):
+    return gs.fetch_yahoo_tw_rss(int(conf.get("page_size", 30)))
+
+
+@source("twse_mops", "announcement", "台湾上市公司每日重大讯息(证交所OpenAPI, 日更出表零key)",
+        ttl_min=720, default_enabled=True)
+def _twse_mops(conf):
+    return gs.fetch_twse_mops(int(conf.get("page_size", 30)))
+
+
+@source("tpex_mops", "announcement", "台湾上柜公司每日重大讯息(柜买中心OpenAPI, 与上市互补零key)",
+        ttl_min=720, default_enabled=True)
+def _tpex_mops(conf):
+    return gs.fetch_tpex_mops(int(conf.get("page_size", 30)))
+
+
+@source("fsc_press", "announcement", "备用|台湾金管会新闻稿RSS(2026-08-31本机出口TLS被重置, 待部署环境复测)",
+        ttl_min=120, default_enabled=False)
+def _fsc(conf):
+    return gs.fetch_fsc_press(int(conf.get("page_size", 20)))
+
+
+@source("bea_rss", "announcement", "BEA美国经济分析局新闻稿(GDP/PCE发布, 通常08:30 ET)",
+        ttl_min=720, default_enabled=True)
+def _bea(conf):
+    return gs.fetch_bea_rss(int(conf.get("page_size", 10)))
+
+
+@source("seekingalpha_rt", "flash", "Seeking Alpha突发快讯流(分钟级带ticker; feed自述限personal/non-commercial注意ToS)",
+        risk="medium", ttl_min=5, default_enabled=True)
+def _seekingalpha(conf):
+    return gs.fetch_seekingalpha_rt(int(conf.get("page_size", 30)))
+
+
+@source("gdpnow_rss", "market", "亚特兰大联储GDPNow预测更新RSS(发布即推, 无需解析xlsx)",
+        ttl_min=1440, default_enabled=True)
+def _gdpnow(conf):
+    return gs.fetch_gdpnow_rss(int(conf.get("page_size", 5)))
+
+
+@source("finra_press", "announcement", "FINRA美国金融业监管局新闻稿(执法/纪律处分; 必须走http, https握手失败)",
+        ttl_min=1440, default_enabled=True)
+def _finra(conf):
+    return gs.fetch_finra_press(int(conf.get("page_size", 10)))
+
+
+@source("hkex_press", "announcement", "香港交易所自身新闻稿RSS(规则/产品/市场动态, 与披露易公司公告不同)",
+        ttl_min=120, default_enabled=True)
+def _hkex_press(conf):
+    return gs.fetch_hkex_press(int(conf.get("page_size", 20)))
+
+
+@source("sfc_press", "announcement", "香港证监会新闻稿RSS(执法/互联互通/季报)",
+        ttl_min=120, default_enabled=True)
+def _sfc(conf):
+    return gs.fetch_sfc_press(int(conf.get("page_size", 20)))
+
+
+@source("rthk_finance", "flash", "香港电台财经即时快讯(ttl=10近7×24, 周末有ADR/金油汇)",
+        ttl_min=10, default_enabled=True)
+def _rthk(conf):
+    return gs.fetch_rthk_finance(int(conf.get("page_size", 30)))
+
+
+@source("hkgov_finance", "announcement", "备用|香港政府新闻网财经RSS(2026-08-31本机出口TLS被重置, 待部署环境复测)",
+        ttl_min=120, default_enabled=False)
+def _hkgov(conf):
+    return gs.fetch_hkgov_finance(int(conf.get("page_size", 20)))
