@@ -15,8 +15,80 @@ import { ComparePanel } from "./templates-core";
 /* ---------------- rows：证据行列表 ---------------- */
 
 export const RowsTpl: React.FC<SceneProps> = (props) => {
-	const d = props.scene.data as unknown as RowsData;
+	const d = props.scene.data as unknown as RowsData & { compact?: boolean };
 	if (d.summary) return <EnrichedRowsTpl {...props} />;   // 丰富详情六区
+	if (d.compact) {
+		// 公告页：全静态无逐条动画(每页仅5s)。
+		// 内容容器必须 position:relative+zIndex:1 —— Backdrop 是 absolute 层,
+		// CSS 绘制顺序上定位元素晚于流内内容绘制,无 transform 的裸 div 会被整层盖住。
+		const { duration, caption } = props;
+		const ROW_H = 88, GAP = 16;
+		return (
+			<SceneShell duration={duration} caption={caption}>
+				<Backdrop />
+				<div
+					style={{
+						position: "relative",
+						zIndex: 1,
+						display: "flex",
+						flexDirection: "column",
+						height: "100%",
+					}}
+				>
+					<div style={{ fontSize: 26, fontWeight: 700, letterSpacing: 6, color: COLORS.sub }}>
+						{d.kicker}
+					</div>
+					<div style={{ fontSize: 54, fontWeight: 800, lineHeight: 1.25, marginTop: 14 }}>
+						<Rich parts={d.headline} />
+					</div>
+					<div style={{ marginTop: 26, display: "flex", flexDirection: "column", gap: GAP }}>
+						{d.rows.map((r, i) => (
+							<div
+								key={i}
+								style={{
+									display: "flex",
+									gap: 22,
+									alignItems: "flex-start",
+									height: ROW_H,
+									overflow: "hidden",
+								}}
+							>
+								<span
+									style={{
+										fontSize: 26,
+										fontWeight: 700,
+										color: COLORS.sub,
+										width: 52,
+										flexShrink: 0,
+										textAlign: "right",
+										marginTop: 8,
+										fontVariantNumeric: "tabular-nums",
+									}}
+								>
+									<Rich parts={r.label} />
+								</span>
+								<div
+									style={{
+										flex: 1,
+										fontSize: 30,
+										lineHeight: 1.47,
+										color: COLORS.text,
+										textAlign: "left",
+										display: "-webkit-box",
+										WebkitLineClamp: 2,
+										WebkitBoxOrient: "vertical",
+										overflow: "hidden",
+									}}
+								>
+									<Rich parts={r.body} />
+								</div>
+							</div>
+						))}
+					</div>
+				</div>
+			</SceneShell>
+		);
+	}
 	const { duration, caption } = props;
 	return (
 		<SceneShell duration={duration} caption={caption}>

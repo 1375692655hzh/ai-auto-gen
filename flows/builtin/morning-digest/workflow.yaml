@@ -9,6 +9,8 @@ params:
   per_report_chars: 6000  # 每份早报送入模型的最大字数
   tag_lines: true         # 解读标签开关(失败自动降级为无解读版)
   tag_mode: direction     # direction=板块×方向(利好/利空/中性) / sectors=只写板块不写多空
+  synth_model: ark:kimi-k3  # 素材分类模型(实测deepseek-v4-pro是旧默认且分类激进, kimi-k3横评最优)
+  article_model: ark:kimi-k3 # 文章标签模型
   tag_model: ark:kimi-k3   # 打标模型(11模型横评定选, 见 docs/打标模型选型.md): 空=默认GLM / ark:<模型名>=方舟订阅; 失败自动回落
   with_image: false       # 长图产物(按需; 图片是文章的额外产物类别)
   image_top: 16           # 图条上限(配额内截断)
@@ -22,10 +24,11 @@ steps:
     with: {wscn_count: "{params.wscn_count}"}
   - id: synth                    # LLM 汇总分类 → 知识素材(存档, 不进队列)
     uses: synthesize_morning
-    with: {per_report_chars: "{params.per_report_chars}"}
+    with: {per_report_chars: "{params.per_report_chars}", model: "{params.synth_model}"}
   - id: article                  # 素材 → 早报文章(标签:详情格式, 进待发队列)
     uses: render_morning_article
     when: "{params.format}"
+    with: {model: "{params.article_model}"}
   - id: tag                      # 文章 → 逐条解读标签(板块×方向)+公告热度汇总  ← 审核点
     uses: tag_morning_items
     when: "{params.format}"

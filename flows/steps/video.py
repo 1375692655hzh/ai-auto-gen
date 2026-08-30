@@ -132,7 +132,12 @@ def _parse_script_md(md: str):
             if its:
                 indices.append({"group": grp.strip(), "items": its})
         elif zone == "ann" and t.startswith("-"):
-            anns.append(t.lstrip("- ").strip())
+            body = t.lstrip("- ").strip()
+            m = re.match(r"^【([^】]+)】(.*)$", body)
+            if m:
+                anns.append({"company": m.group(1), "text": m.group(2).strip()})
+            else:
+                anns.append({"company": "", "text": body})
         elif zone == "item" and blocks:
             b = blocks[-1]
             lm = re.match(r"^\[([^|\]]+)(?:\|([^\]]+))?\]\s*(.+)$", t)
@@ -159,6 +164,39 @@ def _parse_script_md(md: str):
                     b["lines"].append({"label": "详情", "text": t})
     return intro, outro, [b for b in blocks if b["summary"] or b["lines"]], indices, anns
 
+
+# ---- 公告分页预算(集中在 Python 常量层, TSX 侧同口径, 不同步双写) ----
+ANN_CHARS_PER_LINE = 50    # 30px 字正文区 1650px ≈ 55字/行, 保守取 50
+ANN_LINE_PX, ANN_MAX_LINES = 44, 2          # 行高 30px*1.45
+ANN_ROW_PX, ANN_GAP_PX = ANN_LINE_PX * ANN_MAX_LINES, 16   # 88+16
+ANN_PAGE_BUDGET_PX = 680                    # 内容区 900 - 页头约220
+ANN_CUT = 96                                # 每条硬截断(≈2行)
+
+
+def _pack_ann_pages(anns: list) -> list:
+    """行数预算贪心装箱: Σ(行数×44+16) ≤ 680px, 装完逐页断言——溢出视频物理上无法产出。"""
+    import math
+    items = []
+    for i, a in enumerate(anns, 1):
+        text = _cut(a["company"] + a["text"], ANN_CUT)
+        nlines = max(1, math.ceil(len(text) / ANN_CHARS_PER_LINE))
+        items.append({"no": i, "company": a["company"],
+                      "text": text[len(a["company"]):], "nlines": min(nlines, ANN_MAX_LINES)})
+    pages, cur, used = [], [], 0
+    for it in items:
+        cost = it["nlines"] * ANN_LINE_PX + (ANN_GAP_PX if cur else 0)
+        if cur and used + cost > ANN_PAGE_BUDGET_PX:
+            pages.append(cur)
+            cur, used = [], 0
+            cost = it["nlines"] * ANN_LINE_PX
+        cur.append(it)
+        used += cost
+    if cur:
+        pages.append(cur)
+    for pi, pg in enumerate(pages, 1):
+        total = sum(x["nlines"] * ANN_LINE_PX for x in pg) + ANN_GAP_PX * (len(pg) - 1)
+        assert total <= ANN_PAGE_BUDGET_PX, f"公告页 {pi} 超预算 {total}px > {ANN_PAGE_BUDGET_PX}"
+    return pages
 
 def _build_story(intro, outro, blocks, date: str, indices=None, anns=None) -> dict:
     def _r(t, b=False):
@@ -215,7 +253,7 @@ def _build_story(intro, outro, blocks, date: str, indices=None, anns=None) -> di
                      "stat": b["stat"], "tags": b.get("sectors") or [],
                      "rows": rows, "entrances": ent},
         })
-    if anns:                                   # 公告: 一句引言 + 分页静默(每页5条5秒)
+    if anns:                                   # 公告: 一句引言 + 分页静默(行数预算分页器)
         scenes.append({
             "id": "ann-intro", "template": "rows",
             "narration": "接下来是公司公告速览。", "caption": "", "captions": _cues("接下来是公司公告速览。"),
@@ -224,22 +262,21 @@ def _build_story(intro, outro, blocks, date: str, indices=None, anns=None) -> di
                      "stat": {"value": str(len(anns)), "unit": "条", "label": "今日公司公告"},
                      "tags": [], "rows": [], "entrances": {"summary": 4, "stat": 6}},
         })
-        PER_PAGE = 5
-        for pi in range(0, len(anns), PER_PAGE):
-            page = anns[pi:pi + PER_PAGE]
+        pages = _pack_ann_pages(anns)
+        total_p = len(pages)
+        for pi, page in enumerate(pages, 1):
             rows = []
-            for j, t in enumerate(page):
-                rows.append({"accent": "blue",
-                             "label": _r(f"{pi + j + 1:02d}", True),
-                             "body": _r(_cut(t, 68))})
+            for j, a in enumerate(page):
+                body = ([{"t": a["company"], "c": "blue", "b": True},
+                         {"t": a["text"]}] if a["company"] else [{"t": a["text"]}])
+                rows.append({"accent": "blue", "label": _r(f"{a['no']:02d}", True), "body": body})
             scenes.append({
-                "id": f"ann-p{pi // PER_PAGE + 1}", "template": "rows",
+                "id": f"ann-p{pi}", "template": "rows",
                 "narration": "", "silent": True, "durationS": 5,
                 "caption": "",
-                "data": {"kicker": f"公司公告 · {pi // PER_PAGE + 1}/{(len(anns) + PER_PAGE - 1) // PER_PAGE}",
+                "data": {"kicker": f"公司公告 · {pi}/{total_p}",
                          "headline": _r("公司公告速览", True),
-                         "summary": None, "stat": None, "tags": [],
-                         "rows": rows, "entrances": {"row0": 2, "row1": 4, "row2": 6, "row3": 8, "row4": 10}},
+                         "compact": True, "rows": rows},
             })
     scenes.append({
         "id": "closing", "template": "conclusion",

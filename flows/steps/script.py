@@ -142,6 +142,21 @@ def _lint_script(intro, outro, blocks, text_of):
     return {"fail": fail, "warn": warn}
 
 
+
+_COMPANY_VERBS = ("公告称", "公告", "披露", "发布", "宣布", "上半年", "一季度", "前三季度",
+                  "年度", "年报", "预计", "拟", "净利润", "净利", "营收", "业绩", "回购",
+                  "中标", "签署", "签订", "获得", "获批", "获准", "减持", "增持", "分红",
+                  "定增", "终止", "复牌", "停牌", "重组", "合并", "扭亏")
+
+
+def _split_company(text: str):
+    """公告正文 → (公司名, 正文)。动词锚定, 宁缺毋滥: 不命中返回 ("", 原文)。"""
+    m = re.match(r"^((?:\*?ST)?[\u4e00-\u9fffA-Za-z0-9（）()]{2,12}?)("
+                 + "|".join(_COMPANY_VERBS) + ")", text)
+    if m:
+        return m.group(1), text[len(m.group(1)):]
+    return "", text
+
 def _render_md(date, intro, outro, blocks, est, report, n_enriched, ann_items=None, indices=None):
     from datetime import datetime
     try:
@@ -179,8 +194,9 @@ def _render_md(date, intro, outro, blocks, est, report, n_enriched, ann_items=No
         lines.append("")
     lines += ["## 收尾", outro, ""]
     if ann_items:                              # 静默公告区(视频分页展示, 不配音; 人可删条)
-        lines += ["## 公告(静默展示, 每页5条, 每页5秒, 不配音)", ""]
+        lines += ["## 公告(静默展示, 纯文本紧凑分页, 不配音)", ""]
         for it in ann_items:
-            lines.append(f"- {it['text'].strip()}")
+            company, body = _split_company(it["text"].strip())
+            lines.append(f"- 【{company}】{body}" if company else f"- {body}")
         lines.append("")
     return chr(10).join(lines)

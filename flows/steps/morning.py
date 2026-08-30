@@ -67,7 +67,7 @@ def synthesize_morning(ctx, wf, params):
         "morning_synth_system", "你是资深财经早报编辑,只输出 Markdown 正文,不加解释。")
 
     print(f"汇总素材: {len(reports)} 份早报 / 送模型 {len(user)} 字 ...")
-    material = llm_complete(user, system=system, max_tokens=8000, temperature=0.3)
+    material = _llm_call(user, system, params, max_tokens=8000, temperature=0.2)
     _check_complete(material, "素材")
     path = wf.run_dir / f"material-{date}.md"
     path.write_text(material.rstrip() + "\n", encoding="utf-8")
@@ -95,7 +95,9 @@ def render_morning_article(ctx, wf, params):
         "morning_article_system", "你是资深财经早报编辑,只输出 Markdown 正文,不加解释。")
 
     print(f"渲染文章: 素材 {len(content)} 字 → 精炼改写 ...")
-    md = llm_complete(user, system=system, max_tokens=6500, temperature=0.3)
+    md = _llm_call(user, system, params, max_tokens=6500, temperature=0.3)
+    # 半角冒号 → 全角(kimi-k3 等模型会漂格式; 下游索引/机检只认全角)
+    md = re.sub("^(- \*\*[^*]+\*\*):(?=[^:])", "\1：", md, flags=re.M)
     _check_complete(md, "文章")
     md = _inject_indices(md)                       # 开头行情速览(接口数据, 块引用行)
     report = _lint_article(md)
@@ -121,6 +123,17 @@ def _load_sectors(pack_dir: Path) -> list:
         sys.exit(f"缺少板块词表: {f}")
     groups = (yaml.safe_load(f.read_text(encoding="utf-8")) or {}).get("sectors") or []
     return [w for g in groups for w in g]
+
+
+def _llm_call(user: str, system: str, params: dict, max_tokens: int, temperature: float) -> str:
+    """模型分发: params.model 支持 ark:<模型名>(方舟订阅, 失败回落默认); 空=secret.local.json 默认模型。"""
+    m_model = str(params.get("model", "")).strip()
+    if m_model.startswith("ark:"):
+        try:
+            return _ark_complete(user, system, m_model[4:], max_tokens=max_tokens)
+        except RuntimeError as e:
+            print(f"⚠ ark 通道失败({e}), 降级默认模型")
+    return llm_complete(user, system=system, max_tokens=max_tokens, temperature=temperature)
 
 
 def _ark_complete(user: str, system: str, model: str, max_tokens: int = 16384) -> str:
@@ -277,7 +290,7 @@ def _index_items(article: str):
         if m:
             zone = m.group(1).strip()
             continue
-        m = re.match(r"^- \*\*([^*]+)\*\*：(.*)", line)
+        m = re.match(r"^- \*\*([^*]+)\*\*[：:](.*)", line)
         if m and zone and zone != "今日焦点":
             n = len(items) + 1
             items.append({"n": n, "line": i, "tag": m.group(1), "text": m.group(2)})

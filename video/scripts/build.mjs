@@ -193,14 +193,15 @@ for (const s of story.scenes) {
 		dur = probeDuration(file);
 		audio = `audio/${s.id}.mp3`;
 	}
-	const f = Math.ceil((dur + pad + LEAD_S) * fps);
+	const silent = Boolean(s.silent);
+	const f = Math.ceil((dur + (silent ? 0 : pad + LEAD_S)) * fps);
 	frames.push({
 		id: s.id,
 		template: s.template,
 		audio,
 		caption: s.caption ?? null,
 		cues: s.captions ?? null,          // 同步字幕轨(帧级起止)
-		leadFrames: Math.round(LEAD_S * fps),
+		leadFrames: silent ? 0 : Math.round(LEAD_S * fps),
 		audioDuration: Number(dur.toFixed(3)),
 		durationInFrames: f,
 	});

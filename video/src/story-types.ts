@@ -107,6 +107,7 @@ export interface RowsData {
 	headline: Rich;
 	rows: { accent?: ColorKey; label: Rich; body: Rich }[];
 	footnote?: Rich;
+	compact?: boolean;   // 公告紧凑列表(零动画固定行高)
 	// 丰富详情版(enrich 产物投影): 概括区+数字大卡+板块chips+入场时刻(帧)
 	summary?: Rich;
 	stat?: StatData;
@@ -152,6 +153,8 @@ export interface StoryScene {
 	narration: string;
 	caption?: string;
 	captions?: CaptionCue[];
+	silent?: boolean;
+	durationS?: number;
 	data: Record<string, unknown>;
 }
 

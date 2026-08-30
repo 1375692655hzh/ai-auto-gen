@@ -1,9 +1,9 @@
 {
 	"id": "morning-20260828",
-	"title": "特朗普无意接受6月谅解备忘录【财经早报】",
+	"title": "特朗普政府无意恢复谅解备忘录【财经早报】",
 	"status": "built",
 	"created": "2026-08-28",
 	"note": "口播稿已过 flow 审核点, 免 build 门禁",
-	"builtAt": "2026-08-29",
-	"output": "out/final.mp4 (5.37 min)"
+	"builtAt": "2026-08-30",
+	"output": "out/final.mp4 (5.28 min)"
 }
