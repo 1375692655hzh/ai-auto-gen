@@ -85,10 +85,20 @@
 
 弃选/不接记录：
 - **DBnomics**：FRED provider 已被下架（2026-08-31 实测 `providers/FRED` 404）；IMF/WB 等宏观序列对早报边际价值低，不接。FRED 仍走已注册的 `fred_macro`（待配 key）。
-- **StockTwits / Reddit 情绪流**（TradingAgents 用）：散户观点流，按源录入规范"观点流不接（防污染事实底稿）"落选；Reddit 另需 OAuth。
-- **Polymarket**（TradingAgents v0.3 新增）：预测市场，范围外。
 - **Anspire/SerpAPI/Tavily/Bocha/Brave/TickFlow/Qveris/Twingly**（daily_stock_analysis/FinanceMCP 用）：key 型通用搜索/聚合服务，是工具不是信息源，且通用聚合稀释质量（同 NewsAPI 弃选理由）。
 - **qlib / RD-Agent / zvt / ai-hedge-fund**：无量新闻源（行情/因子框架或付费 key 数据），无可收。
+
+### 情绪/观点流 + 预测市场（2026-08-31 用户裁决纠正）
+
+用户裁决：观点/情绪流与预测市场**一律入库**，"防污染"不做接入门槛——用不用由用户在生成时 `--set` 选择，素材好坏不由收录环节判断。此前"观点流不接"的规则作废（规范文档已同步修订）。
+
+| 源 id | 给什么信息 | 市场/形态 | 作息与限额 | 启用条件 |
+|---|---|---|---|---|
+| `polymarket_sentiment` | Polymarket 预测市场财经情绪：活跃财经/宏观市场的概率（Yes 价）+24h 成交量（关键词过滤剔除体育娱乐） | 外围情绪 / 数据(market) | 实时变动 | 无 key，已在册可用 |
+| `stocktwits_stream` | StockTwits 美股情绪流：散户+大V观点，带官方 Bullish/Bearish 情绪标记+点赞数 | 美股 / 观点流(flash) | 交易时段高频 | 无 key，**暂不启用**：2026-08-31 出口 IP 被 Cloudflare 挑战拦截（同 FXStreet 情况），代码在册待恢复 |
+| `reddit_hot` | Reddit 财经 sub 热帖（默认 r/stocks 可换）：标题+分数+评论数+flair | 美股 / 观点流(flash) | 全天滚动 | 需免费 OAuth：`reddit_client_id`/`reddit_client_secret`（reddit.com/prefs/apps 注册 script 应用即得），配好翻开 |
+
+历史回查（同轮用户要求）：此前因"观点流/范围外"判断被排除且**跑得通却被拦下**的，只有本轮 StockTwits/Reddit/Polymarket 三个（已纠正）。分析类轮落的雪球今日话题（阿里云 WAF）、Kobeissi Letter（Substack 404）、X 分析师 RSS 桥（nitter/RSSHub 公共实例均死）都是**跑不通**而非观点流判断，维持落选。范围外冻结清单（印度/欧洲/拉美/澳新/中东其他/加密）未解冻——用户本轮只点名了预测市场与观点流。
 
 ## 其余来源
 

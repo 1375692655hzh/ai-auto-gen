@@ -385,3 +385,23 @@ def _insider(conf):
 def _cctv(conf):
     r = ges.fetch_cctv_xwlb()
     return [r] if r else []
+
+
+# ---------- 情绪/观点流 + 预测市场(2026-08-31 用户裁决: 一律入库, 选取权在用户) ----------
+
+@source("polymarket_sentiment", "market", "Polymarket预测市场财经情绪(活跃财经市场概率+24h成交量, 零key)",
+        ttl_min=120, default_enabled=True)
+def _polymarket(conf):
+    return gs.fetch_polymarket_sentiment(int(conf.get("page_size", 10)))
+
+
+@source("stocktwits_stream", "flash", "StockTwits美股情绪流(散户+大V观点, 带Bullish/Bearish标记; 2026-08-31出口IP被Cloudflare拦截, 待恢复)",
+        ttl_min=15, default_enabled=False)
+def _stocktwits(conf):
+    return gs.fetch_stocktwits_stream(str(conf.get("symbol", "SPY")), int(conf.get("page_size", 30)))
+
+
+@source("reddit_hot", "flash", "Reddit财经sub热帖(观点/情绪, 标题+分数+评论数; 需免费OAuth凭证)",
+        auth="oauth", ttl_min=15, default_enabled=False)
+def _reddit(conf):
+    return gs.fetch_reddit_hot(str(conf.get("subreddit", "stocks")), int(conf.get("page_size", 25)))

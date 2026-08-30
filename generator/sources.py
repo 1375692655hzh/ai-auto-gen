@@ -975,3 +975,104 @@ def fetch_yahoo_headlines(page_size: int = 20, symbol: str = "SPY") -> list:
         if title:
             out.append({"time": t, "text": title[:200], "source": "Yahoo财经", "url": link})
     return out
+
+
+# ---------- 情绪/观点流 + 预测市场(2026-08-31 用户裁决: 观点流与外围情绪一律入库, 用不用用户在生成时选) ----------
+
+
+def fetch_stocktwits_stream(symbol: str = "SPY", page_size: int = 30) -> list:
+    """StockTwits 个股/大盘情绪流(美股散户+大V观点, 带 Bullish/Bearish 官方情绪标记)。
+    2026-08-31 实测出口 IP 被 Cloudflare 挑战拦截(403 Just a moment), 在册待恢复。"""
+    r = requests.get(f"https://api.stocktwits.com/api/2/streams/symbol/{symbol}.json",
+                     headers={"User-Agent": UA}, timeout=15)
+    r.raise_for_status()
+    d = r.json()
+    if d.get("response", {}).get("status") not in (200, None):
+        raise RuntimeError(f"stocktwits status={d.get('response', {}).get('status')}")
+    out = []
+    for m in (d.get("messages") or [])[:int(page_size)]:
+        body = re.sub(r"\s+", " ", (m.get("body") or "")).strip()
+        if not body:
+            continue
+        sent = ((m.get("entities") or {}).get("sentiment") or {}).get("basic") or ""
+        user = ((m.get("user") or {}).get("username")) or ""
+        likes = (m.get("likes") or {}).get("total") or 0
+        t = ""
+        if m.get("created_at"):
+            try:
+                t = (datetime.datetime.fromisoformat(m["created_at"].replace("Z", "+00:00"))
+                     .astimezone(_BJ).strftime("%Y-%m-%d %H:%M"))
+            except ValueError:
+                pass
+        out.append({"time": t, "source": "StockTwits",
+                    "text": f"{f'[{sent}] ' if sent else ''}@{user}(赞{likes}): {body[:220]}"})
+    return out
+
+
+def fetch_reddit_hot(subreddit: str = "stocks", page_size: int = 25) -> list:
+    """Reddit 财经 sub 热帖(美股散户/大V观点, 标题+分数+评论数)。
+    Reddit 2023 起公开 .json 端点对非认证请求 403, 需 OAuth: reddit.com/prefs/apps 免费注册
+    script 应用得 client_id/secret, 配 REDDIT_CLIENT_ID/REDDIT_CLIENT_SECRET 或 secret.local.json。"""
+    cid, csec = _secret("reddit_client_id"), _secret("reddit_client_secret")
+    if not cid or not csec:
+        raise RuntimeError("缺 reddit_client_id/reddit_client_secret(reddit.com/prefs/apps 免费注册 script 应用即得)")
+    tok = requests.post("https://www.reddit.com/api/v1/access_token",
+                        auth=(cid, csec), data={"grant_type": "client_credentials"},
+                        headers={"User-Agent": UA}, timeout=15)
+    tok.raise_for_status()
+    bearer = tok.json().get("access_token")
+    if not bearer:
+        raise RuntimeError(f"reddit token 响应无 access_token: {str(tok.json())[:80]}")
+    r = requests.get(f"https://oauth.reddit.com/r/{subreddit}/hot",
+                     params={"limit": int(page_size), "raw_json": 1},
+                     headers={"User-Agent": UA, "Authorization": f"Bearer {bearer}"}, timeout=15)
+    r.raise_for_status()
+    out = []
+    for k in ((r.json().get("data") or {}).get("children") or []):
+        p = k.get("data") or {}
+        title = (p.get("title") or "").strip()
+        if not title:
+            continue
+        ts = p.get("created_utc")
+        t = datetime.datetime.fromtimestamp(ts, _BJ).strftime("%Y-%m-%d %H:%M") if ts else ""
+        flair = p.get("link_flair_text") or ""
+        out.append({"time": t, "source": f"Reddit r/{subreddit}",
+                    "text": f"{f'[{flair}] ' if flair else ''}{title[:180]} (▲{p.get('score', 0)} 💬{p.get('num_comments', 0)})",
+                    "url": f"https://www.reddit.com{p.get('permalink') or ''}"})
+    return out
+
+
+_POLY_KW = re.compile(r"fed|fomc|rate|inflation|cpi|recession|stock|s&p|nasdaq|dow|treasur|bond|"
+                      r"yield|tariff|oil|crude|gold|bitcoin|ethereum|crypto|dollar|yen|euro|yuan|"
+                      r"election|president|trump|powell|jobs|payroll|gdp|housing|nvidia|apple|tesla",
+                      re.I)
+
+
+def fetch_polymarket_sentiment(page_size: int = 10) -> list:
+    """Polymarket 预测市场财经情绪(外围情绪, 零鉴权 gamma API): 按 24h 成交量取活跃市场,
+    关键词过滤财经/宏观类(纯体育娱乐剔除), 概率=Yes 价。用户 2026-08-31 裁决: 预测市场纳入。"""
+    r = requests.get("https://gamma-api.polymarket.com/markets",
+                     params={"active": "true", "closed": "false", "limit": 80,
+                             "order": "volume24hr", "ascending": "false"},
+                     headers={"User-Agent": UA}, timeout=15)
+    r.raise_for_status()
+    out = []
+    for m in r.json():
+        q = (m.get("question") or "").strip()
+        if not q or not _POLY_KW.search(q):
+            continue
+        try:
+            prices = json.loads(m.get("outcomePrices") or "[]")
+            outcomes = json.loads(m.get("outcomes") or "[]")
+        except ValueError:
+            continue
+        prob = f"{float(prices[0]) * 100:.0f}%" if prices else "?"
+        vol = float(m.get("volume24hr") or 0)
+        end = (m.get("endDate") or "")[:10]
+        pair = "/".join(outcomes[:2]) if outcomes else "Yes/No"
+        out.append({"time": end, "source": "Polymarket",
+                    "text": f"{q} —— {pair}: {prob} (24h量${vol / 1000:.0f}k)",
+                    "url": f"https://polymarket.com/event/{m.get('slug') or ''}"})
+        if len(out) >= int(page_size):
+            break
+    return out
