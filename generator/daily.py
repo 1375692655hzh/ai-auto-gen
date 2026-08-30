@@ -75,9 +75,21 @@ def load_prompt(name: str, default: str = "") -> str:
     return default
 
 
+def _llm(model: str, user: str, system: str, max_tokens: int, temperature: float = 0.4) -> str:
+    """模型分发: ark:<模型名>=方舟订阅CLI(失败降级默认); 空=默认通道(与 morning._llm_call 同语义)。"""
+    model = (model or "").strip()
+    if model.startswith("ark:"):
+        try:
+            from flows.steps.morning import _ark_complete
+            return _ark_complete(user, system, model[4:], max_tokens=max_tokens)
+        except RuntimeError as e:
+            print(f"⚠ ark 通道失败({e}), 降级默认模型")
+    return llm_complete(user, system=system, max_tokens=max_tokens, temperature=temperature)
+
+
 # ---------- 第 2 步:LLM 精选 ----------
 
-def rank_items(items: list, want: int) -> list:
+def rank_items(items: list, want: int, model: str = "") -> list:
     feed = "\n".join(f"#{i} [{it['time']}](x{it['cross_hits']}) {it['text'][:120]}"
                      for i, it in enumerate(items))
     tpl = load_prompt("rank_user")
@@ -92,11 +104,9 @@ def rank_items(items: list, want: int) -> list:
         "筛选标准:影响面大(全市场/行业级优先)、主体量级大(权重股/巨头/部委优先)、"
         "关注度高(多源报道优先)、与A股关联紧密、有详情可展开。"
         f"配额约束:宏观政策≥2条、海外市场≥2条、同一行业相关≤4条。排序按 score 降序。"
-    raw = llm_complete(
-        user,
-        system=load_prompt("rank_system", "你是财经内容主编,只输出 JSON 数组,不加解释。"),
-        max_tokens=3000,
-    )
+    raw = _llm(model, user,
+               system=load_prompt("rank_system", "你是财经内容主编,只输出 JSON 数组,不加解释。"),
+               max_tokens=3000)
     ranked = parse_llm_list(raw)
     if not ranked:
         sys.exit(f"精排输出无法解析:\n{raw[:400]}")
@@ -168,13 +178,14 @@ SYS_EXPAND = (
 )
 
 
-def expand_item(item: dict, ev: dict) -> dict:
+def expand_item(item: dict, ev: dict, model: str = "") -> dict:
     concept_list = "、".join(CONCEPT_POOL)
     material = (f"【快讯原文】[{item['time']}] {ev['raw']}\n"
                 f"【网络搜索(最新报道)】{ev['web'] or '(无)'}\n"
                 f"【同题新闻正文】{ev['news_body'] or '(无)'}\n"
                 f"【同行早报相关段落】{ev['peer'] or '(无)'}")
-    raw = llm_complete(
+    raw = _llm(
+        model,
         f"{material}\n\n"
         "基于以上材料为这条财经消息产出结构化内容,输出 JSON 对象:\n"
         '{"title": "一行式标题(≤22字)", "summary": "一句话摘要(≤40字)",\n'

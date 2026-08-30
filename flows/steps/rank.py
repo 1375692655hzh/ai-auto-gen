@@ -10,7 +10,7 @@ def rank_items(ctx, wf, params):
     items = int(params.get("items") or 0) or int(_cfg_daily_items())
     coarse = daily.coarse_filter(ctx["items"])
     print(f"粗筛: {len(ctx['items'])} → {len(coarse)} 条")
-    ranked = daily.rank_items(coarse, items)
+    ranked = daily.rank_items(coarse, items, model=str(params.get("model", "")))
     print(f"精排入选 {len(ranked)} 条")
     return {"coarse_count": len(coarse), "ranked": ranked}
 

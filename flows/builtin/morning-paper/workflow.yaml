@@ -5,9 +5,11 @@ version: 1.0.0
 
 # 参数: 可被 data/config.local.yaml 或命令行 --set k=v 覆盖
 params:
-  items: 15          # 每日条数(0=取 config daily.items)
-  with_video: false  # 是否接视频成片
-  no_voice: false    # 不生成口播稿
+  items: 15            # 每日条数(0=取 config daily.items)
+  with_video: false    # 是否接视频成片
+  no_voice: false      # 不生成口播稿
+  rank_model: ark:kimi-k3   # 精排模型(2026-08-30 素材链横评定选, 见 docs/素材链模型选型.md): 空=默认通道
+  expand_model: ark:kimi-k3 # 扩写模型(同上)
 
 steps:
   - id: fetch                      # 快讯+同行早报(免 LLM)
@@ -16,10 +18,10 @@ steps:
     uses: fetch_extras
   - id: rank                       # LLM 精排选条
     uses: rank_items
-    with: {items: "{params.items}"}
+    with: {items: "{params.items}", model: "{params.rank_model}"}
   - id: expand                     # 并行扩写(联网取证+AI解读+数字校验)
     uses: expand_entries
-    with: {workers: 2}
+    with: {workers: 2, model: "{params.expand_model}"}
   - id: assemble                   # 图文+口播+daily JSON  ← 审核点
     uses: assemble_daily
     review: true

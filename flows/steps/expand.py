@@ -11,11 +11,12 @@ def expand_entries(ctx, wf, params):
     import daily
     ranked, refs = ctx["ranked"], ctx["refs"]
     workers = int(params.get("workers", 2))
+    model = str(params.get("model", ""))
 
     def work(it):
         ev = daily.collect_evidence(it, refs)
         try:
-            d = daily.expand_item(it, ev)
+            d = daily.expand_item(it, ev, model=model)
         except Exception as ex:
             print(f"  ⚠ 「{it['rank_title'][:16]}」扩写失败({type(ex).__name__}),降级为仅摘要")
             d = {"title": it["rank_title"], "summary": it["text"][:60],
