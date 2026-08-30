@@ -23,6 +23,23 @@
 356
   注意：以上各源与元宝统一走 `peer_mornings` 聚合进工作流（`cli sources fetch peer_mornings` 手动可取），不需要在 config 里单开（避免与聚合重复抓取）。防坑：feeds.a.dj.com、MarketWatch mw_marketpulse、Investing.com news_285 等旧 RSS 已冻结（仍返回 200 但数据停更），网上老资料仍在引用，勿接入。
 
+### 备用源（public-apis 名录收录 2026-08-30，全部默认禁用，主源失效时顶班）
+
+启用方式：需 key 的把 key 写进 `autopub/secret.local.json` 对应字段（或同名大写环境变量），再把 `sources/builtin.py` 里该源的 `default_enabled` 改为 `True`。
+按你的裁决，这些只为"替代"存在——限额紧也无妨，登记时我负责写清每个源给什么。
+
+| 源 id | 给什么信息 | 市场/形态 | 作息与限额 | 启用条件 |
+|---|---|---|---|---|
+| `marketaux_news` | 美股市场新闻标题流，每条带关联 ticker 标注（实测返回真实 JSON） | 美股 / 快讯(flash) | 滚动更新；免费档约 100 次/天 | `marketaux_api_key` |
+| `finnhub_news` | 美股 general 类市场新闻 headline 流 | 美股 / 快讯(flash) | 滚动更新；免费档 60 次/分（最宽松） | `finnhub_api_key` |
+| `alphavantage_news` | 美股新闻 + 整体情绪标签（Bullish/Bearish 等） | 美股 / 快讯(flash) | 滚动更新；免费档仅 25 次/天，只够应急 | `alphavantage_api_key` |
+| `sec_edgar` | SEC 最新 8-K 重大事件申报：公司名+表单类型+申报时刻（美股公告唯一官方源；可改 form_type 换 10-K 等） | 美股 / 公告(announcement) | 交易时段滚动；官方免费，限速 10 次/秒 | 无 key，直接启用 |
+| `frankfurter_fx` | ECB 参考汇率快照：USD 基准对 CNY/HKD/JPY/KRW/TRY/EUR（**不含 TWD**） | 外汇 / 数据行情(market) | 每交易日一更（约北京 23 点），周末无新值 | 无 key，直接启用 |
+| `goldprice_metals` | 黄金现货快照：XAU 折算每克 24K~10K 金价（31 币种）。注意名录描述含银/铜，**免费端点实际只有黄金** | 大宗 / 数据行情(market) | 实时滚动 | 无 key，直接启用 |
+| `fred_macro` | 美联储宏观最新值：CPI 指数/失业率/联邦基金利率/10Y 国债收益率 | 美国宏观 / 数据行情(market) | 各序列按月/周更新；key 免费即申即得 | `fred_api_key` |
+
+名录弃选说明：Econdb（名录标"无 key"但 2026-08-30 实测 401 需 token，无法验证返回结构，不录入）；NewsAPI/GNews/NewsData/Mediastack 等通用聚合器（无市场定向、与主源重叠、稀释质量）；Alpha Vantage/Polygon/Twelve Data 等纯行情 API（价格数据已有 sina 行情接口承担）。
+
 ## 其余来源
 
 `python cli.py sources list` 查看全部（类型/启用/健康）。

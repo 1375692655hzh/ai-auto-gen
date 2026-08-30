@@ -324,3 +324,185 @@ def gather(cfg: dict | None = None, limit: int = 0) -> tuple:
 def render_items(items: list) -> str:
     """把条目渲染成给模型看的清单。"""
     return "\n".join(f"[{it['time']}]({it['source']}) {it['text']}" for it in items)
+
+
+# ---------- 备用源(public-apis 名录收录 2026-08-30; 全部默认禁用, 主源失效时顶班) ----------
+# 启用方式: 需 key 的把 key 写进 autopub/secret.local.json(或同名大写环境变量),
+# 再把 sources/builtin.py 对应注册的 default_enabled 改 True。
+
+_BJ = datetime.timezone(datetime.timedelta(hours=8))
+
+
+def _secret(key: str) -> str:
+    """备用源 API key: 同名大写环境变量优先, 否则 autopub/secret.local.json 对应字段。"""
+    import json
+    import os
+    from pathlib import Path
+    if os.environ.get(key.upper()):
+        return os.environ[key.upper()]
+    p = Path(__file__).resolve().parent.parent / "autopub" / "secret.local.json"
+    if p.exists():
+        try:
+            return str(json.loads(p.read_text(encoding="utf-8")).get(key, "") or "")
+        except Exception:
+            pass
+    return ""
+
+
+def fetch_marketaux_news(page_size: int = 30) -> list:
+    """MarketAux 美股市场新闻(备用): 标题+关联 ticker 标注。免费档约 100 次/天。
+    key: MARKETAUX_API_KEY 或 secret.local.json 的 marketaux_api_key。"""
+    key = _secret("marketaux_api_key")
+    if not key:
+        raise RuntimeError("marketaux_api_key 未配置(secret.local.json 或 MARKETAUX_API_KEY)")
+    r = requests.get("https://api.marketaux.com/v1/news/all",
+                     params={"api_token": key, "language": "en",
+                             "limit": min(int(page_size), 50), "must_have_entities": "true"},
+                     headers={"User-Agent": UA}, timeout=15)
+    r.raise_for_status()
+    out = []
+    for it in (r.json().get("data") or []):
+        title = (it.get("title") or "").strip()
+        if not title:
+            continue
+        t = ""
+        pub = (it.get("published_at") or "")[:19]              # ISO8601 UTC
+        if pub:
+            try:
+                t = (datetime.datetime.strptime(pub, "%Y-%m-%dT%H:%M:%S")
+                     + datetime.timedelta(hours=8)).strftime("%Y-%m-%d %H:%M")
+            except ValueError:
+                pass
+        ticks = ",".join(e["symbol"] for e in (it.get("entities") or []) if e.get("symbol"))
+        out.append({"time": t, "text": title + (f" [{ticks}]" if ticks else ""),
+                    "source": "MarketAux"})
+    return out
+
+
+def fetch_finnhub_news(page_size: int = 30) -> list:
+    """Finnhub 美股市场新闻(备用): general 类市场 headline 流。免费档 60 次/分钟。
+    key: FINNHUB_API_KEY 或 secret.local.json 的 finnhub_api_key。"""
+    key = _secret("finnhub_api_key")
+    if not key:
+        raise RuntimeError("finnhub_api_key 未配置(secret.local.json 或 FINNHUB_API_KEY)")
+    r = requests.get("https://finnhub.io/api/v1/news",
+                     params={"category": "general", "token": key},
+                     headers={"User-Agent": UA}, timeout=15)
+    r.raise_for_status()
+    out = []
+    for it in (r.json() or [])[:int(page_size)]:
+        title = (it.get("headline") or "").strip()
+        ts = it.get("datetime") or 0                            # Unix 秒
+        t = datetime.datetime.fromtimestamp(int(ts), _BJ).strftime("%Y-%m-%d %H:%M") if ts else ""
+        if title:
+            out.append({"time": t, "text": title, "source": "Finnhub"})
+    return out
+
+
+def fetch_alphavantage_news(page_size: int = 30) -> list:
+    """Alpha Vantage 美股新闻+情绪标签(备用): NEWS_SENTIMENT feed。
+    免费档仅 25 次/天, 只适合应急顶班。key: ALPHAVANTAGE_API_KEY 或 secret.local.json。"""
+    key = _secret("alphavantage_api_key")
+    if not key:
+        raise RuntimeError("alphavantage_api_key 未配置(secret.local.json 或 ALPHAVANTAGE_API_KEY)")
+    r = requests.get("https://www.alphavantage.co/query",
+                     params={"function": "NEWS_SENTIMENT", "sort": "LATEST",
+                             "limit": min(int(page_size), 50), "apikey": key},
+                     headers={"User-Agent": UA}, timeout=20)
+    r.raise_for_status()
+    out = []
+    for it in (r.json().get("feed") or []):
+        title = (it.get("title") or "").strip()
+        if not title:
+            continue
+        t = ""
+        pub = (it.get("time_published") or "")                 # 20260830T123000 (UTC)
+        if re.match(r"\d{8}T\d{6}", pub):
+            t = (datetime.datetime.strptime(pub, "%Y%m%dT%H%M%S")
+                 + datetime.timedelta(hours=8)).strftime("%Y-%m-%d %H:%M")
+        senti = it.get("overall_sentiment_label") or ""
+        out.append({"time": t, "text": title + (f" ({senti})" if senti else ""),
+                    "source": "AlphaVantage"})
+    return out
+
+
+def fetch_sec_edgar_filings(page_size: int = 30, form_type: str = "8-K") -> list:
+    """SEC EDGAR 最新申报(备用, 美股公告): 默认 8-K 重大事件, Atom feed 含公司名/表单/时刻。
+    官方免费; SEC 政策要求申报式 UA(代码内已带); 限速 10 次/秒。美股公告唯一官方源。"""
+    r = requests.get("https://www.sec.gov/cgi-bin/browse-edgar",
+                     params={"action": "getcurrent", "type": form_type, "dateb": "",
+                             "owner": "include", "count": int(page_size), "output": "atom"},
+                     headers={"User-Agent": "ai-auto-gen research contact@example.com"},
+                     timeout=15)
+    r.raise_for_status()
+    out = []
+    for e in re.findall(r"<entry>(.*?)</entry>", r.text, re.S):
+        ti = re.search(r"<title>(.*?)</title>", e, re.S)
+        up = re.search(r"<updated>(.*?)</updated>", e, re.S)
+        title = html.unescape(re.sub(r"\s+", " ", ti.group(1)).strip()) if ti else ""
+        t = ""
+        if up:
+            try:
+                t = (datetime.datetime.fromisoformat(up.group(1).strip())
+                     .astimezone(_BJ).strftime("%Y-%m-%d %H:%M"))
+            except ValueError:
+                pass
+        if title:
+            out.append({"time": t, "text": title, "source": "SEC EDGAR"})
+    return out[:int(page_size)]
+
+
+def fetch_frankfurter_fx() -> list:
+    """Frankfurter 汇率快照(备用): ECB 参考汇率, USD 基准 → CNY/HKD/JPY/KRW/TRY/EUR。
+    免费无 key; 每交易日一更(欧洲下午, 约北京 23 点), 周末无新值; ECB 口径不含 TWD。"""
+    r = requests.get("https://api.frankfurter.dev/v1/latest",
+                     params={"base": "USD", "symbols": "CNY,HKD,JPY,KRW,TRY,EUR"}, timeout=15)
+    r.raise_for_status()
+    d = r.json()
+    rates = d.get("rates") or {}
+    if not rates:
+        return []
+    body = " | ".join(f"{k} {v}" for k, v in rates.items())
+    now = datetime.datetime.now(_BJ).strftime("%Y-%m-%d %H:%M")
+    return [{"time": now, "text": f"USD 基准汇率(ECB 参考, 数据日期 {d.get('date')}): {body}",
+             "source": "Frankfurter"}]
+
+
+def fetch_goldprice_metals() -> list:
+    """goldprice.dev 金价快照(备用): XAU 现货折算 24K~10K 每克金价(31 币种, 默认 USD)。
+    免费无 key。注意: 名录描述含银/铜, 但免费公开端点只有黄金。"""
+    r = requests.get("https://api.goldprice.dev/v1/carat", params={"currency": "USD"}, timeout=15)
+    r.raise_for_status()
+    d = r.json()
+    p24 = d.get("price_gram_24k")
+    if not p24:
+        return []
+    oz = round(float(p24) * 31.1034768, 2)
+    text = (f"金价 USD: 现货约 {oz}/盎司 | 每克 24K {p24} / 22K {d.get('price_gram_22k')}"
+            f" / 18K {d.get('price_gram_18k')}")
+    return [{"time": datetime.datetime.now(_BJ).strftime("%Y-%m-%d %H:%M"),
+             "text": text, "source": "goldprice.dev"}]
+
+
+_FRED_SERIES = (("CPIAUCSL", "CPI指数"), ("UNRATE", "失业率%"),
+                ("FEDFUNDS", "联邦基金利率%"), ("DGS10", "10Y国债收益率%"))
+
+
+def fetch_fred_macro() -> list:
+    """FRED 美联储宏观数据(备用): CPI/失业率/联邦基金利率/10Y国债 最新观测值快照。
+    key 免费申请即得: FRED_API_KEY 或 secret.local.json 的 fred_api_key。"""
+    key = _secret("fred_api_key")
+    if not key:
+        raise RuntimeError("fred_api_key 未配置(secret.local.json 或 FRED_API_KEY)")
+    out = []
+    for sid, name in _FRED_SERIES:
+        r = requests.get("https://api.stlouisfed.org/fred/series/observations",
+                         params={"series_id": sid, "api_key": key, "file_type": "json",
+                                 "sort_order": "desc", "limit": 1},
+                         headers={"User-Agent": UA}, timeout=15)
+        r.raise_for_status()
+        obs = [o for o in (r.json().get("observations") or []) if o.get("value") not in (None, ".")]
+        if obs:
+            out.append({"time": obs[0].get("date", ""),
+                        "text": f"{name}({sid}) 最新值 {obs[0]['value']}", "source": "FRED"})
+    return out

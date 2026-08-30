@@ -209,3 +209,45 @@ def _peers(conf):
 @source("extras", "extras_group", "版式素材聚合(日历+行情+公告+同行)", ttl_min=60)
 def _extras(conf):
     return [ges.fetch_extras()]
+
+
+# ---------- 备用源(public-apis 名录收录 2026-08-30; 默认禁用, 主源失效时顶班) ----------
+
+@source("marketaux_news", "flash", "备用|MarketAux美股市场新闻(标题+ticker标注, 免费~100次/天)",
+        auth="apiKey", ttl_min=30)
+def _marketaux(conf):
+    return gs.fetch_marketaux_news(int(conf.get("page_size", 30)))
+
+
+@source("finnhub_news", "flash", "备用|Finnhub美股市场新闻headline流(免费60次/分)",
+        auth="apiKey", ttl_min=30)
+def _finnhub(conf):
+    return gs.fetch_finnhub_news(int(conf.get("page_size", 30)))
+
+
+@source("alphavantage_news", "flash", "备用|AlphaVantage美股新闻+情绪标签(免费仅25次/天, 应急)",
+        auth="apiKey", ttl_min=60)
+def _av(conf):
+    return gs.fetch_alphavantage_news(int(conf.get("page_size", 30)))
+
+
+@source("sec_edgar", "announcement", "备用|SEC EDGAR美股8-K重大公告(官方免费, 申报式UA内置)", ttl_min=30)
+def _edgar(conf):
+    return gs.fetch_sec_edgar_filings(int(conf.get("page_size", 30)))
+
+
+@source("frankfurter_fx", "market", "备用|Frankfurter汇率快照(ECB参考汇率, 无key, 交易日一更, 不含TWD)",
+        ttl_min=360)
+def _frank(conf):
+    return gs.fetch_frankfurter_fx()
+
+
+@source("goldprice_metals", "market", "备用|goldprice.dev金价快照(仅黄金, 无key)", ttl_min=60)
+def _gold(conf):
+    return gs.fetch_goldprice_metals()
+
+
+@source("fred_macro", "market", "备用|FRED美宏观CPI/失业率/利率/10Y国债最新值(免费key即申即得)",
+        auth="apiKey", ttl_min=720)
+def _fred(conf):
+    return gs.fetch_fred_macro()
