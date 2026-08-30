@@ -350,3 +350,38 @@ def _longbridge(conf):
         ttl_min=360, default_enabled=False)
 def _jin10_cal(conf):
     return gs.fetch_jin10_calendar()
+
+
+# ---------- 13 开源项目源收录(akshare/yfinance/edgartools 端点移植, 2026-08-31) ----------
+# 全零鉴权实测通过默认启用。cctv_xwlb 政策信号源不进早报聚合元组(防时政稀释财经浓度), 按需选取。
+
+@source("ths_flash", "flash", "同花顺全球财经直播快讯(带重要性标记, 与东财/财联社不同风控面)",
+        ttl_min=10, default_enabled=True)
+def _ths(conf):
+    return gs.fetch_ths_flash(int(conf.get("page_size", 20)))
+
+
+@source("caixin_flash", "flash", "财新数据通快讯(高质量中文财经, 带栏目标签)",
+        ttl_min=10, default_enabled=True)
+def _caixin(conf):
+    return gs.fetch_caixin_flash(int(conf.get("page_size", 30)))
+
+
+@source("yahoo_headlines", "flash", "Yahoo财经大盘头条RSS(美股盘面英文, 出版方署名)",
+        ttl_min=30, default_enabled=True)
+def _yahoo(conf):
+    return gs.fetch_yahoo_headlines(int(conf.get("page_size", 20)),
+                                    str(conf.get("symbol", "SPY")))
+
+
+@source("sec_insider", "announcement", "SEC Form4内部人交易申报(高管/大股东买卖, 与sec_edgar同端点type=4)",
+        ttl_min=30, default_enabled=True)
+def _insider(conf):
+    return gs.fetch_sec_edgar_filings(int(conf.get("page_size", 30)), form_type="4")
+
+
+@source("cctv_xwlb", "peer_article", "央视新闻联播当日文字稿(A股政策信号: 国常会/部委/立法; 时政占比高供synth背景, 不入聚合)",
+        ttl_min=720, default_enabled=True)
+def _cctv(conf):
+    r = ges.fetch_cctv_xwlb()
+    return [r] if r else []

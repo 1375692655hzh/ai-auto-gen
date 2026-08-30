@@ -900,3 +900,78 @@ def fetch_longbridge_topics(page_size: int = 10) -> list:
                             "url": a.get("web_url") or ""})
     out.sort(key=lambda x: x["time"], reverse=True)
     return out[:page_size]
+
+
+# ---------- 13 开源项目源收录(akshare/yfinance/edgartools 等, 2026-08-31) ----------
+
+
+def fetch_ths_flash(page_size: int = 20) -> list:
+    """同花顺全球财经直播快讯(零鉴权, 与东财/财联社不同风控面): 标题+摘要, import 字段为重要性标记。
+    端点移植自 akshare stock_info_global_ths。"""
+    r = requests.get("https://news.10jqka.com.cn/tapp/news/push/stock",
+                     params={"page": 1, "tag": "", "track": "website"},
+                     headers={"User-Agent": UA}, timeout=15)
+    r.raise_for_status()
+    out = []
+    for it in ((r.json().get("data") or {}).get("list") or [])[:int(page_size)]:
+        title = (it.get("title") or "").strip()
+        digest = re.sub(r"<[^>]+>", "", it.get("digest") or "").strip()
+        ts = it.get("rtime") or it.get("ctime")
+        t = datetime.datetime.fromtimestamp(int(ts), _BJ).strftime("%Y-%m-%d %H:%M") if ts else ""
+        text = f"{title}：{digest}" if title and digest else (title or digest)
+        if not text:
+            continue
+        star = "【重点】" if str(it.get("import")) not in ("", "0", "None") else ""
+        out.append({"time": t, "text": (star + text)[:300], "source": "同花顺快讯",
+                    "url": it.get("url") or ""})
+    return out
+
+
+def fetch_caixin_flash(page_size: int = 30) -> list:
+    """财新数据通快讯(零鉴权, 高质量中文财经): 标题+摘要+栏目标签。
+    端点移植自 akshare stock_news_main_cx(原实现丢弃了 title/time, 本项目保留)。"""
+    r = requests.get("https://cxdata.caixin.com/api/dataplus/sjtPc/news",
+                     params={"pageNum": 1, "pageSize": int(page_size), "showLabels": "true"},
+                     headers={"User-Agent": UA,
+                              "Referer": "https://cxdata.caixin.com/index/newsTab?tab=latest"},
+                     timeout=15)
+    r.raise_for_status()
+    out = []
+    for it in ((r.json().get("data") or {}).get("data") or []):
+        title = (it.get("title") or "").strip()
+        summary = (it.get("summary") or "").strip()
+        tag = (it.get("tag") or "").strip()
+        ts = it.get("time")
+        t = datetime.datetime.fromtimestamp(int(ts), _BJ).strftime("%Y-%m-%d %H:%M") if ts else ""
+        text = f"[{tag}] {title or summary}" + (f"：{summary}" if title and summary else "")
+        if text.strip("[] "):
+            out.append({"time": t, "text": text[:300], "source": "财新",
+                        "url": it.get("url") or ""})
+    return out
+
+
+def fetch_yahoo_headlines(page_size: int = 20, symbol: str = "SPY") -> list:
+    """Yahoo Finance 大盘头条 RSS(零鉴权): 美股盘面英文标题流, 出版方+UTC 时间转北京。
+    端点 feeds.finance.yahoo.com/rss/2.0/headline(yfinance 项目 Search/news 同族接口)。"""
+    from email.utils import parsedate_to_datetime
+    r = requests.get("https://feeds.finance.yahoo.com/rss/2.0/headline",
+                     params={"s": symbol, "region": "US", "lang": "en-US"},
+                     headers={"User-Agent": UA}, timeout=15)
+    r.raise_for_status()
+    out = []
+    for it in re.findall(r"<item>(.*?)</item>", r.text, flags=re.S)[:int(page_size)]:
+        def g(tag_):
+            m = re.search(rf"<{tag_}>(.*?)</{tag_}>", it, flags=re.S)
+            if not m:
+                return ""
+            v = re.sub(r"<!\[CDATA\[(.*?)\]\]>", r"\1", m.group(1), flags=re.S)
+            return html.unescape(v).strip()
+        title, link = g("title"), g("link")
+        t = ""
+        try:
+            t = parsedate_to_datetime(g("pubDate")).astimezone(_BJ).strftime("%Y-%m-%d %H:%M")
+        except (TypeError, ValueError):
+            pass
+        if title:
+            out.append({"time": t, "text": title[:200], "source": "Yahoo财经", "url": link})
+    return out

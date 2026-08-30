@@ -71,6 +71,25 @@
 
 移植修正记录：长桥页面锚点已失效（NEWS 原版 cheerio 选择器只能抓到页脚条款链接），改为解析页内 TanStack 脱水 JSON（`pages[].data.articles[]`）；金十日历按官方 app JS 现行路径实现（`web_data/{year}/week/{ISO周}/{economics|event}.json`，`event.json` 为单数）。
 
+### 13 开源项目源收录（2026-08-31）
+
+盘点 TradingAgents-CN / akshare / yfinance / zvt / TradingAgents / FinceptTerminal / ai-hedge-fund / daily_stock_analysis / qlib / RD-Agent / edgartools / FinanceMCP 等 13 个量化/数据项目封装的数据源。大部分是行情/K线库（与内容管线无关），新闻类接口多数与我们已有源重叠；以下 5 个为增量，全部零鉴权实测通过在册可用。
+
+| 源 id | 给什么信息 | 市场/形态 | 作息与限额 | 启用条件 |
+|---|---|---|---|---|
+| `ths_flash` | 同花顺全球财经直播快讯：标题+摘要，带官方重要性标记（import 字段） | A股+全球 / 快讯(flash) | 7×24 滚动 | 无 key，已在册可用 |
+| `caixin_flash` | 财新数据通快讯：标题+摘要+栏目标签（高质量中文财经） | A股+宏观 / 快讯(flash) | 每日滚动 | 无 key，已在册可用 |
+| `yahoo_headlines` | Yahoo 财经大盘头条 RSS（英文，出版方署名，默认 SPY 视角可换 symbol） | 美股 / 快讯(flash) | 交易日滚动 | 无 key，已在册可用 |
+| `sec_insider` | SEC Form 4 内部人交易申报：高管/大股东买卖（与 sec_edgar 同 atom 端点，type=4） | 美股 / 公告(announcement) | 交易时段滚动 | 无 key，已在册可用 |
+| `cctv_xwlb` | 央视新闻联播当日文字稿（每日 19:00 后）：国常会/部委/立法等政策信号；时政民生占比高，**不进早报聚合**，供 synth 背景按需选取 | A股政策 / 成篇(peer_article) | 每日 19:00 一期 | 无 key，已在册可用 |
+
+弃选/不接记录：
+- **DBnomics**：FRED provider 已被下架（2026-08-31 实测 `providers/FRED` 404）；IMF/WB 等宏观序列对早报边际价值低，不接。FRED 仍走已注册的 `fred_macro`（待配 key）。
+- **StockTwits / Reddit 情绪流**（TradingAgents 用）：散户观点流，按源录入规范"观点流不接（防污染事实底稿）"落选；Reddit 另需 OAuth。
+- **Polymarket**（TradingAgents v0.3 新增）：预测市场，范围外。
+- **Anspire/SerpAPI/Tavily/Bocha/Brave/TickFlow/Qveris/Twingly**（daily_stock_analysis/FinanceMCP 用）：key 型通用搜索/聚合服务，是工具不是信息源，且通用聚合稀释质量（同 NewsAPI 弃选理由）。
+- **qlib / RD-Agent / zvt / ai-hedge-fund**：无量新闻源（行情/因子框架或付费 key 数据），无可收。
+
 ## 其余来源
 
 `python cli.py sources list` 查看全部（类型/启用/健康）。

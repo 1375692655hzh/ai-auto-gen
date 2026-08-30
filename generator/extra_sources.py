@@ -1050,6 +1050,52 @@ def fetch_extras() -> dict:
     return extras
 
 
+def fetch_cctv_xwlb(max_items: int = 15) -> dict | None:
+    """新闻联播当日条目文字稿(每日19:00后, 零鉴权): A股政策信号源(国常会/部委/立法动态),
+    时政民生占比高, 作 synth 背景由 LLM 自行过滤, 不进早报聚合元组(防稀释财经浓度), 在册按需选取。
+    akshare news_cctv 原 URL(cctv.cntv.cn)已失效, 重写为 tv.cctv.com 首页发现 + 条目页 content_area。"""
+    def _text(u, referer):
+        r = _get(u, referer)
+        r.encoding = r.apparent_encoding or "utf-8"   # 央视页面 GBK, requests 会误判 Latin-1 乱码
+        return r.text
+
+    home = _text("https://tv.cctv.com/lm/xwlb/", "https://tv.cctv.com/")
+    links = re.findall(r'href="(https://tv\.cctv\.com/(\d{4}/\d{2}/\d{2})/VIDE[^"]+\.shtml)"', home)
+    if not links:
+        return None
+    day = links[0][1]                     # 首页即最新一期
+    urls = []
+    seen = set()
+    for u, d in links:
+        if d == day and u not in seen:
+            seen.add(u)
+            urls.append(u)
+    parts, got = [], 0
+    for u in urls[:max_items]:
+        try:
+            h = _text(u, "https://tv.cctv.com/lm/xwlb/")
+            ti = re.search(r"<title>(.*?)</title>", h, re.S)
+            title = re.sub(r"^\[视频\]", "", html.unescape(ti.group(1)).strip()) if ti else ""
+            if not title or title.startswith("《新闻联播》"):   # 整期节目页非条目
+                continue
+            m = re.search(r'<div[^>]+class="content_area"[^>]*>(.*?)</div>', h, re.S)
+            body = re.sub(r"<[^>]+>", "", m.group(1)) if m else ""
+            body = re.sub(r"\s+", "", body)
+            body = re.sub(r"^央视网消息（新闻联播）：?", "", body)
+            parts.append(f"- {title}" + (f"：{body[:200]}" if body else ""))
+            got += 1
+        except Exception:
+            continue
+    if not got:
+        raise RuntimeError("新闻联播条目页正文解析失败(content_area 结构改版?)")
+    day_cn = day.replace("/", "")
+    return {"time": f"{day.replace('/', '-')} 19:30",
+            "title": f"新闻联播 {day_cn}({got}条)",
+            "text": "\n".join(parts)[:12000],
+            "media": "央视新闻联播", "url": "https://tv.cctv.com/lm/xwlb/",
+            "source": "新闻联播"}
+
+
 if __name__ == "__main__":
     print("== 同行早报 ==")
     refs, failed = fetch_peer_mornings()
