@@ -59,6 +59,18 @@
 | `miningcom` | MINING.COM 大宗矿业当日条目机器汇总（≤8 条） | 大宗 / 同行文章(peer_article) | 工作日高频；当日无更返回空属正常 | 无 key，已在册可用 |
 | `liberty_street` | 纽约联储 Liberty Street 最新一篇全文（联储经济学家分析博客） | 美国宏观分析 / 同行文章(peer_article) | 周 1-2 篇 | 无 key，已在册可用 |
 
+### NEWS 项目移植（D:\AI项目\NEWS，2026-08-31）
+
+该项目 11 个源里 8 个本项目已有等价物；以下 3 个为增量。它的财联社/东财走公共 RSSHub（已被 Cloudflare 墙），本项目直连版更稳，不回移植。
+
+| 源 id | 给什么信息 | 市场/形态 | 作息与限额 | 启用条件 |
+|---|---|---|---|---|
+| `wscn_live` | 华尔街见闻全球快讯实时流（官方 API，code 20000 校验）；与"见闻早餐" peer 文章互补。全球频道含非财经条目，靠下游粗筛过滤 | 全球宏观 / 快讯(flash) | 7×24 滚动 | 无 key，已在册可用 |
+| `longbridge_topics` | 长桥海豚要闻：港美券商话题热点（标题+链接+发布时刻） | 港美 / 快讯(flash) | 滚动更新，约 20 条/屏 | 无 key，已在册可用 |
+| `jin10_calendar` | 金十财经日历：经济数据+事件+星级+三值（公布/预期/前值），与见闻日历不同口径互备 | 全球宏观 / 数据行情(market) | 周文件更新 | 无 key，**暂不启用**：官方 CDN 域名 cdn-rili.jin10.com 已 NXDOMAIN（2026-08-31 三方向 DoH 确认，金十日历官网同源故障），代码在册待恢复 |
+
+移植修正记录：长桥页面锚点已失效（NEWS 原版 cheerio 选择器只能抓到页脚条款链接），改为解析页内 TanStack 脱水 JSON（`pages[].data.articles[]`）；金十日历按官方 app JS 现行路径实现（`web_data/{year}/week/{ISO周}/{economics|event}.json`，`event.json` 为单数）。
+
 ## 其余来源
 
 `python cli.py sources list` 查看全部（类型/启用/健康）。

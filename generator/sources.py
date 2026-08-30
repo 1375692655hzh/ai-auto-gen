@@ -7,6 +7,7 @@
 import re
 import time
 import html
+import json
 import datetime
 
 import requests
@@ -763,3 +764,139 @@ def fetch_nasdaq_earnings() -> list:
     return [{"time": today,
              "text": f"今日美股财报 {len(rows)} 家: " + "、".join(picks),
              "source": "Nasdaq"}]
+
+
+# ---------- NEWS 项目(D:\AI项目\NEWS)移植 2026-08-31: 见闻快讯/金十日历/长桥海豚, 全零鉴权 ----------
+
+
+def fetch_wscn_live(page_size: int = 50) -> list:
+    """华尔街见闻全球快讯(零鉴权官方 API): content_text 剥 HTML, 与见闻早餐(peer文章)互补的实时流。
+    响应 code 须为 20000(移植自 NEWS 项目 wscn-fetcher.ts)。"""
+    r = requests.get("https://api-prod.wallstreetcn.com/apiv1/content/lives",
+                     params={"channel": "global-channel", "limit": page_size},
+                     headers={"User-Agent": UA, "Referer": "https://wallstreetcn.com/"}, timeout=15)
+    r.raise_for_status()
+    d = r.json()
+    if d.get("code") != 20000:
+        raise RuntimeError(f"见闻 lives code={d.get('code')}: {str(d.get('message'))[:60]}")
+    out = []
+    for it in (d.get("data") or {}).get("items") or []:
+        text = re.sub(r"<[^>]+>", "", it.get("content_text") or "").strip()
+        text = text or re.sub(r"<[^>]+>", "", it.get("title") or "").strip()
+        if not text:
+            continue
+        ts = it.get("display_time")
+        t = datetime.datetime.fromtimestamp(ts, _BJ).strftime("%Y-%m-%d %H:%M") if ts else ""
+        out.append({"time": t, "text": text[:300], "source": "见闻快讯",
+                    "url": f"https://wallstreetcn.com/lives/{it.get('id')}"})
+    return out
+
+
+def fetch_jin10_calendar() -> list:
+    """金十财经日历(今日, CDN 周文件零鉴权): 经济数据+事件, 星级标注, 与见闻日历不同口径互备。
+    weekKey 先试 ISO 周数再试北京周一日期键;  payload 支持数组/日期键字典两种形态
+    (移植自 NEWS 项目 jin10-calendar-fetcher.ts)。"""
+    now = datetime.datetime.now(_BJ)
+    iso_year, iso_week, _ = now.isocalendar()
+    monday = now - datetime.timedelta(days=now.weekday())
+    payloads = []
+    for wk in (str(iso_week), monday.strftime("%Y%m%d")):
+        for fn, typ in (("economics.json", "数据"), ("events.json", "事件")):
+            try:
+                r = requests.get(f"https://cdn-rili.jin10.com/web_data/{iso_year}/week/{wk}/{fn}",
+                                 headers={"User-Agent": UA, "Referer": "https://rili.jin10.com/",
+                                          "Accept": "application/json"}, timeout=12)
+                r.raise_for_status()
+                payloads.append((r.json(), typ))
+            except Exception:
+                continue
+        if payloads:
+            break
+    if not payloads:
+        raise RuntimeError("金十日历本周 CDN 文件均不可用")
+
+    def rows_of(payload):
+        if isinstance(payload, dict) and isinstance(payload.get("data"), list):
+            payload = payload["data"]
+        if isinstance(payload, list):
+            return [(str(x.get("date") or x.get("day") or x.get("pub_date") or ""), x)
+                    for x in payload if isinstance(x, dict)]
+        if isinstance(payload, dict):
+            return [(k, x) for k, v in payload.items()
+                    if re.fullmatch(r"\d{4}-\d{2}-\d{2}", k) and isinstance(v, list)
+                    for x in v if isinstance(x, dict)]
+        return []
+
+    def pick(row, keys):
+        for k in keys:
+            v = row.get(k)
+            if isinstance(v, str) and v.strip():
+                return v.strip()
+            if isinstance(v, (int, float)):
+                return str(v)
+        return ""
+
+    today = now.strftime("%Y-%m-%d")
+    out = []
+    for payload, typ in payloads:
+        for day, row in rows_of(payload):
+            if day and day != today:
+                continue
+            title = pick(row, ("name", "indicator_name", "data_name", "indicatorName",
+                               "title", "event_content", "event"))
+            if not title:
+                continue
+            country = pick(row, ("country", "country_name", "region_name"))
+            try:
+                star = int(row.get("star", row.get("importance", row.get("important", 3))))
+            except (TypeError, ValueError):
+                star = 3
+            tl = ""
+            for k in ("time", "time_period", "pub_time_str"):
+                v = str(row.get(k) or "").strip()
+                if re.fullmatch(r"\d{1,2}:\d{2}", v):
+                    tl = v
+                    break
+            if not tl:
+                pub = row.get("pub_time") or row.get("publish_time")
+                if isinstance(pub, (int, float)) and pub > 1_000_000_000:
+                    ts = pub / 1000 if pub > 1_000_000_000_000 else pub
+                    tl = datetime.datetime.fromtimestamp(ts, _BJ).strftime("%H:%M")
+            act = pick(row, ("actual", "act", "公布值", "公布"))
+            fore = pick(row, ("consensus", "forecast", "预期", "预测值"))
+            prev = pick(row, ("previous", "prev", "前值"))
+            nums = f" [公布:{act or '-'} 预期:{fore or '-'} 前值:{prev or '-'}]"
+            out.append({"time": f"{today} {tl or '00:00'}",
+                        "text": f"[{typ}]{'★' * max(1, min(star, 3))} {country + ' ' if country else ''}{title}{nums}",
+                        "source": "金十日历"})
+    out.sort(key=lambda x: x["time"])
+    return out
+
+
+def fetch_longbridge_topics(page_size: int = 10) -> list:
+    """长桥海豚要闻(港美券商话题热点, 零鉴权): 页内 TanStack 脱水 JSON 的 articles 流。
+    2026-08-31 实测页面锚点已只剩页脚条款链接, 正文数据在 window.__TANSTACK_DEHYDRATED__ 的
+    pages[].data.articles[](title/web_url/published_at Unix秒); NEWS 项目原版 cheerio 锚点选择器已失效。"""
+    r = requests.get("https://longbridge.com/zh-CN/news",
+                     headers={"User-Agent": UA, "Accept": "text/html,application/xhtml+xml",
+                              "Accept-Language": "zh-CN,zh;q=0.9",
+                              "Referer": "https://longbridge.com/"}, timeout=15)
+    r.raise_for_status()
+    out = []
+    for chunk in re.findall(r"window\.__TANSTACK_DEHYDRATED__\.queries\.push\((\{.*?\})\)</script>",
+                            r.text, flags=re.S):
+        try:
+            d = json.loads(chunk)
+        except ValueError:
+            continue
+        for p in (((d.get("state") or {}).get("data") or {}).get("pages")) or []:
+            for a in ((p.get("data") or {}).get("articles")) or []:
+                title = (a.get("title") or "").strip()
+                ts = a.get("published_at")
+                if not title or not ts:
+                    continue
+                t = datetime.datetime.fromtimestamp(int(ts), _BJ).strftime("%Y-%m-%d %H:%M")
+                out.append({"time": t, "text": title[:200], "source": "长桥海豚",
+                            "url": a.get("web_url") or ""})
+    out.sort(key=lambda x: x["time"], reverse=True)
+    return out[:page_size]

@@ -328,3 +328,25 @@ def _mining(conf):
 def _liberty(conf):
     r = ges.fetch_liberty_street()
     return [r] if r else []
+
+
+# ---------- NEWS 项目移植(D:\AI项目\NEWS, 2026-08-31) ----------
+# 见闻快讯/长桥海豚实测通过默认启用; 金十日历官方 CDN 域名 cdn-rili.jin10.com 已 NXDOMAIN
+# (Cloudflare/阿里/腾讯 DoH 三方向均确认, 金十官方日历站同源故障), 代码在册待恢复。
+
+@source("wscn_live", "flash", "见闻全球快讯(官方API零key, 与见闻早餐文章互补的实时流; 全球频道含非财经条目, 下游粗筛过滤)",
+        ttl_min=10, default_enabled=True)
+def _wscn_live(conf):
+    return gs.fetch_wscn_live(int(conf.get("page_size", 50)))
+
+
+@source("longbridge_topics", "flash", "长桥海豚要闻(港美券商话题热点, 页内TanStack脱水JSON解析)",
+        ttl_min=15, default_enabled=True)
+def _longbridge(conf):
+    return gs.fetch_longbridge_topics(int(conf.get("page_size", 10)))
+
+
+@source("jin10_calendar", "market", "金十财经日历(经济数据+事件+星级; 2026-08-31起官方CDN域名NXDOMAIN, 待恢复)",
+        ttl_min=360, default_enabled=False)
+def _jin10_cal(conf):
+    return gs.fetch_jin10_calendar()
