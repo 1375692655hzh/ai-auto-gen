@@ -98,7 +98,8 @@ def render_morning_article(ctx, wf, params):
     print(f"渲染文章: 素材 {len(content)} 字 → 精炼改写 ...")
     md = _llm_call(user, system, params, max_tokens=6500, temperature=0.3)
     # 半角冒号 → 全角(kimi-k3 等模型会漂格式; 下游索引/机检只认全角)
-    md = re.sub("^(- \*\*[^*]+\*\*):(?=[^:])", "\1：", md, flags=re.M)
+    # 替换串必须 raw string: 普通串里 "\1" 是 \x01 控制符, 会把标签段整个吞掉(2026-08-30 实测踩中)
+    md = re.sub(r"^(- \*\*[^*]+\*\*):(?=[^:])", r"\1：", md, flags=re.M)
     _check_complete(md, "文章")
     md = _inject_indices(md)                       # 开头行情速览(接口数据, 块引用行)
     report = _lint_article(md)
@@ -151,24 +152,33 @@ def _ark_complete(user: str, system: str, model: str, max_tokens: int = 16384) -
     if not js.exists():
         raise RuntimeError(f"arkcli 入口未找到: {js}")
     node = shutil.which("node") or "node"
-    cmd = [node, str(js), "+chat", "--no-progress", "--model", model,
-           "--instructions", system, "--reasoning-effort", "low",
-           "--max-output-tokens", str(max_tokens), user]
-    try:
-        r = subprocess.run(cmd, capture_output=True, timeout=900)
-    except FileNotFoundError:
-        raise RuntimeError("arkcli 不在 PATH, 无法走 ark 通道")
-    out = r.stdout.decode("utf-8", "replace").strip()
-    if not out:
-        raise RuntimeError(f"arkcli 无输出: {r.stderr.decode('utf-8', 'replace')[:200]}")
-    try:
-        d = _json.JSONDecoder().raw_decode(out)[0]      # 截掉尾部版本提示
-    except Exception:
-        raise RuntimeError(f"arkcli 输出异常: {out[:150]}")
-    if d.get("ok") is False:
-        raise RuntimeError(f"arkcli 错误: {str((d.get('error') or {}).get('message'))[:200]}")
+
+    def _call(extra: list) -> dict:
+        cmd = [node, str(js), "+chat", "--no-progress", "--model", model,
+               "--instructions", system, *extra,
+               "--max-output-tokens", str(max_tokens), user]
+        try:
+            r = subprocess.run(cmd, capture_output=True, timeout=900)
+        except FileNotFoundError:
+            raise RuntimeError("arkcli 不在 PATH, 无法走 ark 通道")
+        out = r.stdout.decode("utf-8", "replace").strip()
+        if not out:
+            raise RuntimeError(f"arkcli 无输出: {r.stderr.decode('utf-8', 'replace')[:200]}")
+        try:
+            d = _json.JSONDecoder().raw_decode(out)[0]      # 截掉尾部版本提示
+        except Exception:
+            raise RuntimeError(f"arkcli 输出异常: {out[:150]}")
+        if d.get("ok") is False:
+            raise RuntimeError(f"arkcli 错误: {str((d.get('error') or {}).get('message'))[:200]}")
+        return d
+
+    d = _call(["--reasoning-effort", "low"])
     if not d.get("content"):
-        raise RuntimeError(f"ark {model} content 为空(思考链截断, 试 --thinking disabled)")
+        # 思考模型的推理链会吃光输出预算(k3 长 JSON 任务实测踩中): 关思考重试一次
+        print(f"  [ark] {model} content 为空, 关思考重试")
+        d = _call(["--thinking", "disabled"])
+    if not d.get("content"):
+        raise RuntimeError(f"ark {model} content 为空(关思考重试仍空)")
     print(f"  [ark] {d.get('model')} tokens={(d.get('usage') or {}).get('total_tokens')}")
     return d["content"]
 
@@ -473,6 +483,8 @@ def _lint_article(md: str) -> dict:
     short = sum(1 for n in lens if n < 40)          # 下限放宽到 40(公告一行题可短)
     over = sum(1 for n in lens if n > 110)
     fail = []
+    if not items:
+        fail.append("零可索引条目(格式异常: 条目须为「- **标签**：正文」)")
     if bare:
         pass                       # bare 已在上面收集, 统一在此入 fail
     if bare:
