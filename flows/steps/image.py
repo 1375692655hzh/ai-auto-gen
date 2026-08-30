@@ -100,11 +100,12 @@ def render_morning_image(ctx, wf, params):
                        .replace("<<ITEMS>>", feed))
             system = daily.load_prompt("morning_image_lines_system",
                                        "你是财经长图编辑,只输出严格 JSON。")
-            raw = llm_complete(user, system=system, max_tokens=2500, temperature=0.2)
+            from common import gen_llm
+            raw = gen_llm("", user, system, 2500, 0.2)
             refined, err = _parse_lines(raw, {it["n"]: it["text"] for it in sel}, vocab)
             if err:
                 print(f"⚠ 精简校验失败({err}), 重试一次 ...")
-                raw = llm_complete(user, system=system, max_tokens=2500, temperature=0.2)
+                raw = gen_llm("", user, system, 2500, 0.2)
                 refined, err = _parse_lines(raw, {it["n"]: it["text"] for it in sel}, vocab)
             if err:
                 print(f"⚠ 降级为纯截断版({err})")

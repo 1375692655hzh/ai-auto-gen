@@ -58,14 +58,8 @@ def enrich_video_details(ctx, wf, params):
     print(f"enrich: {len(sel)} 条 / 送模型 {len(user)} 字 ...")
 
     def _call():
-        model = str(params.get("model", "")).strip()
-        if model.startswith("ark:"):
-            from flows.steps.morning import _ark_complete
-            try:
-                return _ark_complete(user, system, model[4:], max_tokens=4000)
-            except RuntimeError as e:
-                print(f"⚠ ark 通道失败({e}), 降级默认模型")
-        return llm_complete(user, system=system, max_tokens=4000, temperature=0.2)
+        from common import gen_llm
+        return gen_llm(str(params.get("model", "")), user, system, 4000, 0.2)
 
     art_nums = {c["n"]: set(re.findall(r"\d+(?:\.\d+)?", text_of[c["n"]])) for c in sel}
     mat_nums = set(re.findall(r"\d+(?:\.\d+)?", material))

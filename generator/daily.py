@@ -76,15 +76,9 @@ def load_prompt(name: str, default: str = "") -> str:
 
 
 def _llm(model: str, user: str, system: str, max_tokens: int, temperature: float = 0.4) -> str:
-    """模型分发: ark:<模型名>=方舟订阅CLI(失败降级默认); 空=默认通道(与 morning._llm_call 同语义)。"""
-    model = (model or "").strip()
-    if model.startswith("ark:"):
-        try:
-            from flows.steps.morning import _ark_complete
-            return _ark_complete(user, system, model[4:], max_tokens=max_tokens)
-        except RuntimeError as e:
-            print(f"⚠ ark 通道失败({e}), 降级默认模型")
-    return llm_complete(user, system=system, max_tokens=max_tokens, temperature=temperature)
+    """模型分发(common.gen_llm): ark:<名>=方舟订阅CLI, 失败降kimi官方API再降默认通道; 空=生成链默认kimi-k3。"""
+    from common import gen_llm
+    return gen_llm(model, user, system, max_tokens, temperature)
 
 
 # ---------- 第 2 步:LLM 精选 ----------

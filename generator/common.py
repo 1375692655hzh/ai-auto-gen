@@ -15,10 +15,92 @@ import yaml
 
 GEN_ROOT = Path(__file__).resolve().parent
 AUTOPUB_ROOT = GEN_ROOT.parent / "autopub"
+PROJ_ROOT = GEN_ROOT.parent
 
 # 让 generator 下的脚本无论从哪个 cwd 启动都能 import 同目录模块
 if str(GEN_ROOT) not in sys.path:
     sys.path.insert(0, str(GEN_ROOT))
+
+
+# ---------- 生成链统一模型分发 ----------
+
+def gen_default_model() -> str:
+    """生成链默认模型: data/config.local.yaml 的 gen_model, 未配置=ark:kimi-k3。
+    (2026-08-30 定案: 五条链横评全选 kimi-k3; 此前空 model 会漏进 autopub secret 的 deepseek)"""
+    override = Path(PROJ_ROOT / "data" / "config.local.yaml")
+    if override.exists():
+        try:
+            v = (yaml.safe_load(override.read_text(encoding="utf-8")) or {}).get("gen_model", "")
+            if v:
+                return str(v)
+        except Exception:
+            pass
+    return "ark:kimi-k3"
+
+
+def kimi_api_key() -> str:
+    """Kimi 官方 API key(备用通道): autopub/secret.local.json 的 kimi_api_key 或环境变量 KIMI_API_KEY。未配=空串(通道自动跳过)。"""
+    import os
+    if os.environ.get("KIMI_API_KEY"):
+        return os.environ["KIMI_API_KEY"]
+    p = AUTOPUB_ROOT / "secret.local.json"
+    if p.exists():
+        try:
+            return str(json.loads(p.read_text(encoding="utf-8")).get("kimi_api_key", "") or "")
+        except Exception:
+            pass
+    return ""
+
+
+def kimi_api_complete(user: str, system: str, max_tokens: int) -> str:
+    """Kimi 官方 API 直连(OpenAI 兼容)。模型名可被 secret 的 kimi_api_model 覆盖,默认 kimi-k3。"""
+    import urllib.request
+    key = kimi_api_key()
+    if not key:
+        raise RuntimeError("kimi api key 未配置")
+    model = "kimi-k3"
+    p = AUTOPUB_ROOT / "secret.local.json"
+    if p.exists():
+        try:
+            model = str(json.loads(p.read_text(encoding="utf-8")).get("kimi_api_model", "") or model)
+        except Exception:
+            pass
+    body = json.dumps({"model": model, "messages": [
+        *( [{"role": "system", "content": system}] if system else [] ),
+        {"role": "user", "content": user}],
+        "max_tokens": max_tokens, "temperature": 0.3}).encode("utf-8")
+    req = urllib.request.Request(
+        "https://api.moonshot.cn/v1/chat/completions", data=body,
+        headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"})
+    with urllib.request.urlopen(req, timeout=300) as r:
+        out = json.loads(r.read().decode("utf-8"))
+    text = (out.get("choices") or [{}])[0].get("message", {}).get("content", "")
+    if not text:
+        raise RuntimeError("kimi api 返回为空")
+    return text
+
+
+def gen_llm(model: str, user: str, system: str, max_tokens: int, temperature: float = 0.4) -> str:
+    """生成链统一分发(morning._llm_call 与 daily._llm 的共同实现)。
+    回落顺序: ark:<名>(arkcli 订阅) → kimi 官方 API(配了 key 才启用) → 默认通道(最后兜底)。
+    空 model = gen_default_model()(即 kimi-k3)。"""
+    model = (model or "").strip() or gen_default_model()
+    if model.startswith("ark:"):
+        try:
+            if str(PROJ_ROOT) not in sys.path:
+                sys.path.insert(0, str(PROJ_ROOT))
+            from flows.steps.morning import _ark_complete
+            return _ark_complete(user, system, model[4:], max_tokens=max_tokens)
+        except RuntimeError as e:
+            print(f"⚠ ark 通道失败({e}), 尝试降级")
+        if kimi_api_key():
+            try:
+                print("↓ 降级 kimi 官方 API")
+                return kimi_api_complete(user, system, max_tokens)
+            except Exception as e:
+                print(f"⚠ kimi api 失败({e}), 降级默认通道")
+        return llm_complete(user, system=system, max_tokens=max_tokens, temperature=temperature)
+    return llm_complete(user, system=system, max_tokens=max_tokens, temperature=temperature)
 
 
 def load_cfg() -> dict:

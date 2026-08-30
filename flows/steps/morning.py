@@ -126,14 +126,10 @@ def _load_sectors(pack_dir: Path) -> list:
 
 
 def _llm_call(user: str, system: str, params: dict, max_tokens: int, temperature: float) -> str:
-    """模型分发: params.model 支持 ark:<模型名>(方舟订阅, 失败回落默认); 空=secret.local.json 默认模型。"""
-    m_model = str(params.get("model", "")).strip()
-    if m_model.startswith("ark:"):
-        try:
-            return _ark_complete(user, system, m_model[4:], max_tokens=max_tokens)
-        except RuntimeError as e:
-            print(f"⚠ ark 通道失败({e}), 降级默认模型")
-    return llm_complete(user, system=system, max_tokens=max_tokens, temperature=temperature)
+    """模型分发(common.gen_llm): ark:<模型名>=方舟订阅, 失败降 kimi 官方API(配key才启用)再降默认通道;
+    空=生成链默认 kimi-k3(data/config.local.yaml 的 gen_model 可覆盖)。"""
+    from common import gen_llm
+    return gen_llm(str(params.get("model", "")), user, system, max_tokens, temperature)
 
 
 def _ark_complete(user: str, system: str, model: str, max_tokens: int = 16384) -> str:
@@ -244,12 +240,8 @@ def tag_morning_items(ctx, wf, params):
     m_model = str(params.get("model", "")).strip()
 
     def _call() -> str:
-        if m_model.startswith("ark:"):
-            try:
-                return _ark_complete(user, system, m_model[4:])
-            except RuntimeError as e:
-                print(f"⚠ ark 通道失败({e}), 降级默认模型")
-        return llm_complete(user, system=system, max_tokens=4000, temperature=0.2)
+        from common import gen_llm
+        return gen_llm(m_model, user, system, 4000, 0.2)
 
     raw = _call()
     parsed, err = _parse_tags(raw, sectors, items, mode)
