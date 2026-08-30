@@ -32,7 +32,8 @@ def fetch_morning_reports(ctx, wf, params):
             t = (r.get("time") or "").strip()[:10]
             (fresh if t == wf.date else stale).append(r)
         for r in stale:
-            failed.append(f"{r.get('source')}({t and '非当日' or '无时间'}: {t or '?'}, "
+            rt = (r.get("time") or "").strip()[:10]
+            failed.append(f"{r.get('source')}({rt and '非当日' or '无时间'}: {rt or '?'}, "
                           f"预计发布时间未到或源异常)")
         if not fresh:
             sys.exit(f"没有当日({wf.date})早报, 拒绝用旧素材合成(强跑加 --set allow_stale=true)。"
