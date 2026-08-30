@@ -40,6 +40,26 @@ def fetch_sina_724(page_size: int = 100) -> list:
     return out
 
 
+def fetch_jin10_flash(page_size: int = 50) -> list:
+    """金十数据快讯(中文全球, 400-700条/天, 时间精确到秒)。"""
+    import json
+    r = requests.get(
+        "https://www.jin10.com/flash_newest.js",
+        headers={"User-Agent": UA, "Referer": "https://www.jin10.com/"},
+        timeout=15,
+    )
+    r.raise_for_status()
+    m = re.search(r"var newest\s*=\s*(\[.*\])\s*;?\s*$", r.text.strip(), re.S)
+    arr = json.loads(m.group(1)) if m else []
+    out = []
+    for it in arr[:int(page_size)]:
+        text = _strip_html(((it.get("data") or {}).get("content") or ""))
+        t = (it.get("time") or "").strip()[:16]
+        if text and t:
+            out.append({"time": t, "text": text, "source": "金十数据"})
+    return out
+
+
 def fetch_eastmoney_fast(page_size: int = 50) -> list:
     """东方财富财经快讯(焦点栏目)。"""
     r = requests.get(

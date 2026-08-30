@@ -43,6 +43,11 @@ def _em_fast(conf):
     return gs.fetch_eastmoney_fast(int(conf.get("page_size", 50)))
 
 
+@source("jin10_flash", "flash", "金十数据快讯(全球,秒级时间戳)", ttl_min=10, default_enabled=True)
+def _jin10(conf):
+    return gs.fetch_jin10_flash(int(conf.get("page_size", 50)))
+
+
 # ---------- 同行早报文章(gather_refs) ----------
 
 @source("eastmoney_zaozhidao", "peer_article", "东财搜索《早知道》系列", ttl_min=120,
@@ -95,6 +100,24 @@ def _japan(conf):
 @source("korea_morning", "peer_article", "韩联社韩国市场精选(当日RSS过滤)", ttl_min=60)
 def _korea(conf):
     r = ges.fetch_korea_morning()
+    return [r] if r else []
+
+
+@source("em_research", "peer_article", "东财研报中心机构观点索引(晨会/宏观/策略)", ttl_min=120)
+def _emr(conf):
+    r = ges.fetch_em_research()
+    return [r] if r else []
+
+
+@source("sina_vip", "peer_article", "新浪意见领袖(首席经济学家/大V观点)", ttl_min=60)
+def _svip(conf):
+    r = ges.fetch_sina_vip()
+    return [r] if r else []
+
+
+@source("mint_markets", "peer_article", "Livemint印度市场精选(当日RSS)", ttl_min=60)
+def _mint(conf):
+    r = ges.fetch_mint_markets()
     return [r] if r else []
 
 

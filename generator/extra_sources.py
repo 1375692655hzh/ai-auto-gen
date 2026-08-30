@@ -425,9 +425,9 @@ def _rss_items(xml_text: str) -> list:
     for it in re.findall(r"<item>(.*?)</item>", xml_text, re.S):
         def tag(t):
             m = re.search(rf"<{t}>(.*?)(?:</{t}>|</item>)", it, re.S)
-            return (m.group(1) if m else "").strip()
+            return re.sub(r"<!\[CDATA\[(.*?)\]\]>", r"\1", m.group(1), flags=re.S) if m else ""
         title, link, pub, desc = (tag("title"), tag("link"), tag("pubDate"), tag("description"))
-        title = _clean_html_text(re.sub(r"<!\[CDATA\[(.*?)\]\]>", r"\1", title, flags=re.S))
+        title = _clean_html_text(title)
         desc = _clean_html_text(re.sub(r"<!\[CDATA\[(.*?)\]\]>", r"\1", desc, flags=re.S))
         dt = None
         for fmt in ("%a, %d %b %Y %H:%M:%S %z", "%a, %d %b %Y %H:%M %z"):
@@ -482,6 +482,77 @@ def fetch_korea_morning() -> dict | None:
             kept.append(ln)
         r["text"] = "\n".join(kept)[:12000]
     return r
+
+
+# ---------- 机构观点/名家分析(东财研报中心 + 新浪意见领袖) ----------
+
+def fetch_em_research() -> dict | None:
+    """东财研报中心: 当日宏观研究(qType=3)+晨会纪要(q4)+策略(q2) 列表拼"机构观点索引"篇。
+    列表自带机构+研究员署名(详情页全文太重, 索引已足以告知 synth 今日机构研判方向)。"""
+    import requests as rq
+    today = datetime.datetime.now(_BJ_TZ).strftime("%Y-%m-%d")
+    lines, seen = [], set()
+    for qt, label in ((4, "晨会纪要"), (3, "宏观研究"), (2, "策略报告")):
+        u = ("https://reportapi.eastmoney.com/report/jg?pageSize=50"
+             f"&beginTime={today}&endTime={today}&pageNo=1&qType={qt}")
+        r = rq.get(u, headers={**UA}, timeout=15)
+        r.raise_for_status()
+        for it in (r.json() or {}).get("data") or []:
+            key = it.get("title", "")
+            if key in seen:
+                continue
+            seen.add(key)
+            lines.append(f"【{it.get('orgSName', '')}｜{it.get('researcher', '')}】{key}")
+        if len(lines) >= 30:
+            break
+    if not lines:
+        return None                # 交易日才有, 周末 None 属预期
+    print(f"  东财研报: 当日 {len(lines[:30])} 条机构观点")
+    return {"time": f"{today} 08:30", "title": f"机构观点索引 {today}",
+            "text": "[机构观点·机器汇总]\n" + "\n".join(lines[:30])[:12000],
+            "media": "东方财富研报中心", "url": "https://data.eastmoney.com/report/",
+            "source": "东财研报"}
+
+
+def fetch_sina_vip() -> dict | None:
+    """新浪财经意见领袖: 首席经济学家/大V当日署名观点(标题+摘要)。"""
+    import requests as rq
+    today = datetime.datetime.now(_BJ_TZ).strftime("%Y-%m-%d")
+    lines = []
+    for page in (1, 2):
+        r = rq.get(f"https://interface.sina.cn/finance/api_feed.d.json?page={page}",
+                   headers={**UA, "Referer": "https://finance.sina.com.cn/zl/"},
+                   timeout=15)
+        r.raise_for_status()
+        body = r.json()
+        items = body.get("data") if isinstance(body, dict) else body
+        if not isinstance(items, list):
+            break
+        stop = False
+        for it in items:
+            if (it.get("publish_time") or "")[:10] != today:
+                if (it.get("publish_time") or "")[:10] < today:
+                    stop = True
+                continue
+            t = it.get("title", "")
+            if t and it.get("summary"):
+                lines.append(f"【{it.get('author_name', '')}】{t}：{it['summary']}")
+        if stop:
+            break
+    if not lines:
+        return None
+    print(f"  新浪意见领袖: 当日 {len(lines)} 篇")
+    return {"time": f"{today} {datetime.datetime.now(_BJ_TZ).strftime('%H:%M')}",
+            "title": f"意见领袖观点精选 {today}",
+            "text": "[名家观点·机器汇总]\n" + "\n".join(lines[:15])[:12000],
+            "media": "新浪财经", "url": "https://finance.sina.com.cn/zl/",
+            "source": "新浪意见领袖"}
+
+
+def fetch_mint_markets() -> dict | None:
+    """Livemint 印度市场: RSS markets 当日条目(Stocks to watch 等日报栏目自然含于 feed)。"""
+    return _market_digest("https://www.livemint.com/rss/markets",
+                          re.compile(r"."), "印度市场", "Livemint", max_items=8)
 
 
 def _cls_article_text(article_id) -> str:
@@ -700,7 +771,7 @@ def fetch_gangtise() -> dict | None:
 # ---------- 聚合 ----------
 
 def fetch_peer_mornings() -> tuple:
-    """八份同行早报(富途/财联社/AA/BloombergHT/CNBC/共同社/韩联社/gangtise)，单个失败不影响其余。"""
+    """十一份同行早报/观点源(富途/财联社/AA/BHT/CNBC/日韩/研报/意见领袖/印度/gangtise)，单个失败不影响其余。"""
     refs, failed = [], []
     for name, fn in (("富途早报", fetch_futu_morning),
                      ("财联社有声早报", fetch_cls_morning),
@@ -709,6 +780,9 @@ def fetch_peer_mornings() -> tuple:
                      ("CNBC美股晨报", fetch_cnbc_morning),
                      ("共同社日本市场", fetch_japan_morning),
                      ("韩联社韩国市场", fetch_korea_morning),
+                     ("东财研报", fetch_em_research),
+                     ("新浪意见领袖", fetch_sina_vip),
+                     ("Livemint印度", fetch_mint_markets),
                      ("gangtise", fetch_gangtise)):
         try:
             r = fn()
