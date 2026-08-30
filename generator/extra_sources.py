@@ -556,7 +556,7 @@ def fetch_sina_vip() -> dict | None:
             "source": "新浪意见领袖"}
 
 
-# ---------- etnet經濟通/Newsquawk/ING/SMM(交叉验证轮接入) ----------
+# ---------- etnet經濟通/Newsquawk/SMM(交叉验证轮接入; ING已随欧洲线移除) ----------
 
 _ETNET_CAT = "開市Ｇｏ"
 
@@ -621,6 +621,47 @@ def fetch_newsquawk_open() -> dict | None:
     print(f"  Newsquawk发现: {(h1.group(1) if h1 else art_url)[:44]}")
     return {"time": time_text, "title": _clean_html_text(h1.group(1)) if h1 else "Market Open",
             "text": text[:12000], "media": "Newsquawk", "url": art_url, "source": "Newsquawk市场开盘"}
+
+
+_SMM_SERIES = ("隔夜行情", "SMM日评", "SMM午评", "LME收盘", "收盘评论")
+
+
+def fetch_smm_metals() -> dict | None:
+    """SMM 上海有色网大宗商品日报: 栏目页取最新一篇系列文(【隔夜行情】优先) → 文章页全文。
+    资产类别源(用户 2026-08-30 许可): 独立于七地理市场之外。"""
+    lst = _get("https://news.smm.cn/l/21", "https://news.smm.cn/").text
+    cards = re.findall(r'href="(/news/\d+)"[^>]*>([^<]*【([^】]+)】)', lst)
+    # 栏目页混有直播/公告包装卡: 只认标题以系列名"结尾"的真文章卡
+    real = [(p, t) for p, t, tag in cards
+            if not re.search(r"直播|公告|发布", t) and any(t.rstrip().endswith(f"【{s}】") for s in _SMM_SERIES)]
+    target = None
+    for preferred in ("隔夜行情", "SMM日评", "LME收盘", "SMM午评", "收盘评论"):
+        for path, full in real:
+            if full.rstrip().endswith(f"【{preferred}】"):
+                target = (path, _clean_html_text(full))
+                break
+        if target:
+            break
+    if not target and real:
+        target = (real[0][0], _clean_html_text(real[0][1]))
+    if not target:
+        return None
+    art = _get(f"https://news.smm.cn{target[0]}", "https://news.smm.cn/l/21").text
+    # detail 容器嵌套 div 无法精确闭合, 直接取全文长 <p> 段(正文段落 30+ 字符, 短碎块自然滤掉)
+    paras = [_clean_html_text(p) for p in re.findall(r"<p[^>]*>([^<]{30,})</p>", art)]
+    text = "\n".join(paras)
+    if not text:
+        return None
+    # 发布时间: 页面 time 是推荐位的不可信; 栏目页首位=最新发布, 日期用抓取时刻(聚合层只按日过滤)
+    now = datetime.datetime.now(_BJ_TZ)
+    tms = re.findall(r"<time[^>]*>(\d{4}-\d{2}-\d{2} \d{2}:\d{2})</time>", art)
+    recent = [t for t in tms if t[:10] >= (now - datetime.timedelta(days=1)).strftime("%Y-%m-%d")
+              and t <= now.strftime("%Y-%m-%d %H:%M")]
+    time_text = max(recent) if recent else now.strftime("%Y-%m-%d %H:%M")
+    print(f"  SMM发现: {target[1][:36]}")
+    return {"time": time_text, "title": target[1], "text": text[:12000],
+            "media": "SMM上海有色网", "url": f"https://news.smm.cn{target[0]}",
+            "source": "SMM大宗商品"}
 
 
 def fetch_cnyes_tw() -> dict | None:
@@ -871,7 +912,8 @@ def fetch_gangtise() -> dict | None:
 # ---------- 聚合 ----------
 
 def fetch_peer_mornings() -> tuple:
-    """十三份同行早报/观点源(富途/财联社/AA/BHT/CNBC/日韩台/研报/意见领袖/etnet/Newsquawk/gangtise)，单个失败不影响其余。市场范围: 美/A/港/日/韩/台/土耳其。"""
+    """十四份同行早报/观点源(富途/财联社/AA/BHT/CNBC/日韩台/研报/意见领袖/etnet/Newsquawk/SMM/gangtise)，单个失败不影响其余。
+    市场范围: 美/A/港/日/韩/台/土耳其; SMM为大宗资产类别源(用户 2026-08-30 许可, 独立于地理市场之外)。"""
     refs, failed = [], []
     for name, fn in (("富途早报", fetch_futu_morning),
                      ("财联社有声早报", fetch_cls_morning),
@@ -885,6 +927,7 @@ def fetch_peer_mornings() -> tuple:
                      ("etnet港股", fetch_etnet_open),
                      ("鉅亨台股", fetch_cnyes_tw),
                      ("Newsquawk欧美", fetch_newsquawk_open),
+                     ("SMM大宗商品", fetch_smm_metals),
                      ("gangtise", fetch_gangtise)):
         try:
             r = fn()

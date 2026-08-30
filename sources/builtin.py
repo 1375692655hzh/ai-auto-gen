@@ -48,6 +48,18 @@ def _jin10(conf):
     return gs.fetch_jin10_flash(int(conf.get("page_size", 50)))
 
 
+@source("fxstreet_flash", "flash", "FXStreet外汇央行快讯(英文, 2026-08-30起出口IP被Cloudflare整站403, 待恢复)",
+        ttl_min=10, default_enabled=False)
+def _fxstreet(conf):
+    return gs.fetch_fxstreet_flash(int(conf.get("page_size", 30)))
+
+
+@source("investinglive_flash", "flash", "investingLive外汇/美股/宏观快讯(英文, 原ForexLive, FXStreet同赛道顶替)",
+        ttl_min=10, default_enabled=True)
+def _ilive(conf):
+    return gs.fetch_investinglive_flash(int(conf.get("page_size", 30)))
+
+
 # ---------- 同行早报文章(gather_refs) ----------
 
 @source("eastmoney_zaozhidao", "peer_article", "东财搜索《早知道》系列", ttl_min=120,
@@ -133,6 +145,12 @@ def _nq(conf):
     return [r] if r else []
 
 
+@source("smm_metals", "peer_article", "SMM上海有色网大宗商品日报(隔夜行情等系列, 资产类别源)", ttl_min=120)
+def _smm(conf):
+    r = ges.fetch_smm_metals()
+    return [r] if r else []
+
+
 @source("gangtise", "peer_article", "Gangtise投研日报(搜狗微信链)", risk="high", ttl_min=120)
 def _gangtise(conf):
     r = ges.fetch_gangtise()
@@ -178,7 +196,7 @@ def _ann(conf):
 
 # ---------- 聚合来源(工作流直接调用, 仅供 aag sources fetch 手动取用) ----------
 
-@source("peer_mornings", "peer_group", "同行早报聚合(富途+财联社+AA+BHT+CNBC+日韩台+etnet+gangtise)", ttl_min=120)
+@source("peer_mornings", "peer_group", "同行早报聚合(富途+财联社+AA+BHT+CNBC+日韩台+etnet+SMM+gangtise)", ttl_min=120)
 def _peers(conf):
     items, failed = ges.fetch_peer_mornings()
     if failed:

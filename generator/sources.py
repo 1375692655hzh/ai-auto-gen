@@ -60,6 +60,41 @@ def fetch_jin10_flash(page_size: int = 50) -> list:
     return out
 
 
+def _rss_title_flash(url: str, source: str, page_size: int, referer: str) -> list:
+    """英文快讯 RSS 通用解析: CDATA 标题 + RFC822 GMT pubDate → 北京时间。"""
+    r = requests.get(url, headers={"User-Agent": UA, "Referer": referer}, timeout=15)
+    r.raise_for_status()
+    out = []
+    for it in re.findall(r"<item>(.*?)</item>", r.text, re.S):
+        def tag(t, s=it):
+            m = re.search(rf"<{t}>(.*?)(?:</{t}>|</item>)", s, re.S)
+            return re.sub(r"<!\[CDATA\[(.*?)\]\]>", r"\1", m.group(1), flags=re.S) if m else ""
+        title = _strip_html(tag("title"))
+        pub = tag("pubDate").strip()
+        try:
+            dt = datetime.datetime.strptime(pub, "%a, %d %b %Y %H:%M:%S %Z")
+        except ValueError:
+            continue
+        bj = (dt + datetime.timedelta(hours=8)).strftime("%Y-%m-%d %H:%M")
+        if title:
+            out.append({"time": bj, "text": title, "source": source})
+    return out[:int(page_size)]
+
+
+def fetch_fxstreet_flash(page_size: int = 30) -> list:
+    """FXStreet 外汇/央行快讯(英文, 周末停更——周六早班恰抓完整周五美盘)。
+    资产类别源(用户 2026-08-30 许可)。注意: 2026-08-30 起本站出口 IP 被 Cloudflare 整站 403, 源默认禁用待恢复。"""
+    return _rss_title_flash("https://www.fxstreet.com/rss/news", "FXStreet", page_size,
+                            "https://www.fxstreet.com/")
+
+
+def fetch_investinglive_flash(page_size: int = 30) -> list:
+    """investingLive 外汇/美股/宏观快讯(英文, 原 ForexLive, 周末停更)。
+    资产类别源(用户 2026-08-30 许可外汇类): FXStreet 被 403 后的同赛道顶替, 三家交叉轮已验证该站。"""
+    return _rss_title_flash("https://www.investinglive.com/feed/", "investingLive", page_size,
+                            "https://www.investinglive.com/")
+
+
 def fetch_eastmoney_fast(page_size: int = 50) -> list:
     """东方财富财经快讯(焦点栏目)。"""
     r = requests.get(
