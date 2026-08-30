@@ -150,6 +150,340 @@ def fetch_cls_morning() -> dict | None:
             "media": "财联社", "source": "财联社有声早报"}
 
 
+# ---------- Anadolu Agency 英文晨报 ----------
+
+_TR_TZ = datetime.timezone(datetime.timedelta(hours=3))
+_BJ_TZ = datetime.timezone(datetime.timedelta(hours=8))
+_AA_SLUG_RE = re.compile(r"morning-briefing-([a-z]+)-(\d{1,2})-(\d{4})/(\d+)", re.I)
+_AA_MONTHS = {
+    "jan": 1, "january": 1, "feb": 2, "february": 2, "mar": 3, "march": 3,
+    "apr": 4, "april": 4, "may": 5, "jun": 6, "june": 6, "jul": 7, "july": 7,
+    "aug": 8, "august": 8, "sep": 9, "sept": 9, "september": 9,
+    "oct": 10, "october": 10, "nov": 11, "november": 11, "dec": 12, "december": 12,
+}
+
+
+def _clean_html_text(raw: str) -> str:
+    """统一清理 HTML / RSC 片段为纯文本。"""
+    text = html.unescape(re.sub(r"<[^>]+>", "\n", raw))
+    text = re.sub(r"[ \t]+", " ", text)
+    return re.sub(r"\n\s*\n+", "\n", text).strip()
+
+
+def _aa_rsc_text(page: str) -> str:
+    """从 AA Next.js RSC script payload 中抽取晨报正文。"""
+    blocks = []
+    for raw in re.findall(r"<script[^>]*>(.*?)</script>", page, re.S | re.I):
+        if "TOP STORIES" not in raw and "NEWS IN BRIEF" not in raw:
+            continue
+        decoded = re.sub(r"\\u([0-9a-fA-F]{4})",
+                         lambda m: chr(int(m.group(1), 16)), raw)
+        # 导语措辞多变("Here's/Here’s/Here is a rundown"):先宽匹配到 RSC 数组收尾,再退回段落式
+        m = re.search(r"(<p>Here.{0,60}rundown[\s\S]*?)(?:\"\]\)|\"\]\])", decoded, re.I)
+        if not m:
+            m = re.search(r"(<p>Here.?s a rundown[\s\S]*?</p>(?:[\s\S]*?<p>[\s\S]*?</p>)*)",
+                          decoded, re.I)
+        if not m:
+            m = re.search(r"(Here.?s a rundown[\s\S]*?)(?:\"\]\)|\"\]\])", decoded, re.I)
+        if not m:
+            continue
+        block = m.group(1)
+        for end in ('\"])', '\"]]', "US-Iran war", "LATEST NEWS"):
+            pos = block.find(end)
+            if pos > 1000:
+                block = block[:pos]
+        block = (block.replace(r'\"', '"').replace(r'\/', '/')
+                      .replace(r'\n', '\n').replace(r'\t', '\t').replace(r'\\', '\\'))
+        blocks.append(_clean_html_text(block))
+    return max(blocks, key=len, default="")
+
+
+def fetch_aa_morning() -> dict | None:
+    """抓取 AA 英文晨报：土耳其今天优先，48 小时窗口内回退最新一篇。"""
+    today = datetime.datetime.now(_TR_TZ).date()
+    wanted = [today - datetime.timedelta(days=n) for n in range(3)]
+    search_url = "https://www.aa.com.tr/en/search?s=Morning+Briefing"
+    discovery = ((search_url, "https://www.aa.com.tr/en/"),
+                 ("https://www.aa.com.tr/en/rss/default?cat=world", "https://www.aa.com.tr/en/world"),
+                 ("https://www.aa.com.tr/en/world", "https://www.aa.com.tr/en/"))
+    discovered = None
+    errors = []
+    fetched_any = False
+    for url, referer in discovery:
+        try:
+            page = _get(url, referer).text
+        except Exception as e:
+            errors.append(e)
+            continue
+        fetched_any = True
+        candidates = []
+        for m in _AA_SLUG_RE.finditer(page):
+            month = _AA_MONTHS.get(m.group(1).lower())
+            if not month:
+                continue
+            try:
+                date = datetime.date(int(m.group(3)), month, int(m.group(2)))
+            except ValueError:
+                continue
+            if date in wanted:
+                candidates.append((date, m.group(0)))
+        if candidates:
+            discovered = max(candidates, key=lambda x: x[0])[1]
+            break
+    if not discovered:
+        if fetched_any:
+            return None                # 请求通了但 48h 窗口内无晨报 → 未发布
+        raise RuntimeError(f"AA 发现入口均请求失败: {type(errors[-1]).__name__ if errors else 'unknown'}")
+
+    page = article_url = ""
+    for section in ("world", "general"):
+        candidate = f"https://www.aa.com.tr/en/{section}/{discovered}"
+        try:
+            response = _get(candidate, "https://www.aa.com.tr/en/")
+        except Exception:
+            continue
+        if "Morning Briefing" in response.text:
+            article_url, page = candidate, response.text
+            print(f"  AA晨报发现: {article_url}")
+            break
+    if not page:
+        raise RuntimeError("AA 晨报文章页不可用")
+
+    h1 = re.search(r"<h1[^>]*>(.*?)</h1>", page, re.S | re.I)
+    title = _clean_html_text(h1.group(1)) if h1 else "Morning Briefing"
+    published = re.search(r'"datePublished"\s*:\s*"([^"]+)"', page)
+    if not published:
+        published = re.search(r'<meta[^>]+(?:property|name)=["\']article:published_time["\'][^>]+content=["\']([^"\']+)', page, re.I)
+    if not published:
+        published = re.search(r'<meta[^>]+content=["\']([^"\']+)["\'][^>]+(?:property|name)=["\']article:published_time["\']', page, re.I)
+    try:
+        dt = datetime.datetime.fromisoformat(published.group(1).replace("Z", "+00:00"))
+        dt = dt.replace(tzinfo=_TR_TZ) if dt.tzinfo is None else dt
+        time_text = dt.astimezone(_BJ_TZ).strftime("%Y-%m-%d %H:%M")
+    except Exception:
+        time_text = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
+    text = _aa_rsc_text(page)
+    if not text:                       # 兜底: main 常是 RSC 空壳, 逐个试到取到文本为止
+        for pat in (r"<main[^>]*>(.*?)</main>", r"<body[^>]*>(.*?)</body>"):
+            m = re.search(pat, page, re.S | re.I)
+            if m:
+                text = _clean_html_text(m.group(1))
+                if text:
+                    break
+    if not text:
+        raise RuntimeError("AA 晨报正文解析为空")
+    return {"time": time_text, "title": title, "text": text[:12000],
+            "media": "Anadolu Agency", "url": article_url, "source": "AA晨报"}
+
+
+# ---------- BloombergHT 土耳其市场 ----------
+
+_TR_MONTHS = {"ocak": 1, "şubat": 2, "subat": 2, "mart": 3, "nisan": 4,
+              "mayıs": 5, "mayis": 5, "haziran": 6, "temmuz": 7,
+              "ağustos": 8, "agustos": 8, "eylül": 9, "eylul": 9, "ekim": 10,
+              "kasım": 11, "kasim": 11, "aralık": 12, "aralik": 12}
+
+
+def _bht_title(raw: str) -> str:
+    return re.sub(r"\s+", " ", html.unescape(re.sub(r"<[^>]+>", "", raw))).strip()
+
+
+def fetch_turkey_morning() -> dict | None:
+    """抓取 BloombergHT 快讯、要闻及当日可用的土耳其市场收盘综述。"""
+    base = "https://www.bloomberght.com"
+    session = requests.Session()
+    session.headers.update({**UA, "Accept-Language": "tr-TR,tr;q=0.9,en;q=0.8"})
+    response = session.get(f"{base}/borsa", timeout=15)
+    response.raise_for_status()
+    page = response.text
+    breaking, featured = [], []
+    marker = page.find("SON DAKİKA")
+    if marker >= 0:
+        for m in re.finditer(r'<a[^>]+href=["\'](/sondakika)["\'][^>]*>(.*?)</a>', page[marker:marker + 9000], re.S | re.I):
+            title = _bht_title(m.group(2))
+            if title and title not in breaking:
+                breaking.append(title)
+    marker = page.find("Öne Çıkan")
+    if marker >= 0:
+        for m in re.finditer(r'<a[^>]+href=["\'](/[^"\']+-\d+)["\'][^>]*>(.*?)</a>', page[marker:marker + 12000], re.S | re.I):
+            title = _bht_title(m.group(2))
+            if title and title not in {x[0] for x in featured}:
+                featured.append((title, base + m.group(1)))
+
+    summary = ""
+    today = datetime.datetime.now(_TR_TZ).date()
+    try:
+        listing = session.get(f"{base}/tum-piyasa-haberleri", timeout=15)
+        listing.raise_for_status()
+        for m in re.finditer(r'href=["\']([^"\']*(?:piyasalarda-gunun-ozeti|piyasa-ozeti)[^"\']*)["\']', listing.text, re.I):
+            href = html.unescape(m.group(1))
+            date_match = re.search(r"(\d{1,2})-([a-zçğıöşü]+)-(\d{4})", href, re.I)
+            if not date_match or _TR_MONTHS.get(date_match.group(2).lower()) is None:
+                continue
+            date = datetime.date(int(date_match.group(3)), _TR_MONTHS[date_match.group(2).lower()], int(date_match.group(1)))
+            if date != today:
+                continue
+            article = session.get(href if href.startswith("http") else base + href, timeout=15)
+            article.raise_for_status()
+            # 正文在 <article class="...news-content..."> 里; 容器没匹配上就跳过(整页兜底全是广告脚本)
+            content = re.search(r'<article[^>]*news-content[^>]*>(.*?)</article>',
+                                article.text, re.S | re.I)
+            summary = _clean_html_text(content.group(1)) if content else ""
+            break
+    except Exception:
+        pass
+
+    parts = ["[土耳其市场·机器汇总]"]
+    if breaking:
+        parts.extend(["", "■ SON DAKİKA 快讯"] + [f"- {x}" for x in breaking[:12]])
+    if featured:
+        parts.extend(["", "■ Öne Çıkan 要闻"] + [f"- {title} ({url})" for title, url in featured[:8]])
+    if summary:
+        parts.extend(["", "■ 收盘综述(当日如有)", summary])
+    if not (breaking or featured or summary):
+        return None
+    text = "\n".join(parts)[:12000]
+    print(f"  BloombergHT汇总: 快讯{len(breaking[:12])}条，要闻{len(featured[:8])}条")
+    return {"time": datetime.datetime.now().strftime("%Y-%m-%d %H:%M"),
+            "title": f"BloombergHT土耳其市场汇总 {today:%Y-%m-%d}", "text": text,
+            "media": "BloombergHT", "url": f"{base}/borsa", "source": "BloombergHT土耳其"}
+
+
+# ---------- CNBC 美股晨报(Daily Open) ----------
+
+_CNBC_ARCHIVE = "https://www.cnbc.com/daily-open/"
+_CNBC_URL_RE = re.compile(r"https://www\.cnbc\.com/(\d{4}/\d{2}/\d{2})/(?:cnbc-)?daily-open[a-z0-9-]*\.html")
+_UTC_TZ = datetime.timezone.utc
+
+
+def _cnbc_article_text(page: str) -> str:
+    """CNBC 文章页 SSR 正文: ArticleBody-articleBody 容器, 内联标签保行内连续、块级换行。"""
+    m = re.search(r'<div[^>]*ArticleBody-articleBody[^>]*>(.*?)(?=<div[^>]*class="[^"]*ArticleBody-googlePreferredSourceContainer)',
+                  page, re.S)
+    seg = m.group(1) if m else ""
+    if not seg:                       # 容器标记改版时退而取 articleBody 起点后固定范围
+        i = page.find("ArticleBody-articleBody")
+        if i < 0:
+            return ""
+        seg = page[i:i + 60000]
+    seg = re.sub(r"</(?:p|li|h2|h3)>|<br\s*/?>", "\n", seg)
+    seg = html.unescape(re.sub(r"<[^>]+>", "", seg))
+    seg = re.sub(r"[ \t\xa0]+", " ", seg)
+    lines = [ln.strip() for ln in seg.split("\n")
+             if ln.strip() and "Getty Images" not in ln]
+    return re.sub(r"\n{2,}", "\n", "\n".join(lines)).strip()
+
+
+def fetch_cnbc_morning() -> dict | None:
+    """CNBC Daily Open 晨报(每工作日 APAC/EMEA 两版, 周末停更)。
+    归档页 SSR 发现 48h 内最新一篇 → 文章页 SSR 全文。"""
+    page = _get(_CNBC_ARCHIVE, "https://www.cnbc.com/").text
+    today = datetime.datetime.now(_UTC_TZ).date()
+    seen, urls = set(), []
+    for m in _CNBC_URL_RE.finditer(page):
+        y, mo, d = (int(x) for x in m.group(1).split("/"))
+        try:
+            dt = datetime.date(y, mo, d)
+        except ValueError:
+            continue
+        if dt < today - datetime.timedelta(days=2) or m.group(0) in seen:
+            continue
+        seen.add(m.group(0))
+        urls.append((dt, m.group(0)))
+    if not urls:
+        return None                   # 请求通但 48h 窗口内无晨报(周末)
+    url = max(urls)[1]
+    art = _get(url, _CNBC_ARCHIVE).text
+    text = _cnbc_article_text(art)
+    if not text:
+        raise RuntimeError("CNBC 正文解析为空")
+    h1 = re.search(r"<h1[^>]*>(.*?)</h1>", art, re.S)
+    title = _clean_html_text(h1.group(1)) if h1 else "CNBC Daily Open"
+    published = re.search(r'"datePublished"\s*:\s*"([^"]+)"', art)
+    try:
+        dt = datetime.datetime.strptime(published.group(1), "%Y-%m-%dT%H:%M:%S%z")
+        time_text = dt.astimezone(_BJ_TZ).strftime("%Y-%m-%d %H:%M")
+    except Exception:
+        time_text = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
+    print(f"  CNBC晨报发现: {url.rsplit('/', 1)[-1][:60]}")
+    return {"time": time_text, "title": title, "text": text[:12000],
+            "media": "CNBC", "url": url, "source": "CNBC美股晨报"}
+
+
+# ---------- Kyodo 共同社 / Yonhap 韩联社 市场精选(RSS) ----------
+
+_JP_KW = re.compile(r"(?:Nikkei|stocks?|yen|BOJ|Bank of Japan|market|econom|trade|GDP|"
+                    r"exports?|tariff|interest rate|inflation|TSE|Topix)", re.I)
+_KR_KW = re.compile(r"(?:KOSPI|KOSDAQ|won\b|BOK|Bank of Korea|market|econom|trade|GDP|"
+                    r"exports?|chip|semiconductor|tariff|interest rate|inflation|"
+                    r"Samsung|Hyundai|SK Group|LG\b)", re.I)
+
+
+def _rss_items(xml_text: str) -> list:
+    """RSS 2.0 → [(title, link, pubDate_bj, lead)]; 解析失败条目跳过。"""
+    out = []
+    for it in re.findall(r"<item>(.*?)</item>", xml_text, re.S):
+        def tag(t):
+            m = re.search(rf"<{t}>(.*?)(?:</{t}>|</item>)", it, re.S)
+            return (m.group(1) if m else "").strip()
+        title, link, pub, desc = (tag("title"), tag("link"), tag("pubDate"), tag("description"))
+        title = _clean_html_text(re.sub(r"<!\[CDATA\[(.*?)\]\]>", r"\1", title, flags=re.S))
+        desc = _clean_html_text(re.sub(r"<!\[CDATA\[(.*?)\]\]>", r"\1", desc, flags=re.S))
+        dt = None
+        for fmt in ("%a, %d %b %Y %H:%M:%S %z", "%a, %d %b %Y %H:%M %z"):
+            try:
+                dt = datetime.datetime.strptime(pub, fmt)
+                break
+            except ValueError:
+                continue
+        out.append({"title": title, "link": link, "dt": dt,
+                    "pub_bj": dt.astimezone(_BJ_TZ).strftime("%Y-%m-%d %H:%M") if dt else pub,
+                    "lead": desc})
+    return out
+
+
+def _market_digest(feed_url: str, kw: re.Pattern, label: str, media: str,
+                   max_items: int = 10) -> dict | None:
+    """通用市场精选: 当日(北京时间)条目 × 关键词过滤 → 单篇机器汇总。"""
+    xml_text = _get(feed_url, "https://www.google.com/").text
+    today = datetime.datetime.now(_BJ_TZ).strftime("%Y-%m-%d")
+    hits = [x for x in _rss_items(xml_text)
+            if x["pub_bj"][:10] == today and kw.search(f"{x['title']} {x['lead']}")]
+    if not hits:
+        return None                  # 当日无市场相关条目
+    parts = [f"[{label}·机器汇总]"]
+    for x in hits[:max_items]:
+        lead = x["lead"][:300]
+        parts.append(f"- {x['title']}：{lead}" if lead else f"- {x['title']}")
+    print(f"  {media}汇总: 当日市场条目 {len(hits[:max_items])} 条")
+    return {"time": max(x["pub_bj"] for x in hits[:max_items]),
+            "title": f"{media}{label}精选 {today}",
+            "text": "\n".join(parts)[:12000], "media": media,
+            "url": feed_url, "source": f"{media}{label}"}
+
+
+def fetch_japan_morning() -> dict | None:
+    """共同社英文 Japan Wire: 当日市场/宏观条目精选。"""
+    return _market_digest("https://english.kyodonews.net/list/feed/rss4kyodonews-fzone",
+                          _JP_KW, "日本市场", "共同社")
+
+
+def fetch_korea_morning() -> dict | None:
+    """韩联社英文 RSS: 当日市场/宏观条目精选(URGENT/LEAD 演进链按标题去重取最新)。"""
+    r = _market_digest("https://en.yna.co.kr/RSS/news.xml", _KR_KW, "韩国市场", "韩联社")
+    if r and r["text"]:
+        lines = r["text"].split("\n")
+        seen, kept = set(), [lines[0]]
+        for ln in lines[1:]:
+            key = re.sub(r"^(?:URGENT|LEAD|\d+(?:st|nd|rd|th) LD)[\s,:-]*", "", ln[:60])
+            if key in seen:
+                continue
+            seen.add(key)
+            kept.append(ln)
+        r["text"] = "\n".join(kept)[:12000]
+    return r
+
+
 def _cls_article_text(article_id) -> str:
     detail = _cls_page_props(f"https://www.cls.cn/detail/{article_id}")
     content = ((detail.get("articleDetail") or {}).get("content")) or ""
@@ -366,10 +700,15 @@ def fetch_gangtise() -> dict | None:
 # ---------- 聚合 ----------
 
 def fetch_peer_mornings() -> tuple:
-    """三份同行早报(富途/财联社/gangtise),供 expand 证据层;单个失败不影响其他。"""
+    """八份同行早报(富途/财联社/AA/BloombergHT/CNBC/共同社/韩联社/gangtise)，单个失败不影响其余。"""
     refs, failed = [], []
     for name, fn in (("富途早报", fetch_futu_morning),
                      ("财联社有声早报", fetch_cls_morning),
+                     ("AA英文晨报", fetch_aa_morning),
+                     ("BloombergHT土耳其", fetch_turkey_morning),
+                     ("CNBC美股晨报", fetch_cnbc_morning),
+                     ("共同社日本市场", fetch_japan_morning),
+                     ("韩联社韩国市场", fetch_korea_morning),
                      ("gangtise", fetch_gangtise)):
         try:
             r = fn()

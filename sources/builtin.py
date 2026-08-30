@@ -68,6 +68,36 @@ def _cls(conf):
     return [r] if r else []
 
 
+@source("aa_morning", "peer_article", "AA安纳多卢通讯社英文晨报", ttl_min=120)
+def _aa(conf):
+    r = ges.fetch_aa_morning()
+    return [r] if r else []
+
+
+@source("turkey_morning", "peer_article", "BloombergHT土耳其市场", risk="medium", ttl_min=120)
+def _turkey(conf):
+    r = ges.fetch_turkey_morning()
+    return [r] if r else []
+
+
+@source("cnbc_morning", "peer_article", "CNBC Daily Open美股晨报(工作日)", ttl_min=120)
+def _cnbc(conf):
+    r = ges.fetch_cnbc_morning()
+    return [r] if r else []
+
+
+@source("japan_morning", "peer_article", "共同社日本市场精选(当日RSS过滤)", ttl_min=60)
+def _japan(conf):
+    r = ges.fetch_japan_morning()
+    return [r] if r else []
+
+
+@source("korea_morning", "peer_article", "韩联社韩国市场精选(当日RSS过滤)", ttl_min=60)
+def _korea(conf):
+    r = ges.fetch_korea_morning()
+    return [r] if r else []
+
+
 @source("gangtise", "peer_article", "Gangtise投研日报(搜狗微信链)", risk="high", ttl_min=120)
 def _gangtise(conf):
     r = ges.fetch_gangtise()
@@ -113,7 +143,7 @@ def _ann(conf):
 
 # ---------- 聚合来源(工作流直接调用, 仅供 aag sources fetch 手动取用) ----------
 
-@source("peer_mornings", "peer_group", "同行早报聚合(富途+财联社+gangtise)", ttl_min=120)
+@source("peer_mornings", "peer_group", "同行早报聚合(富途+财联社+AA+BHT+CNBC+日韩+gangtise)", ttl_min=120)
 def _peers(conf):
     items, failed = ges.fetch_peer_mornings()
     if failed:

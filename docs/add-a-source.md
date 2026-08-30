@@ -4,12 +4,16 @@
 
 ## 现有来源
 
-早报四路径（2026-08-28 打通，全部实测 ok）：
+早报源（2026-08-30 扩至八源，全部实测 ok；调研依据见 docs/调研/）：
 - **富途《港美早报》**：列表接口 seqMark 翻页 + 文章页 WAF 破盾，正文保留段落
 - **财联社有声早报**：专栏 1151，每天 07:00，48h 内最新一篇全文
 - **华尔街见闻早餐FM-Radio**：搜索接口定位 + 内容 API 补全文
 - **元宝·Gangtise**：Playwright 持久化登录态问元宝拿当日投研日报（gangtise 搜狗链失败时自动兜底）；登录态过期时跑 `py -3.11 generator/yuanbao_fetch.py --login` 扫码
-  注意：富途/财联社/元宝走 `peer_mornings` 聚合进工作流（`cli sources fetch peer_mornings` 手动可取），不需要在 config 里单开（避免与聚合重复抓取）。
+- **AA安纳多卢英文晨报**（土耳其/国际，2026-08-30）：search→world RSS→world 页三级发现链，RSC payload 抽正文，48h 窗口；约北京 13:00 发布
+- **BloombergHT 土耳其市场**（2026-08-30）：SON DAKİKA 快讯 + Öne Çıkan 要闻 + 当日收盘综述拼篇；周末无收盘综述属正常
+- **CNBC Daily Open 美股晨报**（2026-08-30）：归档页 SSR 发现 48h 最新版 → ArticleBody 正文；每工作日两版，APAC 版约北京 09:10 发布（早于 9 点跑工作流会取到前一日版并被当日过滤记 failed，属预期）；周末停更
+- **共同社日本市场精选 / 韩联社韩国市场精选**（2026-08-30）：当日 RSS 条目 × 市场/宏观关键词过滤拼篇；日本周末休市常无市场条目（None 属预期），韩国周末照常
+  注意：以上各源与元宝统一走 `peer_mornings` 聚合进工作流（`cli sources fetch peer_mornings` 手动可取），不需要在 config 里单开（避免与聚合重复抓取）。防坑：feeds.a.dj.com、MarketWatch mw_marketpulse、Investing.com news_285 等旧 RSS 已冻结（仍返回 200 但数据停更），网上老资料仍在引用，勿接入。
 
 ## 其余来源
 
