@@ -911,9 +911,10 @@ def fetch_gangtise() -> dict | None:
 
 # ---------- 聚合 ----------
 
-def fetch_peer_mornings() -> tuple:
+def fetch_peer_mornings(only: list | None = None) -> tuple:
     """十四份同行早报/观点源(富途/财联社/AA/BHT/CNBC/日韩台/研报/意见领袖/etnet/Newsquawk/SMM/gangtise)，单个失败不影响其余。
-    市场范围: 美/A/港/日/韩/台/土耳其; SMM为大宗资产类别源(用户 2026-08-30 许可, 独立于地理市场之外)。"""
+    市场范围: 美/A/港/日/韩/台/土耳其; SMM为大宗资产类别源(用户 2026-08-30 许可, 独立于地理市场之外)。
+    only: 只抓指定源(按显示名, 如 ["鉅亨台股","SMM大宗商品"]); None=全部。"""
     refs, failed = [], []
     for name, fn in (("富途早报", fetch_futu_morning),
                      ("财联社有声早报", fetch_cls_morning),
@@ -929,6 +930,8 @@ def fetch_peer_mornings() -> tuple:
                      ("Newsquawk欧美", fetch_newsquawk_open),
                      ("SMM大宗商品", fetch_smm_metals),
                      ("gangtise", fetch_gangtise)):
+        if only and name not in only:
+            continue
         try:
             r = fn()
             if r and r.get("text"):
@@ -938,9 +941,10 @@ def fetch_peer_mornings() -> tuple:
                 failed.append(f"{name}(今日未发布或未命中)")
         except Exception as e:
             failed.append(f"{name}({type(e).__name__}: {str(e)[:60]})")
-    # gangtise 没拿到 → 元宝镜像兜底(Playwright 登录态, 更稳)
-    if not any("gangtise" in (r.get("source") or "") or "元宝" in (r.get("source") or "")
-               for r in refs):
+    # gangtise 没拿到 → 元宝镜像兜底(Playwright 登录态, 更稳); only 选取未含 gangtise 时不兜底
+    if (not only or "gangtise" in only) and not any(
+            "gangtise" in (r.get("source") or "") or "元宝" in (r.get("source") or "")
+            for r in refs):
         try:
             r = fetch_yuanbao_gangtise()
             if r and r.get("text"):

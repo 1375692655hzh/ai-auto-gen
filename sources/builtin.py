@@ -211,7 +211,9 @@ def _extras(conf):
     return [ges.fetch_extras()]
 
 
-# ---------- 备用源(public-apis 名录收录 2026-08-30; 默认禁用, 主源失效时顶班) ----------
+# ---------- 备用源(public-apis 名录收录 2026-08-30) ----------
+# 模型: 能跑通的在册即可用(default_enabled=True); 需 key 的配好 key 后把 default_enabled 翻开。
+# 工作流层用 --set peer_sources=/flash_sources= 按名选取源, 不靠禁用开关做排除。
 
 @source("marketaux_news", "flash", "备用|MarketAux美股市场新闻(标题+ticker标注, 免费~100次/天)",
         auth="apiKey", ttl_min=30)
@@ -231,18 +233,20 @@ def _av(conf):
     return gs.fetch_alphavantage_news(int(conf.get("page_size", 30)))
 
 
-@source("sec_edgar", "announcement", "备用|SEC EDGAR美股8-K重大公告(官方免费, 申报式UA内置)", ttl_min=30)
+@source("sec_edgar", "announcement", "备用|SEC EDGAR美股8-K重大公告(官方免费, 申报式UA内置)",
+        ttl_min=30, default_enabled=True)
 def _edgar(conf):
     return gs.fetch_sec_edgar_filings(int(conf.get("page_size", 30)))
 
 
 @source("frankfurter_fx", "market", "备用|Frankfurter汇率快照(ECB参考汇率, 无key, 交易日一更, 不含TWD)",
-        ttl_min=360)
+        ttl_min=360, default_enabled=True)
 def _frank(conf):
     return gs.fetch_frankfurter_fx()
 
 
-@source("goldprice_metals", "market", "备用|goldprice.dev金价快照(仅黄金, 无key)", ttl_min=60)
+@source("goldprice_metals", "market", "备用|goldprice.dev金价快照(仅黄金, 无key)",
+        ttl_min=60, default_enabled=True)
 def _gold(conf):
     return gs.fetch_goldprice_metals()
 

@@ -10,19 +10,24 @@ from flows.steps import step
 
 @step("fetch_morning_reports")
 def fetch_morning_reports(ctx, wf, params):
-    """四份早报源: 富途/财联社/gangtise(元宝兜底) 走 peers 聚合 + 华尔街见闻单独。
+    """十四份早报源走 peers 聚合 + 华尔街见闻单独。
     只保留「今天」发布的早报(防昨日早报被当今日素材误发), 非当日源计入 failed。
-    with: {wscn_count: 2, allow_stale: false}。产出 reports(list)/failed。"""
+    with: {wscn_count: 2, allow_stale: false, peer_sources: "空=全部; 逗号分隔源名=只抓指定"}
+    产出 reports(list)/failed。"""
     import extra_sources
     import sources as gs        # generator/sources.py(fetch_wscn_breakfast 在这)
-    refs, failed = extra_sources.fetch_peer_mornings()
-    try:
-        wscn = gs.fetch_wscn_breakfast(int(params.get("wscn_count", 2)))
-        refs.extend(wscn)
-        if not wscn:
-            failed.append("华尔街见闻早餐(空结果)")
-    except Exception as e:
-        failed.append(f"华尔街见闻早餐({type(e).__name__}: {str(e)[:60]})")
+    only = _split_names(params.get("peer_sources"))     # --set peer_sources=鉅亨台股,AA英文晨报 只抓指定源
+    refs, failed = extra_sources.fetch_peer_mornings(only=only)
+    if only and "华尔街见闻早餐" not in only:
+        wscn = []               # 选取模式未点名见闻 → 跳过
+    else:
+        try:
+            wscn = gs.fetch_wscn_breakfast(int(params.get("wscn_count", 2)))
+            refs.extend(wscn)
+            if not wscn:
+                failed.append("华尔街见闻早餐(空结果)")
+        except Exception as e:
+            failed.append(f"华尔街见闻早餐({type(e).__name__}: {str(e)[:60]})")
     if not refs:
         sys.exit("四份早报源全部失败, 无素材可合成")
 
@@ -115,6 +120,12 @@ def render_morning_article(ctx, wf, params):
 # ---------- 解读标签(tag 步): LLM 出 JSON, 代码渲染插行 ----------
 
 DIRECTIONS = ["利好", "利空", "中性", "承压", "关注"]
+
+
+def _split_names(v) -> list:
+    """逗号/空白分隔的源名参数 → 列表; 空= None(不选取, 全部)。"""
+    s = str(v or "").strip()
+    return ([x for x in re.split(r"[,，\s]+", s) if x] or None) if s else None
 
 
 def _load_sectors(pack_dir: Path) -> list:

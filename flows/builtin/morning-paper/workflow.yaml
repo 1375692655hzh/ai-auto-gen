@@ -6,6 +6,8 @@ version: 1.0.0
 # 参数: 可被 data/config.local.yaml 或命令行 --set k=v 覆盖
 params:
   items: 15            # 每日条数(0=取 config daily.items)
+  peer_sources: ""     # 早报源选取: 空=全部14源; 逗号分隔源名=只抓指定(如 "鉅亨台股,SMM大宗商品")
+  flash_sources: ""    # 快讯源选取: 空=全部启用快讯; 逗号分隔源id=只抓指定(如 "jin10_flash,investinglive_flash")
   with_video: false    # 是否接视频成片
   no_voice: false      # 不生成口播稿
   rank_model: ark:kimi-k3   # 精排模型(2026-08-30 素材链横评定选, 见 docs/素材链模型选型.md): 空=默认通道
@@ -14,6 +16,7 @@ params:
 steps:
   - id: fetch                      # 快讯+同行早报(免 LLM)
     uses: fetch_news
+    with: {peer_sources: "{params.peer_sources}", flash_sources: "{params.flash_sources}"}
   - id: extras                     # 日历/外围/公告(版式板块)
     uses: fetch_extras
   - id: rank                       # LLM 精排选条
