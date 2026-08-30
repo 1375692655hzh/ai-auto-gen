@@ -556,12 +556,6 @@ def fetch_sina_vip() -> dict | None:
             "source": "新浪意见领袖"}
 
 
-def fetch_mint_markets() -> dict | None:
-    """Livemint 印度市场: RSS markets 当日条目(Stocks to watch 等日报栏目自然含于 feed)。"""
-    return _market_digest("https://www.livemint.com/rss/markets",
-                          re.compile(r"."), "印度市场", "Livemint", max_items=8)
-
-
 # ---------- etnet經濟通/Newsquawk/ING/SMM(交叉验证轮接入) ----------
 
 _ETNET_CAT = "開市Ｇｏ"
@@ -629,49 +623,36 @@ def fetch_newsquawk_open() -> dict | None:
             "text": text[:12000], "media": "Newsquawk", "url": art_url, "source": "Newsquawk市场开盘"}
 
 
-def fetch_ing_think() -> dict | None:
-    """ING Think 欧洲机构观点: 经济学家实名(三家交叉全票), RSS dc:date 分钟级, description 直出观点。"""
-    return _market_digest("https://think.ing.com/rss", re.compile(r"."), "欧洲机构观点", "ING Think", max_items=8)
-
-
-_SMM_SERIES = ("隔夜行情", "SMM日评", "SMM午评", "LME收盘", "收盘评论")
-
-
-def fetch_smm_metals() -> dict | None:
-    """SMM 上海有色网大宗商品日报: 栏目页取最新一篇系列文(【隔夜行情】优先) → 文章页全文。"""
-    lst = _get("https://news.smm.cn/l/21", "https://news.smm.cn/").text
-    cards = re.findall(r'href="(/news/\d+)"[^>]*>([^<]*【([^】]+)】)', lst)
-    # 栏目页混有直播/公告包装卡: 只认标题以系列名"结尾"的真文章卡
-    real = [(p, t) for p, t, tag in cards
-            if not re.search(r"直播|公告|发布", t) and any(t.rstrip().endswith(f"【{s}】") for s in _SMM_SERIES)]
-    target = None
-    for preferred in ("隔夜行情", "SMM日评", "LME收盘", "SMM午评", "收盘评论"):
-        for path, full in real:
-            if full.rstrip().endswith(f"【{preferred}】"):
-                target = (path, _clean_html_text(full))
-                break
-        if target:
-            break
-    if not target and real:
-        target = (real[0][0], _clean_html_text(real[0][1]))
-    if not target:
+def fetch_cnyes_tw() -> dict | None:
+    """鉅亨网台湾市场精选: 新闻API tw_stock 分类当日条目(繁中, title+summary), 周末照常滚动。"""
+    import requests as rq
+    now = int(datetime.datetime.now(_BJ_TZ).timestamp())
+    u = ("https://news.cnyes.com/api/v3/news/category/tw_stock"
+         f"?startAt={now - 86400}&endAt={now}&limit=30")
+    r = rq.get(u, headers={**UA, "Referer": "https://news.cnyes.com/"}, timeout=15)
+    r.raise_for_status()
+    items = (r.json().get("items") or {}).get("data") or []
+    today = datetime.datetime.now(_BJ_TZ).strftime("%Y-%m-%d")
+    lines = []
+    for it in items:
+        ts = it.get("publishAt") or 0
+        bj = datetime.datetime.fromtimestamp(ts, _BJ_TZ)
+        if bj.strftime("%Y-%m-%d") != today:
+            continue
+        lines.append((bj.strftime("%H:%M"), f"- {it.get('title', '')}：{_strip_tags(it.get('summary', ''))[:120]}"))
+    if not lines:
         return None
-    art = _get(f"https://news.smm.cn{target[0]}", "https://news.smm.cn/l/21").text
-    # detail 容器嵌套 div 无法精确闭合, 直接取全文长 <p> 段(正文段落 30+ 字符, 短碎块自然滤掉)
-    paras = [_clean_html_text(p) for p in re.findall(r"<p[^>]*>([^<]{30,})</p>", art)]
-    text = "\n".join(paras)
-    if not text:
-        return None
-    # 发布时间: 页面 time 是推荐位的不可信; 栏目页首位=最新发布, 日期用抓取时刻(聚合层只按日过滤)
-    now = datetime.datetime.now(_BJ_TZ)
-    tms = re.findall(r"<time[^>]*>(\d{4}-\d{2}-\d{2} \d{2}:\d{2})</time>", art)
-    recent = [t for t in tms if t[:10] >= (now - datetime.timedelta(days=1)).strftime("%Y-%m-%d")
-              and t <= now.strftime("%Y-%m-%d %H:%M")]
-    time_text = max(recent) if recent else now.strftime("%Y-%m-%d %H:%M")
-    print(f"  SMM发现: {target[1][:36]}")
-    return {"time": time_text, "title": target[1], "text": text[:12000],
-            "media": "SMM上海有色网", "url": f"https://news.smm.cn{target[0]}",
-            "source": "SMM大宗商品"}
+    print(f"  鉅亨台湾: 当日 {len(lines)} 条")
+    body = "\n".join(x[1] for x in sorted(lines, reverse=True))
+    return {"time": f"{today} {max(x[0] for x in lines)}",
+            "title": f"鉅亨台股精选 {today}",
+            "text": "[台湾市场·机器汇总]\n" + body[:12000],
+            "media": "鉅亨网", "url": "https://news.cnyes.com/cat/tw_stock",
+            "source": "鉅亨台股"}
+
+
+def _strip_tags(s: str) -> str:
+    return re.sub(r"<[^>]+>", "", s or "").strip()
 
 
 def _cls_article_text(article_id) -> str:
@@ -890,7 +871,7 @@ def fetch_gangtise() -> dict | None:
 # ---------- 聚合 ----------
 
 def fetch_peer_mornings() -> tuple:
-    """十五份同行早报/观点源(富途/财联社/AA/BHT/CNBC/日韩/研报/意见领袖/印度/etnet/Newsquawk/ING/SMM/gangtise)，单个失败不影响其余。"""
+    """十三份同行早报/观点源(富途/财联社/AA/BHT/CNBC/日韩台/研报/意见领袖/etnet/Newsquawk/gangtise)，单个失败不影响其余。市场范围: 美/A/港/日/韩/台/土耳其。"""
     refs, failed = [], []
     for name, fn in (("富途早报", fetch_futu_morning),
                      ("财联社有声早报", fetch_cls_morning),
@@ -901,11 +882,9 @@ def fetch_peer_mornings() -> tuple:
                      ("韩联社韩国市场", fetch_korea_morning),
                      ("东财研报", fetch_em_research),
                      ("新浪意见领袖", fetch_sina_vip),
-                     ("Livemint印度", fetch_mint_markets),
                      ("etnet港股", fetch_etnet_open),
+                     ("鉅亨台股", fetch_cnyes_tw),
                      ("Newsquawk欧美", fetch_newsquawk_open),
-                     ("ING欧洲观点", fetch_ing_think),
-                     ("SMM大宗商品", fetch_smm_metals),
                      ("gangtise", fetch_gangtise)):
         try:
             r = fn()
