@@ -41,6 +41,24 @@
 
 名录弃选说明：Econdb（名录标"无 key"但 2026-08-30 实测 401 需 token，无法验证返回结构，不录入）；NewsAPI/GNews/NewsData/Mediastack 等通用聚合器（无市场定向、与主源重叠、稀释质量）；Alpha Vantage/Polygon/Twelve Data 等纯行情 API（价格数据已有 sina 行情接口承担）。
 
+### 扩展源（simonlin1212 目录项目收录 + 前两轮调研遗漏补收 2026-08-30）
+
+收录标准只有两条（用户裁决）：在七地理市场+外汇/大宗范围内、且能给内容。全部零鉴权、逐一直调实测通过、在册即可用。
+
+| 源 id | 给什么信息 | 市场/形态 | 作息与限额 | 启用条件 |
+|---|---|---|---|---|
+| `cls_telegraph` | 财联社电报 7×24 实时快讯流（签名纯本地计算零 key，实测 50 条即返） | A股+宏观 / 快讯(flash) | 7×24 滚动 | 无 key，已在册可用 |
+| `eastmoney_global` | 东财全球资讯快讯（海外宏观/美港股）；与财联社电报不同域名不同风控面，互为备胎 | 全球 / 快讯(flash) | 滚动更新 | 无 key，已在册可用 |
+| `cninfo_latest` | 巨潮全市场最新公告：证券简称+公告标题+类型（A股官方信披，不带 stock 参数即全市场） | A股 / 公告(announcement) | 披露时段滚动；announcementTime 是日期级时间戳，按日期归集 | 无 key，已在册可用 |
+| `nbs_pmi` | 统计局月度 PMI：制造业/非制造业/综合 + 大中小型企业分档 | 中国宏观 / 数据行情(market) | 每月最后一天发布当月值；首页只放两周，发现层自动翻 4 页兜底；措辞改版 fail-fast 报警 | 无 key，已在册可用 |
+| `pboc_social_financing` | 央行社融增量月度：总规模/人民币贷款/企业债/政府债/股票融资（三级跳到 xlsx，openpyxl 解析） | 中国宏观 / 数据行情(market) | 次月中旬发布 | 无 key，已在册可用 |
+| `treasury_yield_curve` | 美债收益率曲线日更：3M/2Y/10Y/30Y + 10Y-2Y 利差 | 美国利率 / 数据行情(market) | 每交易日一更（美东下午） | 无 key，已在册可用 |
+| `cftc_cot` | CFTC 持仓周报：金/银/铜/油/外汇/股指投机净多（多-空，官方 Socrata 接口） | 大宗+外汇+股指 / 数据行情(market) | 每周五发布当周周二持仓 | 无 key，已在册可用 |
+| `nasdaq_earnings` | 当日美股财报日历：symbol+盘前/盘后+预期 EPS | 美股 / 数据行情(market) | 交易日更新；周末/假期返回空属正常 | 无 key，已在册可用 |
+| `gelonghui` | 格隆汇首页精选一篇全文（港/美/A 评论与要闻） | 港美A / 同行文章(peer_article) | 滚动更新；同时入早报聚合（17 源之一） | 无 key，已在册可用 |
+| `miningcom` | MINING.COM 大宗矿业当日条目机器汇总（≤8 条） | 大宗 / 同行文章(peer_article) | 工作日高频；当日无更返回空属正常 | 无 key，已在册可用 |
+| `liberty_street` | 纽约联储 Liberty Street 最新一篇全文（联储经济学家分析博客） | 美国宏观分析 / 同行文章(peer_article) | 周 1-2 篇 | 无 key，已在册可用 |
+
 ## 其余来源
 
 `python cli.py sources list` 查看全部（类型/启用/健康）。

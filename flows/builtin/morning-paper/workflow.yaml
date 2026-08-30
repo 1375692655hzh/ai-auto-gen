@@ -6,7 +6,7 @@ version: 1.0.0
 # 参数: 可被 data/config.local.yaml 或命令行 --set k=v 覆盖
 params:
   items: 15            # 每日条数(0=取 config daily.items)
-  peer_sources: ""     # 早报源选取: 空=全部14源; 逗号分隔源名=只抓指定(如 "鉅亨台股,SMM大宗商品")
+  peer_sources: ""     # 早报源选取: 空=全部17源; 逗号分隔源名=只抓指定(如 "鉅亨台股,SMM大宗商品")
   flash_sources: ""    # 快讯源选取: 空=全部启用快讯; 逗号分隔源id=只抓指定(如 "jin10_flash,investinglive_flash")
   with_video: false    # 是否接视频成片
   no_voice: false      # 不生成口播稿

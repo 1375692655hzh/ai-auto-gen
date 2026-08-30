@@ -255,3 +255,76 @@ def _gold(conf):
         auth="apiKey", ttl_min=720)
 def _fred(conf):
     return gs.fetch_fred_macro()
+
+
+# ---------- 扩展源(simonlin1212 目录项目收录 + 前两轮调研遗漏补收 2026-08-30) ----------
+# 全部零鉴权且已逐一直调实测通过; 休刊日返回空属正常(nasdaq 周末/miningcom 当日无更)。
+# nbs_pmi/pboc 为月频官方数据: 发现层翻页/三级跳已内置, 措辞改版会 fail-fast 报警。
+
+@source("cls_telegraph", "flash", "财联社电报快讯流(本地签名零key, 7×24实时)",
+        ttl_min=5, default_enabled=True)
+def _cls_tele(conf):
+    return gs.fetch_cls_telegraph(int(conf.get("page_size", 50)))
+
+
+@source("eastmoney_global", "flash", "东财全球资讯快讯(美/港/宏观, 与电报不同风控面备胎)",
+        ttl_min=10, default_enabled=True)
+def _em_global(conf):
+    return gs.fetch_eastmoney_global(int(conf.get("page_size", 50)))
+
+
+@source("cninfo_latest", "announcement", "巨潮全市场最新公告(A股官方信披, 按日期归集)",
+        ttl_min=30, default_enabled=True)
+def _cninfo(conf):
+    return gs.fetch_cninfo_latest(int(conf.get("page_size", 30)))
+
+
+@source("nbs_pmi", "market", "国家统计局PMI(月度, 制造业/非制造业/综合+企业分档, 官方)",
+        ttl_min=720, default_enabled=True)
+def _nbs(conf):
+    return gs.fetch_nbs_pmi()
+
+
+@source("pboc_social_financing", "market", "人民银行社融增量(月度, 总量+贷款/政府债/企业债, 官方)",
+        ttl_min=720, default_enabled=True)
+def _pboc(conf):
+    return gs.fetch_pboc_social_financing()
+
+
+@source("treasury_yield_curve", "market", "美债收益率曲线日更(3M/2Y/10Y/30Y+10Y-2Y利差, 官方)",
+        ttl_min=720, default_enabled=True)
+def _ust(conf):
+    return gs.fetch_treasury_yield_curve()
+
+
+@source("cftc_cot", "market", "CFTC持仓周报(金银铜油/外汇/股指投机净多, 官方Socrata)",
+        ttl_min=1440, default_enabled=True)
+def _cot(conf):
+    return gs.fetch_cftc_cot(int(conf.get("page_size", 10)))
+
+
+@source("nasdaq_earnings", "market", "Nasdaq美股财报日历(当日披露+预期EPS, 周末/假期无数据正常)",
+        ttl_min=720, default_enabled=True)
+def _earnings(conf):
+    return gs.fetch_nasdaq_earnings()
+
+
+@source("gelonghui", "peer_article", "格隆汇精选(港/美/A评论要闻, 早报聚合17源之一)",
+        ttl_min=120, default_enabled=True)
+def _glh(conf):
+    r = ges.fetch_gelonghui()
+    return [r] if r else []
+
+
+@source("miningcom", "peer_article", "MINING.COM大宗矿业新闻机器汇总(当日RSS条目, 资产类别源)",
+        ttl_min=120, default_enabled=True)
+def _mining(conf):
+    r = ges.fetch_miningcom()
+    return [r] if r else []
+
+
+@source("liberty_street", "peer_article", "纽约联储Liberty Street分析博客(联储经济学家, 周1-2篇)",
+        ttl_min=720, default_enabled=True)
+def _liberty(conf):
+    r = ges.fetch_liberty_street()
+    return [r] if r else []

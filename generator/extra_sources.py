@@ -696,6 +696,67 @@ def _strip_tags(s: str) -> str:
     return re.sub(r"<[^>]+>", "", s or "").strip()
 
 
+# ---------- 前两轮调研遗漏补收(2026-08-30 晚, 用户扩展令: 范围内市场+能给内容即收) ----------
+
+def fetch_gelonghui() -> dict | None:
+    """格隆汇首页精选(港/美/A 评论与要闻, 前两轮定 P2 待接, 扩展令补收):
+    首页 /p/ 文章卡首个 → 文章页全文。"""
+    lst = _get("https://www.gelonghui.com/", "https://www.gelonghui.com/").text
+    ids = list(dict.fromkeys(re.findall(r'href="/p/(\d+)"', lst)))
+    if not ids:
+        return None
+    url = f"https://www.gelonghui.com/p/{ids[0]}"
+    art = _get(url, "https://www.gelonghui.com/").text
+    h1 = re.search(r"<h1[^>]*>(.*?)</h1>", art, re.S)
+    title = _clean_html_text(h1.group(1)) if h1 else ""
+    paras = [_clean_html_text(p) for p in re.findall(r"<p[^>]*>([^<]{30,})</p>", art)]
+    text = "\n".join(p for p in paras if p)
+    if not text:
+        return None
+    tms = re.findall(r'(\d{4}-\d{2}-\d{2} \d{2}:\d{2})', art)
+    now = datetime.datetime.now(_BJ_TZ)
+    recent = [t for t in tms if t <= now.strftime("%Y-%m-%d %H:%M")]
+    print(f"  格隆汇发现: {title[:36]}")
+    return {"time": max(recent) if recent else now.strftime("%Y-%m-%d %H:%M"),
+            "title": title or f"格隆汇精选 {ids[0]}", "text": text[:12000],
+            "media": "格隆汇", "url": url, "source": "格隆汇"}
+
+
+def fetch_miningcom() -> dict | None:
+    """MINING.COM 大宗/矿业新闻(前两轮定 P2 待接, 扩展令补收): RSS 当日条目机器汇总。"""
+    return _market_digest("https://www.mining.com/feed/",
+                          re.compile(r"."), "大宗矿业", "MINING.COM", max_items=8)
+
+
+def fetch_liberty_street() -> dict | None:
+    """纽约联储 Liberty Street Economics(联储经济学家分析博客, 周 1-2 篇, 前两轮 P3 待收):
+    RSS 最新一篇全文(content:encoded)。"""
+    r = _get("https://libertystreeteconomics.newyorkfed.org/feed/",
+             "https://libertystreeteconomics.newyorkfed.org/")
+    m = re.search(r"<item>(.*?)</item>", r.text, re.S)
+    if not m:
+        return None
+    it = m.group(1)
+
+    def tag(t, s=it):
+        mm = re.search(rf"<{t}[^>]*>(.*?)</{t}>", s, re.S)
+        return re.sub(r"<!\[CDATA\[(.*?)\]\]>", r"\1", mm.group(1), flags=re.S).strip() if mm else ""
+
+    title = _clean_html_text(tag("title"))
+    body = _clean_html_text(tag("content:encoded") or tag("description"))
+    pub = tag("pubDate")
+    if not body:
+        return None
+    try:
+        dt = datetime.datetime.strptime(pub, "%a, %d %b %Y %H:%M:%S %z")
+        ts = dt.astimezone(_BJ_TZ).strftime("%Y-%m-%d %H:%M")
+    except ValueError:
+        ts = datetime.datetime.now(_BJ_TZ).strftime("%Y-%m-%d %H:%M")
+    print(f"  Liberty Street: {title[:36]}")
+    return {"time": ts, "title": title, "text": body[:12000],
+            "media": "纽约联储", "url": tag("link"), "source": "纽约联储Liberty"}
+
+
 def _cls_article_text(article_id) -> str:
     detail = _cls_page_props(f"https://www.cls.cn/detail/{article_id}")
     content = ((detail.get("articleDetail") or {}).get("content")) or ""
@@ -912,8 +973,8 @@ def fetch_gangtise() -> dict | None:
 # ---------- 聚合 ----------
 
 def fetch_peer_mornings(only: list | None = None) -> tuple:
-    """十四份同行早报/观点源(富途/财联社/AA/BHT/CNBC/日韩台/研报/意见领袖/etnet/Newsquawk/SMM/gangtise)，单个失败不影响其余。
-    市场范围: 美/A/港/日/韩/台/土耳其; SMM为大宗资产类别源(用户 2026-08-30 许可, 独立于地理市场之外)。
+    """十七份同行早报/观点源(富途/财联社/AA/BHT/CNBC/日韩台/研报/意见领袖/etnet/Newsquawk/SMM/格隆汇/MINING/Liberty/gangtise)，单个失败不影响其余。
+    市场范围: 美/A/港/日/韩/台/土耳其 + 大宗/外汇资产类别(用户 2026-08-30 许可)。
     only: 只抓指定源(按显示名, 如 ["鉅亨台股","SMM大宗商品"]); None=全部。"""
     refs, failed = [], []
     for name, fn in (("富途早报", fetch_futu_morning),
@@ -929,6 +990,9 @@ def fetch_peer_mornings(only: list | None = None) -> tuple:
                      ("鉅亨台股", fetch_cnyes_tw),
                      ("Newsquawk欧美", fetch_newsquawk_open),
                      ("SMM大宗商品", fetch_smm_metals),
+                     ("格隆汇", fetch_gelonghui),
+                     ("MINING大宗", fetch_miningcom),
+                     ("纽约联储Liberty", fetch_liberty_street),
                      ("gangtise", fetch_gangtise)):
         if only and name not in only:
             continue
