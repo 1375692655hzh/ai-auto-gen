@@ -60,6 +60,30 @@ def fetch_jin10_flash(page_size: int = 50) -> list:
     return out
 
 
+def fetch_fxstreet_flash(page_size: int = 30) -> list:
+    """FXStreet 外汇/央行快讯(英文, 秒级 GMT 时间戳, 周末停更——周六早班恰抓完整周五美盘)。"""
+    import json
+    r = requests.get("https://www.fxstreet.com/rss/news",
+                     headers={"User-Agent": UA, "Referer": "https://www.fxstreet.com/"},
+                     timeout=15)
+    r.raise_for_status()
+    out = []
+    for it in re.findall(r"<item>(.*?)</item>", r.text, re.S):
+        def tag(t, s=it):
+            m = re.search(rf"<{t}>(.*?)(?:</{t}>|</item>)", s, re.S)
+            return re.sub(r"<!\[CDATA\[(.*?)\]\]>", r"\1", m.group(1), flags=re.S) if m else ""
+        title = _strip_html(tag("title"))
+        pub = tag("pubDate").strip()
+        try:
+            dt = datetime.datetime.strptime(pub, "%a, %d %b %Y %H:%M:%S %Z")
+        except ValueError:
+            continue
+        bj = (dt + datetime.timedelta(hours=8)).strftime("%Y-%m-%d %H:%M")
+        if title:
+            out.append({"time": bj, "text": title, "source": "FXStreet"})
+    return out[:int(page_size)]
+
+
 def fetch_eastmoney_fast(page_size: int = 50) -> list:
     """东方财富财经快讯(焦点栏目)。"""
     r = requests.get(

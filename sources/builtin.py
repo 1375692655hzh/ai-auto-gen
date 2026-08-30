@@ -48,6 +48,11 @@ def _jin10(conf):
     return gs.fetch_jin10_flash(int(conf.get("page_size", 50)))
 
 
+@source("fxstreet_flash", "flash", "FXStreet外汇央行快讯(英文)", ttl_min=10, default_enabled=True)
+def _fxstreet(conf):
+    return gs.fetch_fxstreet_flash(int(conf.get("page_size", 30)))
+
+
 # ---------- 同行早报文章(gather_refs) ----------
 
 @source("eastmoney_zaozhidao", "peer_article", "东财搜索《早知道》系列", ttl_min=120,
@@ -118,6 +123,30 @@ def _svip(conf):
 @source("mint_markets", "peer_article", "Livemint印度市场精选(当日RSS)", ttl_min=60)
 def _mint(conf):
     r = ges.fetch_mint_markets()
+    return [r] if r else []
+
+
+@source("etnet_open", "peer_article", "etnet經濟通開市Go港股晨报(工作日08:30)", ttl_min=120)
+def _etnet(conf):
+    r = ges.fetch_etnet_open()
+    return [r] if r else []
+
+
+@source("newsquawk_open", "peer_article", "Newsquawk欧美市场开盘综述(交易日午后/傍晚)", ttl_min=120)
+def _nq(conf):
+    r = ges.fetch_newsquawk_open()
+    return [r] if r else []
+
+
+@source("ing_think", "peer_article", "ING Think欧洲机构观点(经济学家实名)", ttl_min=120)
+def _ing(conf):
+    r = ges.fetch_ing_think()
+    return [r] if r else []
+
+
+@source("smm_metals", "peer_article", "SMM上海有色网大宗商品日报(隔夜行情等系列)", ttl_min=120)
+def _smm(conf):
+    r = ges.fetch_smm_metals()
     return [r] if r else []
 
 
