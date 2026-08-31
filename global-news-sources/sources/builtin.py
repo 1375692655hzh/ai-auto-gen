@@ -134,6 +134,13 @@ def _cnyes(conf):
     return [r] if r else []
 
 
+@source("threads_kol_digest", "peer_article",
+        "台股Threads KOL情报日报(threads-tw-monitor本地产物, 社媒观点流)",
+        ttl_min=60, default_enabled=True)
+def _threads_kol(conf):
+    return gs.fetch_threads_kol_digest(conf)
+
+
 @source("etnet_open", "peer_article", "etnet經濟通開市Go港股晨报(工作日08:30)", ttl_min=120)
 def _etnet(conf):
     r = ges.fetch_etnet_open()

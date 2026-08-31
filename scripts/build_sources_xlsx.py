@@ -117,6 +117,7 @@ M = {
     "technews_rss": ("台湾", "日内滚动", "启用", "半导体/供应链, 台积电链素材"),
     "moneydj_flash": ("台湾", "日内滚动", "启用", "盘口快讯; RSS 已退化空壳走 HTML 解析"),
     "cnyes_tw": ("台湾", "日内(周末照常)", "聚合", "鉅亨网台股精选"),
+    "threads_kol_digest": ("台湾", "每日(跟随监控项目)", "启用", "Threads KOL 情报日报; 本地文件源(threads-tw-monitor 产物), 可配 digests_dir"),
     "tw_cbc_stats": ("台湾", "按月", "占位·被拦待恢复", "央行统计 API; 本机出口 TLS 被重置"),
     "fsc_press": ("台湾", "工作日", "占位·被拦待恢复", "金管会新闻稿; 本机出口 TLS 被重置"),
     "finmind_news": ("台湾", "滚动", "占位·待配key", "免费 token 即申即得"),
@@ -153,7 +154,7 @@ for sid, v in REGISTRY.items():
         assert status != "启用", f"{sid} 注册为停用但映射状态=启用"
     rows.append([len(rows) + 1, sid, market, KIND_CN[meta["kind"]],
                  meta["title"], schedule, status, note])
-assert len(rows) == 107, len(rows)
+assert len(rows) == 108, len(rows)
 
 wb = Workbook()
 
@@ -162,7 +163,7 @@ ws = wb.active
 ws.title = "源清单"
 headers = ["序号", "源 id", "市场", "类型", "给什么内容", "更新作息", "状态", "备注/坑"]
 last_col = len(headers) + 1  # B..I
-base.setup_sheet(ws, title="ai-auto-gen 信息源清单（注册表全量 107 源，2026-08-31 导出）",
+base.setup_sheet(ws, title="ai-auto-gen 信息源清单（注册表全量 108 源，2026-08-31 导出）",
                  last_col=last_col)
 for c, h in enumerate(headers, start=2):
     ws.cell(row=4, column=c, value=h)

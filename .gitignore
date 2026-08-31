@@ -20,6 +20,9 @@ logs/
 # 生成模块的过程产物与口播稿
 /ai-workflow/generator/output/
 
+# 元宝镜像的浏览器 profile(含登录态/cookies, 严禁提交)
+/global-news-sources/fetchers/output/
+
 # 视频子系统产物(成片/音频/自动生成的时间轴)
 /ai-workflow/video/videos/*/out/
 /ai-workflow/video/videos/*/audio/

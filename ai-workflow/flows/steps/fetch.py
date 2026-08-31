@@ -15,9 +15,17 @@ def fetch_news(ctx, wf, params):
     import extra as extra_sources   # fetchers/extra.py
     flash_only = _split(params.get("flash_sources"))
     if flash_only:
-        cfg = {sid: {"enabled": sid in flash_only}
-               for sid, e in sources.REGISTRY.items() if e["meta"]["kind"] == "flash"}
-        items, failed = sources.gather(cfg)
+        # 指定快讯源时走注册表(global-news-sources/sources, 带缓存+健康);
+        # 默认路径保持 legacy gather(sina_7x24+eastmoney_fast)不变。
+        import sources as registry
+        flash_ids = {sid for sid, e in registry.REGISTRY.items()
+                     if e["meta"]["kind"] == "flash"}
+        unknown = [s for s in flash_only if s not in flash_ids]
+        if unknown:
+            sys.exit(f"未知快讯源: {', '.join(unknown)}"
+                     f" (已注册: {', '.join(sorted(flash_ids))})")
+        cfg = {sid: {"enabled": sid in flash_only} for sid in flash_ids}
+        items, failed = registry.gather(cfg)
     else:
         items, failed = sources.gather()
     refs, ref_failed = sources.gather_refs()

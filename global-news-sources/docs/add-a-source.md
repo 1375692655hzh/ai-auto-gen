@@ -189,6 +189,12 @@ grok 报告在首轮提交后才返回（前两轮被服务端取消），带来
 
 弃选（本批）：CNA feedburner RSS（与已收 cna_flash JSON API 同源且条目更少）；TreasuryDirect 发行公告（太细分）；Alpha Vantage demo（已有 `alphavantage_news` 占位）。grok 亦有两处错误已在复测中拦下：声称"披露易无免登录 GET JSON"（`hkexnews` 首轮已实测收录）、"PR Newswire 时 200 时 404 不稳定"（本机两次 200，已在册）。
 
+#### 本地文件源（2026-08-31 收录 +1）
+
+| 源 id | 给什么信息 | 市场/形态 | 作息 | 启用条件 |
+|---|---|---|---|---|
+| `threads_kol_digest` | 台股 Threads KOL 情报日报（threads-tw-monitor 项目产物的本地 digest 文件，社媒观点/资讯/分析流，含 KOL 档位标注） | 台湾 / 同行(peer_article) | 每日（跟随监控项目产出） | 无网络依赖；digest 目录自动探测（`~/threads-tw-monitor` 或桌面 exa-SKILL 备份最新份），显式配置 `digests_dir`/`THREADS_TW_DIGESTS` 无效路径会抛异常冒泡；`max_age_days`（默认 1）内无新 digest 返回空 |
+
 ## 其余来源
 
 `python cli.py sources list` 查看全部（类型/启用/健康）。

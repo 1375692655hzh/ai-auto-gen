@@ -9,6 +9,7 @@ import time
 import html
 import json
 import datetime
+from pathlib import Path
 
 import requests
 
@@ -256,6 +257,55 @@ def _wscn_full_text(uri: str) -> str:
         return re.sub(r"\n\s*\n+", "\n", text).strip()
     except Exception:
         return ""
+
+
+def fetch_threads_kol_digest(conf: dict | None = None) -> list:
+    """台股 Threads KOL 情报日报(threads-tw-monitor 项目的日更 digest, 本地文件源)。
+
+    目录解析顺序: conf["digests_dir"] → 环境变量 THREADS_TW_DIGESTS
+    → 自动探测 ~/threads-tw-monitor/data/digests 与桌面 exa-SKILL 备份(取最新一份)。
+    目录缺失=故障(抛异常); 目录在但 max_age_days(默认1, 即今天或昨天)内无 digest=没数据(返回空)。
+    """
+    import os
+    conf = conf or {}
+    # 显式配置(conf/环境变量)路径无效=配置故障, 直接抛; 只有自动探测允许"找不到继续找"
+    explicit = conf.get("digests_dir") or os.environ.get("THREADS_TW_DIGESTS")
+    if explicit:
+        dig_dir = Path(str(explicit))
+        if not dig_dir.is_dir():
+            raise RuntimeError(f"threads_kol_digest 配置的 digest 目录不存在: {dig_dir}")
+    else:
+        home = Path.home()
+        cand = [home / "threads-tw-monitor" / "data" / "digests"]
+        bks = sorted((home / "Desktop" / "exa-SKILL").glob(
+            "threads-tw-monitor-backup-*/threads-tw-monitor/data/digests"))
+        cand.extend(reversed(bks))      # 最新备份优先
+        dig_dir = next((p for p in cand if p.is_dir()), None)
+    if dig_dir is None:
+        raise RuntimeError("threads-tw-monitor digest 目录未找到: 请在 config 的 "
+                           "sources.threads_kol_digest.digests_dir 或环境变量 THREADS_TW_DIGESTS 指定")
+    max_age = int(conf.get("max_age_days", 1))
+    today = datetime.datetime.now().date()
+    best = None
+    for f in dig_dir.glob("digest_*.wa.txt"):
+        m = re.match(r"digest_(\d{4}-\d{2}-\d{2})\.wa\.txt$", f.name)
+        if not m:
+            continue
+        d = datetime.date.fromisoformat(m.group(1))
+        if d > today or (today - d).days > max_age:
+            continue
+        if best is None or d > best[0]:
+            best = (d, f)
+    if best is None:
+        return []
+    d, f = best
+    text = f.read_text(encoding="utf-8").strip()
+    if not text:
+        return []
+    return [{"title": f"台股Threads KOL情报 {d.isoformat()}",
+             "media": "台股Threads情报",
+             "time": d.strftime("%Y-%m-%d 08:00"),
+             "text": text}]
 
 
 REF_FETCHERS = {
