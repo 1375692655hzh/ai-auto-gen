@@ -11,8 +11,8 @@ def fetch_news(ctx, wf, params):
     """快讯(gather) + 同行早报(gather_refs + 富途/财联社/gangtise 聚合)。
     源选取(用户定): --set peer_sources=鉅亨台股,SMM大宗商品 只抓指定早报源;
     --set flash_sources=jin10_flash,investinglive_flash 只抓指定快讯源。空=全部。"""
-    import sources
-    import extra_sources
+    import basic as sources   # fetchers/basic.py
+    import extra as extra_sources   # fetchers/extra.py
     flash_only = _split(params.get("flash_sources"))
     if flash_only:
         cfg = {sid: {"enabled": sid in flash_only}
@@ -42,5 +42,5 @@ def _split(v) -> list:
 @step("fetch_extras")
 def fetch_extras(ctx, wf, params):
     """版式素材:财经日历/外围市场/重点公告(长图与早报文章的板块数据)。"""
-    import extra_sources
+    import extra as extra_sources   # fetchers/extra.py
     return {"extras": extra_sources.fetch_extras()}

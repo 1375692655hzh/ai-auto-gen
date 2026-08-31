@@ -20,7 +20,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from workflows.base import WorkflowBase
 from common import load_cfg, out_dir, save_text, GEN_ROOT
-import sources
+import basic as sources   # fetchers/basic.py(原 generator/sources.py)
 import daily
 
 
@@ -54,7 +54,7 @@ class MorningPaperWorkflow(WorkflowBase):
         if failed or ref_failed:
             print(f"⚠ 不可用来源: {', '.join(failed + ref_failed)}")
         # 富途早报/财联社有声早报/gangtise镜像 → 并入同行早报证据层
-        import extra_sources
+        import extra as extra_sources   # fetchers/extra.py
         peers, peer_failed = extra_sources.fetch_peer_mornings()
         refs = peers + refs
         if peer_failed:
@@ -65,7 +65,7 @@ class MorningPaperWorkflow(WorkflowBase):
         return {"items": items, "refs": refs}
 
     def step_extras(self, ctx):
-        import extra_sources
+        import extra as extra_sources   # fetchers/extra.py
         return {"extras": extra_sources.fetch_extras()}
 
     def step_rank(self, ctx):

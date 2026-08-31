@@ -13,13 +13,19 @@ from pathlib import Path
 
 import yaml
 
-GEN_ROOT = Path(__file__).resolve().parent
-AUTOPUB_ROOT = GEN_ROOT.parent / "autopub"
-PROJ_ROOT = GEN_ROOT.parent
+GEN_ROOT = Path(__file__).resolve().parent          # ai-workflow/generator
+AIWF_ROOT = GEN_ROOT.parent                          # ai-workflow
+PROJ_ROOT = AIWF_ROOT.parent                         # 项目根
+AUTOPUB_ROOT = PROJ_ROOT / "auto-publisher" / "autopub"
 
-# 让 generator 下的脚本无论从哪个 cwd 启动都能 import 同目录模块
+# 让 generator 下的脚本无论从哪个 cwd 启动都能 import 同目录模块;
+# 同时挂上板块一(global-news-sources + fetchers)与板块二根(flows 包)
 if str(GEN_ROOT) not in sys.path:
     sys.path.insert(0, str(GEN_ROOT))
+_GNS = PROJ_ROOT / "global-news-sources"
+for _p in (AIWF_ROOT, _GNS, _GNS / "fetchers"):
+    if _p.is_dir() and str(_p) not in sys.path:
+        sys.path.append(str(_p))
 
 
 # ---------- 生成链统一模型分发 ----------
@@ -149,9 +155,9 @@ def llm_require_config():
     if not llm.is_configured():
         sys.exit(
             "模型 API 未配置。三种方式任选:\n"
-            "  1. 打开 autopub 网页控制台(python autopub/webapp/app.py → 127.0.0.1:5001)在「模型 API 设置」里填\n"
-            "  2. 设环境变量 AUTOPUB_API_KEY,并在 autopub/config.yaml 的 model: 段填 provider 和 model\n"
-            "  3. 直接编辑 autopub/secret.local.json(provider/api_key/model/base_url)"
+            "  1. 打开 autopub 网页控制台(python auto-publisher/autopub/webapp/app.py → 127.0.0.1:5001)在「模型 API 设置」里填\n"
+            "  2. 设环境变量 AUTOPUB_API_KEY,并在 auto-publisher/autopub/config.yaml 的 model: 段填 provider 和 model\n"
+            "  3. 直接编辑 auto-publisher/autopub/secret.local.json(provider/api_key/model/base_url)"
         )
     return llm
 

@@ -14,8 +14,8 @@ def fetch_morning_reports(ctx, wf, params):
     只保留「今天」发布的早报(防昨日早报被当今日素材误发), 非当日源计入 failed。
     with: {wscn_count: 2, allow_stale: false, peer_sources: "空=全部; 逗号分隔源名=只抓指定"}
     产出 reports(list)/failed。"""
-    import extra_sources
-    import sources as gs        # generator/sources.py(fetch_wscn_breakfast 在这)
+    import extra as extra_sources
+    import basic as gs          # fetchers/basic.py(fetch_wscn_breakfast 在这)
     only = _split_names(params.get("peer_sources"))     # --set peer_sources=鉅亨台股,AA英文晨报 只抓指定源
     refs, failed = extra_sources.fetch_peer_mornings(only=only)
     if only and "华尔街见闻早餐" not in only:

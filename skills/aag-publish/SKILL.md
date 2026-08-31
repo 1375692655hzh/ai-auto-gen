@@ -8,7 +8,7 @@ description: 用 ai-auto-gen 工具把生成好的文章/视频发布到各平�
 项目根目录运行。**发布是不可逆动作，严格按序：**
 
 1. **前置检查**：`python cli.py doctor`
-   - Chrome 调试口(9222) 必须 ✅（让用户双击 `autopub/chrome_debug.bat`）。
+   - Chrome 调试口(9222) 必须 ✅（让用户双击 `auto-publisher/autopub/chrome_debug.bat`）。
    - 提醒用户：发布期间不要手动操作那个 Chrome（工具在接管）。
 2. **看队列与账本**：`python cli.py publish status`
    - 账本里 `published`/`uncertain` 的平台会自动跳过（防重发），这是设计不是 bug。
@@ -20,6 +20,6 @@ description: 用 ai-auto-gen 工具把生成好的文章/视频发布到各平�
 6. **收尾**：`python cli.py publish status` 汇总各平台结果链接给用户。
 
 红线：
-- 不手编 `autopub/state.json`（防重发账本）。
+- 不手编 `auto-publisher/autopub/state.json`（防重发账本）。
 - B站/抖音上传框是多文件累加队列，适配器已防重，不要绕过适配器直接操作页面。
 - 真发后如某平台"结果未知"，标记 uncertain 等人工核实，不要重跑该平台。

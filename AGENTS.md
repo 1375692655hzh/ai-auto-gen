@@ -15,7 +15,7 @@
 | 命令 | 作用 | 副作用 |
 |---|---|---|
 | `python cli.py doctor [--json]` | 环境体检（密钥/浏览器/队列/账本） | 无 |
-| `python cli.py sources list/check/fetch <id>` | 来源库（12 源+健康+缓存） | `check/fetch` 会请求外网 |
+| `python cli.py sources list/check/fetch <id>` | 来源库（107 源+健康+缓存） | `check/fetch` 会请求外网 |
 | `python cli.py flows list/lint/run <wf>/status/new/export/import` | 生成工作流（断点续跑/审核挂起 exit 2） | `run` 会调 LLM |
 | `python cli.py gen <args>` | 生成模块透传（旧入口，等价 flows） | `run` 会调 LLM |
 | `python cli.py publish status [--json]` | 待发队列 + 发布账本 | 无 |
@@ -24,37 +24,37 @@
 | `python cli.py publish login [plat]` | 一键登录平台 | 弹浏览器等人工扫码 |
 | `python cli.py publish run [--draft ...]` | 发全部启用平台 | **真发**！必须先 `--draft` |
 | `python cli.py publish run-video --video <mp4> --title <t> [--draft]` | B站/抖音投稿 | **真发**！必须先 `--draft` |
-| `python cli.py video build <id> [--estimate]` | Remotion 出片 | 写 video/videos/&lt;id&gt;/out |
+| `python cli.py video build <id> [--estimate]` | Remotion 出片 | 写 ai-workflow/video/videos/&lt;id&gt;/out |
 
-## 目录地图
+## 目录地图（三板块，可单独下载）
 
 ```
-cli.py / bin/aag.cmd   统一入口(P0)
-generator/             生成引擎(P1 起抽 sources/flows, 留 shim)
-autopub/               浏览器发布引擎(10 平台, CDP 接管用户 Chrome)
-adapters-kit/          Node API 发布引擎(搜狐/头条/网易/值得买)
-video/                 Remotion 视频引擎(story.json 契约)
-data/                  运行时数据(gitignored: 缓存/健康/运行产物)
-docs/                  方案与操作手册
+cli.py / bin/aag.cmd        统一入口(P0, 自动挂三板块上 sys.path)
+global-news-sources/        板块一·来源: sources/ 注册表 + fetchers/ 抓取实现 + docs/ 源清单
+ai-workflow/                板块二·工作流: flows/ YAML引擎+步骤库 + generator/ 生成实现 + video/ Remotion
+auto-publisher/             板块三·发布: autopub/ 浏览器引擎(10平台) + adapters-kit/ Node API + publish/ 门面
+data/                       运行时数据(gitignored: 缓存/健康/运行产物)
+docs/                       方案与操作手册
+scripts/ skills/            工具脚本 / agent 技能
 ```
 
 ## 状态文件（agent 的共享内存）
 
 | 文件 | 语义 | 谁写 |
 |---|---|---|
-| `autopub/state.json` | 发布账本：`published/failed/uncertain`。**agent 只读**；`uncertain` = 已点发布未确认，禁止自动重试，须人工到平台后台核实 | autopub 写 |
+| `auto-publisher/autopub/state.json` | 发布账本：`published/failed/uncertain`。**agent 只读**；`uncertain` = 已点发布未确认，禁止自动重试，须人工到平台后台核实 | autopub 写 |
 | `data/runs/<流>/<日期>/run.json` | 工作流状态机（done/waiting_review/stopped + 产物清单） | 引擎写 |
 | `data/health/sources-health.json` | 来源健康（dead 自动跳过） | 来源库写 |
-| `generator/output/workflows/<流>/<日期>/` | 旧引擎步骤存档（flows 新引擎在 data/runs） | 引擎写 |
-| `autopub/articles/` | 待发队列（md/docx），发完全平台自动归档 `_done/` | 人/生成写 |
-| `generator/output/` | 生成产物（文章/口播/长图/daily JSON） | 生成写 |
+| `ai-workflow/generator/output/workflows/<流>/<日期>/` | 旧引擎步骤存档（flows 新引擎在 data/runs） | 引擎写 |
+| `auto-publisher/autopub/articles/` | 待发队列（md/docx），发完全平台自动归档 `_done/` | 人/生成写 |
+| `ai-workflow/generator/output/` | 生成产物（文章/口播/长图/daily JSON） | 生成写 |
 
 ## 红线（违反会造成事故）
 
 1. **发布命令先 `--draft` 验证**，用户明确同意后才去掉 `--draft` 真发。
-2. **不手编 `autopub/state.json`**——它是防重复发布的唯一账本（原子写+损坏熔断，误改会导致重发或漏发）。
-3. **不提交** `data/`、`autopub/secret.local.json`、`autopub/profiles/`、任何日志/截图。
-4. **不改** `video/src/active-story.ts`（渲染时自动生成）与 `video/src/story-types.ts` 契约。
+2. **不手编 `auto-publisher/autopub/state.json`**——它是防重复发布的唯一账本（原子写+损坏熔断，误改会导致重发或漏发）。
+3. **不提交** `data/`、`auto-publisher/autopub/secret.local.json`、`auto-publisher/autopub/profiles/`、任何日志/截图。
+4. **不改** `ai-workflow/video/src/active-story.ts`（渲染时自动生成）与 `ai-workflow/video/src/story-types.ts` 契约。
 5. B站/抖音上传框是**多文件累加**队列——绝不重复 set_input_files；适配器已有队列防重逻辑，别绕过。
 6. Chrome 调试模式（9222）接管的是用户日常浏览器：发布期间提示用户勿手动操作该浏览器。
 
@@ -68,10 +68,10 @@ python cli.py publish status               # 看队列与账本
 python cli.py publish run --draft          # 草稿验证 → 用户确认 → 去掉 --draft 真发
 ```
 
-**某来源挂了**：`python cli.py gen fetch` 看各源抓取输出 → 失败源按 `docs/add-a-source.md`（P1 提供）修选择器/接口。
+**某来源挂了**：`python cli.py sources check --id <id>` 实抓定位 → 失败源按 `global-news-sources/docs/add-a-source.md` 修选择器/接口。
 
 **视频**：`python cli.py gen video --date <d>`（生成 story.json+TTS+渲染+封面）→ `python cli.py publish run-video --video <mp4> --title <标题> --draft`。
 
 ## 环境
 
-Python ≥3.10（本机用 `py -3.11`）；Node ≥20（视频/API 发布才需要）；`pip install -r generator/requirements.txt -r autopub/requirements.txt`；`playwright install chromium`；LLM 密钥三选一（网页控制台 / `AUTOPUB_API_KEY` / `autopub/secret.local.json`）。发布前：双击 `autopub/chrome_debug.bat` 启动自动化 Chrome 并完成各平台登录（`publish login`）。
+Python ≥3.10（本机用 `py -3.11`）；Node ≥20（视频/API 发布才需要）；`pip install -r ai-workflow/generator/requirements.txt -r auto-publisher/autopub/requirements.txt`；`playwright install chromium`；LLM 密钥三选一（网页控制台 / `AUTOPUB_API_KEY` / `auto-publisher/autopub/secret.local.json`）。发布前：双击 `auto-publisher/autopub/chrome_debug.bat` 启动自动化 Chrome 并完成各平台登录（`publish login`）。

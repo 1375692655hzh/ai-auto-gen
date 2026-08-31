@@ -9,9 +9,9 @@ description: ai-auto-gen 工具的信息源抓取失败排查与修复（来源�
 2. **单源复现**：`python cli.py sources fetch <id> --fresh --limit 5`
    - dead = 连续 3 次失败，gather 时自动跳过。
 3. **修复**（按 docs/add-a-source.md）：
-   - 接口/选择器变了 → 改 `sources/builtin.py` 里对应包装指向的 generator 抓取函数（`generator/sources.py` / `extra_sources.py`）。
-   - 富途 WAF 类 → 算法在 `generator/extra_sources.py` 的 `_waf_hash/_waf_suffix`，需按新站况更新。
-   - 反爬严的源（gangtise 搜狗链）优先考虑换 fallback（元宝镜像 `generator/yuanbao_fetch.py`）。
+   - 接口/选择器变了 → 改 `global-news-sources/sources/builtin.py` 里对应包装指向的 fetchers 抓取函数（`global-news-sources/fetchers/basic.py` / `extra.py`）。
+   - 富途 WAF 类 → 算法在 `global-news-sources/fetchers/extra.py` 的 `_waf_hash/_waf_suffix`，需按新站况更新。
+   - 反爬严的源（gangtise 搜狗链）优先考虑换 fallback（元宝镜像 `global-news-sources/fetchers/yuanbao_fetch.py`）。
 4. **复位**：修好后 `python cli.py sources check --id <id>` 成功一次即从 dead 恢复 ok。
 5. 新增来源：在 `sources/builtin.py` 加 `@source(...)` 包装（见 docs/add-a-source.md）。
 

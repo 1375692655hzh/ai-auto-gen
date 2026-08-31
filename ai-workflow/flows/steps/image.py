@@ -150,7 +150,7 @@ def render_morning_image(ctx, wf, params):
     # ---- 渲染 ----
     sys.path.insert(0, str(GEN_ROOT))
     from image_digest import render_digest_image
-    out_cfg = (load_cfg().get("output") or {}).get("images_dir", "../autopub/images")
+    out_cfg = (load_cfg().get("output") or {}).get("images_dir", "../../auto-publisher/autopub/images")
     out_dir = Path(out_cfg) if Path(out_cfg).is_absolute() else GEN_ROOT / out_cfg
     out = str(out_dir / f"早报长图-{date}.png")
     render_digest_image(payload, date, out)

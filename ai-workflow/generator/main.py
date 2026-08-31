@@ -84,7 +84,7 @@ def main():
         for name, cls in wf.WORKFLOWS.items():
             print(f"  {name:16} {cls.title} —— {cls.description}")
     elif args.cmd == "fetch":
-        import sources
+        import basic as sources   # fetchers/basic.py
         items, failed = sources.gather()
         refs, ref_failed = sources.gather_refs()
         failed += ref_failed

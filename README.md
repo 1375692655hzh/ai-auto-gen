@@ -1,64 +1,52 @@
 # ai-auto-gen
 
-AI 文章生成与多平台自动发布工具：基于大语言模型生成文章，并自动发布到国内 8 大内容平台。
+AI 财经内容 **来源采集 → 生成 → 发布** 一体化工具。仓库按三大板块组织，**每个板块可独立下载使用**（只想要其中一块功能时，只取对应文件夹即可）。
 
-## 架构总览
+## 三板块布局
 
-本仓库由两个互补的发布子系统组成，覆盖不同平台的最佳接入方式：
-
-| 模块 | 技术栈 | 接入方式 | 支持平台 |
+| 板块 | 目录 | 干什么 | 独立运行 |
 |---|---|---|---|
-| [`generator/`](generator/) | Python + LLM | 多源财经快讯 + OpenAI 兼容模型 | 早报（A股/港美股）、AI 财经日报（逐条详情+AI 分析）与分析文章生成 |
-| [`video/`](video/) | Node.js + Remotion | Edge-TTS/DashScope 配音 + React 模板渲染 | 日报/分析文章一键成片（1080p，10 种画面模板） |
-| [`autopub/`](autopub/) | Python + Playwright | 浏览器持久化配置（人工首登保会话） | 雪球、知乎专栏、东方财富财富号、老虎社区（同花顺/微博为占位） |
-| [`adapters-kit/`](adapters-kit/) | Node.js + Playwright | API 优先 + storageState 认证 | 搜狐号、今日头条（头条号）、网易号、什么值得买 |
+| **来源** | [`global-news-sources/`](global-news-sources/) | 107 个金融信息源的注册表 + 抓取实现（快讯/公告/行情/同行文章/日历），带 TTL 缓存与健康检查 | ✅ 完全独立（`sources` 包 + `fetchers/`），配置走板块根 `config.yaml` 兜底 |
+| **工作流** | [`ai-workflow/`](ai-workflow/) | 生成引擎：`flows/` YAML 编排工作流（断点续跑/审核挂起）+ `generator/` 生成实现 + `video/` Remotion 出片 | ⚠️ 依赖板块一的 fetchers 与板块三的模型配置 |
+| **发布** | [`auto-publisher/`](auto-publisher/) | 双引擎发布：`autopub/` 浏览器自动化（10 平台，CDP 接管日常 Chrome）+ `adapters-kit/` Node API 适配器（搜狐/头条/网易/值得买）+ `publish/` 平台矩阵门面 | ✅ 基本独立（LLM 配置自给自足） |
 
-生成 → 成片 → 发布链路：`generator daily` 产出图文日报 + 结构化 JSON → `generator video` 转成 Remotion 故事板一键出片 → `autopub` 发布图文到多平台。
+统一入口是根目录的 [`cli.py`](cli.py)（或 `bin/aag.cmd`），它会自动把三个板块挂上导入路径。
 
-### autopub/ — 浏览器自动化发布（Python）
-
-- 从 `articles/` 目录读取 Markdown / Word 文章，解析为富文本块（粗体、标题、股票标签、图片）
-- 每个平台使用独立的持久化 Chrome 配置目录（位于用户主目录），首次运行人工登录一次即可长期保持会话
-- 内置：发布幂等账本（state.json）、节流与熔断（每篇间隔 ≥60s、连续 3 次失败熔断）、验证码/登录等待人工介入、图表转文字兜底（可选接 LLM）、Flask 本地控制台
-- 详见 [autopub/README.md](autopub/README.md) 与 [autopub/使用指南.md](autopub/使用指南.md)
+## 快速开始
 
 ```bash
-cd autopub
-pip install -r requirements.txt
+pip install -r ai-workflow/generator/requirements.txt -r auto-publisher/autopub/requirements.txt
 playwright install chromium
-python webapp/app.py        # 打开 http://127.0.0.1:5001 本地控制台
-# 或命令行方式
-python publish_all.py       # 依次发布到所有启用平台
-python publish.py --platform xueqiu --draft
+
+python cli.py doctor                 # 环境体检（密钥/浏览器/队列/账本）
+python cli.py sources list           # 板块一: 全部 107 源 + 启用/健康状态
+python cli.py flows list             # 板块二: 全部工作流包
+python cli.py flows run morning-paper --auto   # 跑每日早报(断点续跑, 审核挂起 exit 2)
+python cli.py publish status         # 板块三: 待发队列 + 发布账本
+python cli.py publish run --draft    # 草稿验证(真发需去掉 --draft 并人工确认)
 ```
 
-### adapters-kit/ — API 适配器套件（Node.js）
+## 只取一个板块
 
-- 统一的适配器接口与错误分类（需登录 / 拒绝发布 / 结果未知等），92 个单元测试
-- 搜狐号 / 网易号 / 什么值得买走纯 HTTP API（含签名、CSRF、封面裁剪等完整握手），头条为 API + 无头浏览器混合（动态安全签名）
-- 认证通过 Playwright storageState（cookies + localStorage）注入，登录态捕获需自行完成
-- 内置平台约束校验（标题字数、封面必填、正文字数/图片数）、每日配额（北京时间计算）
-- 详见 [adapters-kit/README.md](adapters-kit/README.md) 与 [adapters-kit/docs/engineering-guide.md](adapters-kit/docs/engineering-guide.md)
-
-```bash
-cd adapters-kit
-npm install
-npm test
-node examples/publish.js <sohu|toutiao|wangyi|zdm> <accountId> <storageState.json> <article.json>
-```
+- **只要源**：下载 `global-news-sources/`，`pip install requests pyyaml`，然后 `sys.path` 挂上该目录及其 `fetchers/` 即可 `from sources import gather, fetch_one`。enabled 开关读板块根 `config.yaml`（完整仓库内自动改用 `ai-workflow/generator/config.yaml`），备用源 key 读环境变量或板块根 `secret.local.json`。详见 [global-news-sources/README.md](global-news-sources/README.md)。
+- **只要发布**：下载 `auto-publisher/`，按 [auto-publisher/README.md](auto-publisher/README.md) 操作（模型密钥三种方式任选，网页控制台最省事）。
+- **只要工作流**：下载 `ai-workflow/`，另需把 `global-news-sources/fetchers/` 的可抓取实现配上（工作流的 fetch 步骤依赖它）；模型配置沿用 auto-publisher 的 `autopub/secret.local.json` 链路或环境变量。
 
 ## 安全模型
 
-- 仓库内**不含任何凭证**：平台登录态保存在本机（Chrome 配置目录 / storageState 文件），均被 .gitignore 排除
-- LLM API Key 等个人密钥通过 `secret.local.json`（已忽略）或环境变量注入，切勿提交
-- `adapters-kit` 源自脱敏学习包，附带 [NOTICE.md](adapters-kit/NOTICE.md) 说明，仅限授权学习使用
+- 仓库内**不含任何凭证**：平台登录态保存在本机（Chrome 配置目录 / storageState），LLM key 走 `secret.local.json` 或环境变量，均被 .gitignore 排除
+- 发布账本 `auto-publisher/autopub/state.json` 是防重复发布的唯一账本（原子写+损坏熔断），不手编
+- 发布命令一律先 `--draft` 验证，人工确认后才真发
+- `adapters-kit` 源自脱敏学习包，附带 [NOTICE.md](auto-publisher/adapters-kit/NOTICE.md)，仅限授权学习使用
 
 ## 功能规划
 
-- [x] 多平台自动发布（8 平台，两个子系统）
-- [x] AI 文章生成模块（早报 + 分析文章，多模型可切换，复用 autopub 模型配置）
-- [x] AI 财经日报（逐条详情 + AI 板块/影响分析 + 口播稿 + 数字防幻觉校验）
-- [x] 日报一键成片（Remotion：TTS 配音 + 模板渲染）
-- [x] 生成 → 发布链路（generator 产出直接进入 autopub 待发目录）
+- [x] 来源库 107 源（快讯/公告/行情/同行/日历，缓存+健康检查）
+- [x] YAML 工作流引擎（断点续跑 / 审核挂起 / 包导出导入）
+- [x] AI 财经早报 + 日报 + 分析文章（多模型可切换）
+- [x] 日报一键成片（Remotion：TTS 配音 + 模板渲染，1080p）
+- [x] 多平台自动发布（14 平台矩阵，浏览器 + API 双引擎）
 - [ ] 定时自动早报（交易日早间）
 - [ ] 发布结果统一对账与数据看板
+
+详细架构见 [docs/三大板块实施方案.md](docs/三大板块实施方案.md)。

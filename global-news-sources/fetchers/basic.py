@@ -267,7 +267,10 @@ REF_FETCHERS = {
 def gather_refs(cfg: dict | None = None) -> tuple:
     """抓同行早报文章,按时间倒序。返回 (文章列表, 挂掉的来源)。"""
     if cfg is None:
-        from common import load_cfg
+        try:
+            from common import load_cfg
+        except ImportError:
+            from _runtime import load_cfg
         cfg = load_cfg().get("sources", {})
     refs, failed = [], []
     for key, fn in REF_FETCHERS.items():
@@ -294,7 +297,10 @@ def render_refs(refs: list) -> str:
 def gather(cfg: dict | None = None, limit: int = 0) -> tuple:
     """按配置抓所有启用的来源,去重、按时间倒序。返回 (条目列表, 挂掉的来源)。"""
     if cfg is None:
-        from common import load_cfg
+        try:
+            from common import load_cfg
+        except ImportError:
+            from _runtime import load_cfg
         cfg = load_cfg().get("sources", {})
     items, failed = [], []
     for key, fn in FETCHERS.items():
@@ -335,19 +341,23 @@ _BJ = datetime.timezone(datetime.timedelta(hours=8))
 
 
 def _secret(key: str) -> str:
-    """备用源 API key: 同名大写环境变量优先, 否则 autopub/secret.local.json 对应字段。"""
-    import json
-    import os
-    from pathlib import Path
-    if os.environ.get(key.upper()):
-        return os.environ[key.upper()]
-    p = Path(__file__).resolve().parent.parent / "autopub" / "secret.local.json"
-    if p.exists():
-        try:
-            return str(json.loads(p.read_text(encoding="utf-8")).get(key, "") or "")
-        except Exception:
-            pass
-    return ""
+    """备用源 API key: 同名大写环境变量优先, 否则 auto-publisher/autopub/secret.local.json。"""
+    try:
+        from _runtime import secret_value
+        return secret_value(key)
+    except ImportError:
+        import json
+        import os
+        from pathlib import Path
+        if os.environ.get(key.upper()):
+            return os.environ[key.upper()]
+        p = Path(__file__).resolve().parents[2] / "auto-publisher" / "autopub" / "secret.local.json"
+        if p.exists():
+            try:
+                return str(json.loads(p.read_text(encoding="utf-8")).get(key, "") or "")
+            except Exception:
+                pass
+        return ""
 
 
 def fetch_marketaux_news(page_size: int = 30) -> list:

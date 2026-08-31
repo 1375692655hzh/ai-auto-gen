@@ -9,7 +9,7 @@ import json
 from datetime import datetime
 from pathlib import Path
 
-HEALTH_FILE = Path(__file__).resolve().parent.parent / "data" / "health" / "sources-health.json"
+HEALTH_FILE = Path(__file__).resolve().parents[2] / "data" / "health" / "sources-health.json"
 DEAD_AFTER = 3          # 连续失败 N 次 → dead
 
 

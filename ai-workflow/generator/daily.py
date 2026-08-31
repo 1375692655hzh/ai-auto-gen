@@ -12,7 +12,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from common import (load_cfg, out_dir, today, now_str, save_text,
                     llm_complete, parse_llm_list, safe_filename)
-import sources
+import basic as sources   # fetchers/basic.py(原 generator/sources.py)
 
 CATEGORIES = ["宏观政策", "公司动态", "行业产业", "海外市场", "大宗商品"]
 

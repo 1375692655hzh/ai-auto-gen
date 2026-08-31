@@ -20,14 +20,14 @@ def review_data(ctx, wf, params):
     region = str(params.get("region") or "cn").lower()
     material = {"region": region, "indices": [], "sectors": None, "clues": []}
 
-    import sources as gs
+    import basic as gs          # fetchers/basic.py
     if region in ("cn", "all"):
         try:
             material["indices"] += gs.fetch_cn_index_snapshot()
         except Exception as e:
             print(f"  ⚠ A股指数失败({type(e).__name__}: {str(e)[:60]})")
     if region != "cn":
-        import extra_sources as ges
+        import extra as ges
         try:
             gm = ges.fetch_global_markets()
             keep = None if region == "all" else _REGION_NAMES.get(region, set())
@@ -66,7 +66,7 @@ def review_synth(ctx, wf, params):
     idx_lines = "\n".join(f"- {x['name']}: {x['price']} ({x['chg_pct']})" for x in m["indices"])
     sec_lines = ""
     if m["sectors"]:
-        import sources as gs
+        import basic as gs
         sec_lines = "\n".join(f"- {x['text']}" for x in gs.sector_board_text(m["sectors"]))
     clue_lines = "\n".join(f"- [{c['time']}|{c['source']}] {c['text']}" for c in m["clues"])
 

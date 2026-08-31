@@ -1,7 +1,7 @@
-"""来源注册:包装 generator 现有抓取函数为标准来源(P1 包装不重写)。
+"""来源注册:包装 fetchers/ 抓取函数为标准来源(P1 包装不重写)。
 
-物理迁移(函数搬到本包、generator 留 shim)在后续阶段做——
-注册 id 与语义已稳定,届时不影响调用方。
+fetchers/basic.py + extra.py 是本板块的抓取实现(原 generator/sources.py 等),
+注册 id 与语义稳定,调用方经 sources.REGISTRY / sources.gather 使用。
 
 kind: flash 快讯 | peer_article 同行早报 | calendar 日历 | market 行情 | announcement 公告
       peer_group/extras_group 聚合来源(morning_paper 工作流直接调用,不进 gather)
@@ -12,13 +12,13 @@ import importlib.util
 from datetime import datetime
 from pathlib import Path
 
-_GEN = Path(__file__).resolve().parent.parent / "generator"
-if str(_GEN) not in sys.path:
-    sys.path.insert(0, str(_GEN))          # extra_sources 内部 `from search import ...` 需要
+_FETCHERS = Path(__file__).resolve().parent.parent / "fetchers"
+if str(_FETCHERS) not in sys.path:
+    sys.path.insert(0, str(_FETCHERS))     # extra.py 内部 `from search import ...` 需要
 
 
 def _load(alias: str, path: Path):
-    """按路径加载 generator 同名模块(本包也叫 sources, 不能直接 import sources)。"""
+    """按路径加载 fetcher 模块(本包也叫 sources, 不能直接 import sources)。"""
     spec = importlib.util.spec_from_file_location(alias, path)
     mod = importlib.util.module_from_spec(spec)
     sys.modules[alias] = mod
@@ -26,8 +26,8 @@ def _load(alias: str, path: Path):
     return mod
 
 
-gs = _load("gen_sources", _GEN / "sources.py")          # generator/sources.py
-ges = _load("gen_extra_sources", _GEN / "extra_sources.py")
+gs = _load("gen_sources", _FETCHERS / "basic.py")          # fetchers/basic.py
+ges = _load("gen_extra_sources", _FETCHERS / "extra.py")   # fetchers/extra.py
 
 from sources.base import source            # noqa: E402
 

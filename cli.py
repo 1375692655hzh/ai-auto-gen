@@ -3,13 +3,18 @@
 
 用法:
   python cli.py doctor [--json]            环境体检(密钥/浏览器/队列/账本)
-  python cli.py gen <args...>              生成模块(passthrough 到 generator/main.py)
+  python cli.py gen <args...>              生成模块(passthrough 到 ai-workflow/generator/main.py)
       例: gen morning / gen daily / gen run morning-paper --auto / gen fetch / gen llm-status
   python cli.py publish status [--json]    发布账本+待发队列(原生)
   python cli.py publish login [plat...]    一键登录(passthrough)
   python cli.py publish run [args...]      发全部平台(passthrough, 支持 --draft/--platforms/--file)
   python cli.py publish run-video <args..> 视频发布 B站/抖音(passthrough)
   python cli.py video build <id> [args..]  Remotion 出片(passthrough)
+
+三板块布局(可单独下载):
+  global-news-sources/  来源采集(注册表+fetchers+缓存健康)
+  ai-workflow/          生成工作流(flows 引擎+generator+video)
+  auto-publisher/       自动发布(autopub 浏览器引擎+adapters-kit+publish 门面)
 
 退出码约定(agent 靠此决策):
   0 成功 | 2 需人工介入(登录/审核/验证码) | 3 业务失败 | 4 配置缺失
@@ -25,6 +30,10 @@ import urllib.request
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
+GNS = ROOT / "global-news-sources"        # 板块一: 来源
+AIWF = ROOT / "ai-workflow"               # 板块二: 工作流
+PUB = ROOT / "auto-publisher"             # 板块三: 发布
+AUTOPUB = PUB / "autopub"
 EXIT_OK, EXIT_HUMAN, EXIT_FAIL, EXIT_CONFIG = 0, 2, 3, 4
 
 
@@ -64,10 +73,10 @@ def doctor(json_out: bool = False) -> int:
     except Exception:
         checks.append(_check("node", False, "装 Node 20+ (仅视频/API发布需要)", warn=True))
     # ffprobe(Remotion 时长探测)
-    ff = ROOT / "video" / "node_modules"
+    ff = AIWF / "video" / "node_modules"
     ffprobe_ok = any(ff.glob("@remotion/compositor-*/ffprobe*"))
     checks.append(_check("ffprobe(remotion)", ffprobe_ok,
-                         "cd video && npm install", warn=True))
+                         "cd ai-workflow/video && npm install", warn=True))
     # 中文字体
     fonts = [r"C:\Windows\Fonts\msyh.ttc", "/System/Library/Fonts/PingFang.ttc",
              "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
@@ -75,24 +84,24 @@ def doctor(json_out: bool = False) -> int:
     checks.append(_check("中文字体(长图渲染)", any(Path(f).exists() for f in fonts),
                          "config.yaml fonts: 段指定本机字体路径"))
     # LLM 密钥
-    secret = ROOT / "autopub" / "secret.local.json"
+    secret = AUTOPUB / "secret.local.json"
     has_key = secret.exists() or bool(os.environ.get("AUTOPUB_API_KEY"))
     checks.append(_check("LLM 密钥", has_key,
-                         "python autopub/webapp/app.py 网页里填, 或设 AUTOPUB_API_KEY"))
+                         "python auto-publisher/autopub/webapp/app.py 网页里填, 或设 AUTOPUB_API_KEY"))
     # Chrome 调试口(CDP 发布模式)
     try:
         urllib.request.urlopen("http://127.0.0.1:9222/json/version", timeout=2)
         checks.append(_check("Chrome 调试口(9222)", True))
     except Exception:
         checks.append(_check("Chrome 调试口(9222)", False,
-                             "双击 autopub/chrome_debug.bat 启动自动化 Chrome(发布前必须)",
+                             "双击 auto-publisher/autopub/chrome_debug.bat 启动自动化 Chrome(发布前必须)",
                              warn=True))
     # 待发队列
-    queue = ROOT / "autopub" / "articles"
+    queue = AUTOPUB / "articles"
     n_queue = len(list(queue.glob("*.md")) + list(queue.glob("*.docx"))) if queue.exists() else 0
     checks.append(_check(f"待发队列({n_queue}篇)", True))
     # 发布账本
-    state_f = ROOT / "autopub" / "state.json"
+    state_f = AUTOPUB / "state.json"
     n_pub = 0
     if state_f.exists():
         try:
@@ -122,7 +131,7 @@ def doctor(json_out: bool = False) -> int:
 # ---------- publish status: 原生读账本 ----------
 
 def publish_status(json_out: bool = False) -> int:
-    state_f = ROOT / "autopub" / "state.json"
+    state_f = AUTOPUB / "state.json"
     data = {}
     if state_f.exists():
         try:
@@ -130,7 +139,7 @@ def publish_status(json_out: bool = False) -> int:
         except Exception as e:
             print(f"账本读取失败: {e}", file=sys.stderr)
             return EXIT_CONFIG
-    queue = ROOT / "autopub" / "articles"
+    queue = AUTOPUB / "articles"
     files = sorted([f.name for f in queue.glob("*") if f.suffix in (".md", ".docx")]
                    ) if queue.exists() else []
     if json_out:
@@ -151,7 +160,7 @@ def publish_status(json_out: bool = False) -> int:
 
 
 def sources_cmd(args) -> int:
-    sys.path.insert(0, str(ROOT))
+    sys.path.insert(0, str(GNS))
     from sources import list_sources, fetch_one
     from sources import health as health_mod
 
@@ -209,7 +218,7 @@ def sources_cmd(args) -> int:
 
 
 def flows_cmd(args) -> int:
-    sys.path.insert(0, str(ROOT))
+    sys.path.insert(0, str(AIWF))
     from flows.engine import discover, lint, run_flow, YamlWorkflow, RUNS_ROOT
 
     if args.sub == "list":
@@ -402,12 +411,12 @@ def main() -> int:
     if args.cmd == "flows":
         return flows_cmd(args)
     if args.cmd == "gen":
-        return _passthrough(ROOT / "generator" / "main.py", args.args)
+        return _passthrough(AIWF / "generator" / "main.py", args.args)
     if args.cmd == "publish":
         if args.sub == "status":
             return publish_status(json_out=args.json)
         if args.sub == "targets":
-            sys.path.insert(0, str(ROOT))
+            sys.path.insert(0, str(PUB))
             from publish.facade import platform_status
             rows = platform_status()
             icons = {"published": "✅已真发", "draft": "🟡draft验证", "disabled-需实名": "⛔需实名",
@@ -418,11 +427,11 @@ def main() -> int:
                       f"{icons.get(r['verified'], r['verified'])}")
             return EXIT_OK
         if args.sub == "login":
-            return _passthrough(ROOT / "autopub" / "login.py", args.args)
+            return _passthrough(AUTOPUB / "login.py", args.args)
         if args.sub == "run":
-            return _passthrough(ROOT / "autopub" / "publish_all.py", args.args)
+            return _passthrough(AUTOPUB / "publish_all.py", args.args)
         if args.sub == "run-video":
-            return _passthrough(ROOT / "autopub" / "publish_video.py", args.args)
+            return _passthrough(AUTOPUB / "publish_video.py", args.args)
     if args.cmd == "skills":
         import shutil
         src = ROOT / "skills"
@@ -449,7 +458,7 @@ def main() -> int:
     if args.cmd == "video":
         if args.sub == "build":
             r = subprocess.run(["node", "scripts/build.mjs"] + args.args,
-                               cwd=str(ROOT / "video"))
+                               cwd=str(AIWF / "video"))
             return r.returncode
     ap.print_help()
     return EXIT_FAIL

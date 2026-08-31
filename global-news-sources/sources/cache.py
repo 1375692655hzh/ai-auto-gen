@@ -8,7 +8,7 @@ import json
 import time
 from pathlib import Path
 
-CACHE_DIR = Path(__file__).resolve().parent.parent / "data" / "cache" / "sources"
+CACHE_DIR = Path(__file__).resolve().parents[2] / "data" / "cache" / "sources"
 
 
 def _key(source_id: str, conf: dict) -> Path:

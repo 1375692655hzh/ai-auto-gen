@@ -77,7 +77,7 @@ def render_morning_video(ctx, wf, params):
     src = proj_dir / "out" / "final.mp4"
     if not src.exists():
         sys.exit(f"出片产物缺失: {src}")
-    out_dir = GEN_ROOT.parent / "autopub" / "videos"
+    out_dir = GEN_ROOT.parent.parent / "auto-publisher" / "autopub" / "videos"
     out_dir.mkdir(parents=True, exist_ok=True)
     out = out_dir / f"早报视频-{date}.mp4"
     out.write_bytes(src.read_bytes())

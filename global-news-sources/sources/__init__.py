@@ -17,11 +17,14 @@ from sources.base import REGISTRY
 from sources import cache as _cache
 from sources import health as _health
 
-_GEN_CFG = Path(__file__).resolve().parent.parent / "generator" / "config.yaml"
+_PROJ = Path(__file__).resolve().parents[2]   # 完整仓库的项目根(独立使用时走板块根兜底)
+_GEN_CFG = _PROJ / "ai-workflow" / "generator" / "config.yaml"
+if not _GEN_CFG.exists():
+    _GEN_CFG = Path(__file__).resolve().parent.parent / "config.yaml"
 
 
 def _cfg_section() -> dict:
-    """enabled 开关沿用 generator/config.yaml 的 sources: 段(不另起配置)。"""
+    """enabled 开关沿用 ai-workflow/generator/config.yaml 的 sources: 段(不另起配置)。"""
     try:
         import yaml
         return (yaml.safe_load(_GEN_CFG.read_text(encoding="utf-8")) or {}).get("sources") or {}

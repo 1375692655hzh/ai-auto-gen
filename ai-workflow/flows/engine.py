@@ -17,10 +17,13 @@ from pathlib import Path
 
 import yaml
 
-ROOT = Path(__file__).resolve().parent.parent
-GEN = ROOT / "generator"
-if str(GEN) not in sys.path:
-    sys.path.insert(0, str(GEN))
+ROOT = Path(__file__).resolve().parents[2]          # 项目根
+AIWF = ROOT / "ai-workflow"
+GEN = AIWF / "generator"
+GNS = ROOT / "global-news-sources"
+for _p in (GEN, AIWF, GNS, GNS / "fetchers"):
+    if str(_p) not in sys.path:
+        sys.path.insert(0, str(_p))
 
 from workflows.base import WorkflowBase      # noqa: E402  (generator 的成熟骨架)
 from flows.steps import STEPS                # noqa: E402

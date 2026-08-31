@@ -11,7 +11,10 @@ import sys
 
 import requests
 
-from common import AUTOPUB_ROOT
+try:
+    from common import AUTOPUB_ROOT
+except ImportError:
+    from _runtime import AUTOPUB_ROOT
 
 ENDPOINT = "https://open.feedcoopapi.com/search_api/web_search"
 

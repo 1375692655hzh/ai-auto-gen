@@ -12,7 +12,7 @@ import sys
 
 from common import (load_cfg, out_dir, today, now_str, save_text,
                     llm_complete, parse_llm_list, confirm)
-import sources
+import basic as sources   # fetchers/basic.py(原 generator/sources.py)
 
 SYS_TOPIC = "你是财经内容策划,擅长从零散快讯里发现值得深度分析的主题。只输出要求的内容,不加解释。"
 SYS_RESEARCH = "你是严谨的财经研究员,只依据给定材料工作,不编造。只输出要求的内容。"
@@ -163,5 +163,5 @@ def run(topic: str | None = None, auto: bool = False) -> dict:
     print("\n===== 第 4 步:生成文章与口播稿 =====")
     r = step4_write(t, outline, related)
     print(f"文章: {r['article']}\n口播: {r['script']}")
-    print("\n提示:文章已进入 autopub 待发目录;建议先 `python autopub/publish.py --platform zhihu --draft` 单平台试发。")
+    print("\n提示:文章已进入 autopub 待发目录;建议先 `python auto-publisher/autopub/publish.py --platform zhihu --draft` 单平台试发。")
     return r

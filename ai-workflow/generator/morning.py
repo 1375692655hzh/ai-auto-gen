@@ -7,7 +7,7 @@
 import sys
 
 from common import load_cfg, out_dir, today, now_str, save_text, llm_complete
-import sources
+import basic as sources   # fetchers/basic.py(原 generator/sources.py)
 
 MARKETS = {
     "a": {
@@ -95,5 +95,5 @@ def run(markets: str = "both") -> list:
         print(f"文章: {r['article']}")
         print(f"口播: {r['script']}")
         results.append(r)
-    print("\n提示:文章已直接放入 autopub 待发目录,可用 `python autopub/publish_all.py --limit 1` 试发;口播稿在 generator/output/ 下,不进发布链路。")
+    print("\n提示:文章已直接放入 autopub 待发目录,可用 `python cli.py publish run --draft` 试发;口播稿在 ai-workflow/generator/output/ 下,不进发布链路。")
     return results
