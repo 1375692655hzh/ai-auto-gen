@@ -23,19 +23,25 @@ sys.path.insert(0, str(ROOT))
 import yaml
 import llm
 from state import State
+from publishers import REGISTRY
 
 ARTICLES_DIR = ROOT / "articles"
 LOG_DIR = ROOT / "logs"
 RUN_LOG = LOG_DIR / "webrun.log"
 ALLOWED_EXT = {".md", ".docx"}
 
-# publish_all.py 里 ORDER 支持的平台 + 中文名
-PLATFORMS = [
-    {"key": "laohu",     "name": "老虎社区",   "note": "已验证"},
-    {"key": "eastmoney", "name": "东方财富股吧", "note": "已验证"},
-    {"key": "xueqiu",    "name": "雪球",       "note": "已验证"},
-    {"key": "zhihu",     "name": "知乎",       "note": "已验证(图表转文字需模型 API)"},
-]
+# 平台清单动态生成, 不在这里维护第二份(内核加平台网页自动跟上):
+#   清单  = publishers/REGISTRY(发布真正认的平台)
+#   中文名+验证状态 = publish/targets.yaml
+#   开关  = config.yaml platforms.<id>.enabled(与 publish_all.py 同语义)
+TARGETS_YAML = ROOT.parent / "publish" / "targets.yaml"
+VERIFIED_NOTE = {
+    "published": "已真发验证",
+    "draft": "草稿验证",
+    "placeholder": "适配器占位",
+    "disabled-需实名": "已停用: 需实名",
+    "disabled-风控": "已停用: 账号风控",
+}
 
 app = Flask(__name__)
 
@@ -69,6 +75,32 @@ def load_config():
         return {}
 
 
+def list_platforms():
+    """网页展示用的平台清单(单一事实来源聚合, 见顶部注释)。"""
+    cfg = load_config().get("platforms") or {}
+    meta = {}
+    try:
+        with open(TARGETS_YAML, encoding="utf-8") as f:
+            meta = (yaml.safe_load(f) or {}).get("platforms") or {}
+    except Exception:
+        pass
+    # targets.yaml 的顺序即展示顺序(验证过的在前); 它漏登记的注册平台兜底排最后
+    ordered = [k for k, m in meta.items()
+               if isinstance(m, dict) and m.get("engine") == "autopub" and k in REGISTRY]
+    ordered += [k for k in REGISTRY if k not in ordered]
+    out = []
+    for k in ordered:
+        m = meta.get(k) or {}
+        note = VERIFIED_NOTE.get(m.get("verified", ""), m.get("verified") or "已注册")
+        out.append({
+            "key": k,
+            "name": m.get("title") or k,
+            "note": note,
+            "enabled": bool((cfg.get(k) or {}).get("enabled")),
+        })
+    return out
+
+
 # ---------- 页面 ----------
 
 @app.route("/")
@@ -81,15 +113,16 @@ def api_status():
     """页面初始/轮询数据: 模型配置 + 文章列表 + 平台 + 运行态。"""
     state = State(ROOT / "state.json")
     arts = list_articles()
+    platforms = list_platforms()
     # 每篇在各平台的发布状态(给页面打勾用)
     pub = {}
     for a in arts:
-        pub[a["name"]] = {p["key"]: state.is_published(a["name"], p["key"]) for p in PLATFORMS}
+        pub[a["name"]] = {p["key"]: state.is_published(a["name"], p["key"]) for p in platforms}
     return jsonify({
         "model": llm.status(),
         "providers": list(llm.PRESET_BASE_URLS.keys()) + ["claude_cli"],
         "preset_urls": llm.PRESET_BASE_URLS,
-        "platforms": PLATFORMS,
+        "platforms": platforms,
         "articles": arts,
         "published": pub,
         "running": is_running(),
@@ -159,6 +192,14 @@ def api_run():
         only_file = d.get("file") or None
         if not platforms:
             return jsonify({"ok": False, "message": "请至少勾选一个平台"}), 400
+        # --platforms 显式点名会绕过 config 的 enabled 开关, 网页侧必须自己挡:
+        # 勾了停用平台的明确拒绝, 不悄悄尝试发
+        plat_info = {p["key"]: p for p in list_platforms()}
+        disabled = [p for p in platforms if not plat_info.get(p, {}).get("enabled")]
+        if disabled:
+            names = ", ".join(plat_info[d]["name"] for d in disabled)
+            return jsonify({"ok": False,
+                            "message": f"平台已停用(见 config.yaml 开关): {names}"}), 400
         if not list_articles():
             return jsonify({"ok": False, "message": "articles/ 里没有文章,请先上传"}), 400
 

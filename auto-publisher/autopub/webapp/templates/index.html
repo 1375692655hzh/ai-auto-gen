@@ -39,6 +39,7 @@
   .plat { display:flex; gap:10px; flex-wrap:wrap; }
   .plat label { display:flex; align-items:center; gap:8px; border:1px solid var(--line);
                 border-radius:10px; padding:10px 14px; margin:0; cursor:pointer; font-size:14px; }
+  .plat label.off { cursor:not-allowed; opacity:.5; }
   .plat input { width:16px; height:16px; }
   .plat .n { font-size:11px; color:var(--mut); }
   pre#log { background:#0b1021; color:#cbd5e1; padding:14px; border-radius:10px;
@@ -136,12 +137,13 @@ async function refresh() {
     if (m.base_url) document.getElementById('base_url').value = m.base_url;
     if (m.model) document.getElementById('model').value = m.model;
   }
-  // 平台(只首次填充)
+  // 平台(只首次填充; enabled=false 的灰显不可勾, 与 config.yaml 开关一致)
   const platBox = document.getElementById('plat');
   if (!platBox.children.length) {
     DATA.platforms.forEach(p => {
       const l=document.createElement('label');
-      l.innerHTML = `<input type="checkbox" value="${p.key}" checked>
+      if (!p.enabled) l.className='off';
+      l.innerHTML = `<input type="checkbox" value="${p.key}" ${p.enabled?'':'disabled'}>
         <span>${p.name}<br><span class="n">${p.note}</span></span>`;
       platBox.appendChild(l);
     });
