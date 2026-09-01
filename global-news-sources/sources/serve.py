@@ -149,12 +149,18 @@ def create_app():
     @app.get("/v1/items")
     def items(request: Request, markets: str = "", kinds: str = "",
               info_types: str = "", channels: str = "", forms: str = "",
-              sources: str = "", since: str = "", limit: int = 200, cursor: str = ""):
+              sources: str = "", tickers: str = "", sentiments: str = "",
+              event_types: str = "", q: str = "",
+              since: str = "", limit: int = 200, cursor: str = "",
+              dedup: int = 1):
         csv = lambda v: [s.strip() for s in v.split(",") if s.strip()] or None
         out, nxt = _store.query(markets=csv(markets), kinds=csv(kinds),
                                 info_types=csv(info_types), channels=csv(channels),
                                 forms=csv(forms), source_ids=csv(sources),
-                                since=since, limit=limit, cursor=cursor)
+                                tickers=csv(tickers), sentiments=csv(sentiments),
+                                event_types=csv(event_types),
+                                q=q, since=since, limit=limit, cursor=cursor,
+                                dedup=bool(dedup))
         why = _check_quota(request.state.kdef, cost_items=len(out))
         if why:
             return JSONResponse({"error": why}, status_code=429,

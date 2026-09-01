@@ -1,25 +1,38 @@
-"""对外服务库: SQLite WAL。单机数据站的权威读侧存储(拍板 2026-09-01)。
+"""对外服务库 v2: SQLite WAL。单机数据站的权威读侧存储。
+
+v1(2026-09-01): 基础存储。v2(同日拍板): URL规范化去重 + 相似标题簇(clusters表)
++ 规则打标(tagger) + 时间可信位 + q检索 + dedup折叠 + cursor跳项修复。
 
 - 唯一写者: sources/refresh.py(调度进程)。读者: serve(HTTP)/CLI/板块二。
-- 幂等去重键: md5(source_id + (url 或 规范化正文前60字))。
-- 保留窗: flash 48h / peer_article·announcement 7d / market·calendar 7d。
-- 信息标签缺省规则(kind→info_type): announcement→filing, market→data,
-  flash→news, peer_article→insight; 条目自带的优先。insight 类不打赛道(裁决)。
+- 精确去重键: md5(source_id + (canonical_url 或 规范化正文前60字))。
+- 模糊去重: 轮末 link_dups() 批量归并(bigram倒排+数字/极性硬否决), 不丢弃只挂簇。
+- 保留窗: flash 48h / 其他 7d。prune 同步清理簇。
+- 信息标签: info_type 按 kind 缺省; tickers/event_type/sentiment/sectors 由
+  tagger.enrich 规则打标(insight 不打赛道); llm_tag 精修(M4)。
 """
 
 import gzip
 import hashlib
 import json
 import os
+import re
 import sqlite3
 import time
 from datetime import datetime, timedelta
 from pathlib import Path
 
+from sources import tagger as _tagger
+
 KIND_TO_INFO_TYPE = {"flash": "news", "peer_article": "insight",
                      "announcement": "filing", "market": "data", "calendar": "calendar"}
 RETENTION_HOURS = {"flash": 48, "peer_article": 24 * 7, "announcement": 24 * 7,
                    "market": 24 * 7, "calendar": 24 * 7}
+SCHEMA_VERSION = 2
+_COLS = ["id", "source_id", "source", "time", "text", "title", "url", "media",
+         "kind", "form", "channel", "risk", "markets", "lang", "info_type",
+         "sectors", "sentiment", "fetched_at",
+         "canonical_url", "title_norm", "cluster_id", "dup_count", "dup_scope",
+         "published_at_known", "matched_terms", "tickers", "event_type"]
 
 
 def _serve_dir() -> Path:
@@ -41,88 +54,322 @@ def _connect() -> sqlite3.Connection:
     p.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(str(p), timeout=30)
     conn.execute("PRAGMA journal_mode=WAL")
-    conn.execute("""CREATE TABLE IF NOT EXISTS items(
-        id TEXT PRIMARY KEY, source_id TEXT, source TEXT, time TEXT, text TEXT,
-        title TEXT, url TEXT, media TEXT, kind TEXT, form TEXT, channel TEXT,
-        risk TEXT, markets TEXT, lang TEXT, info_type TEXT, sectors TEXT,
-        sentiment TEXT, fetched_at TEXT)""")
-    conn.execute("CREATE INDEX IF NOT EXISTS idx_items_time ON items(time DESC)")
-    conn.execute("CREATE INDEX IF NOT EXISTS idx_items_source ON items(source_id)")
-    conn.execute("CREATE INDEX IF NOT EXISTS idx_items_kind ON items(kind)")
+    _migrate(conn)
     return conn
 
 
-def _item_id(source_id: str, it: dict) -> str:
-    key = (it.get("url") or "") or "".join((it.get("text") or "").split())[:60]
-    return hashlib.md5(f"{source_id}|{key}".encode("utf-8")).hexdigest()
+def _migrate(conn: sqlite3.Connection) -> None:
+    """幂等迁移: 缺列补列, 缺表建表。schema_meta 记录版本。"""
+    conn.execute("CREATE TABLE IF NOT EXISTS schema_meta(k TEXT PRIMARY KEY, v TEXT)")
+    base = """CREATE TABLE IF NOT EXISTS items(
+        id TEXT PRIMARY KEY, source_id TEXT, source TEXT, time TEXT, text TEXT,
+        title TEXT, url TEXT, media TEXT, kind TEXT, form TEXT, channel TEXT,
+        risk TEXT, markets TEXT, lang TEXT, info_type TEXT, sectors TEXT,
+        sentiment TEXT, fetched_at TEXT)"""
+    conn.execute(base)
+    have = {r[1] for r in conn.execute("PRAGMA table_info(items)")}
+    new_cols = {"canonical_url": "TEXT DEFAULT ''", "title_norm": "TEXT DEFAULT ''",
+                "cluster_id": "TEXT DEFAULT ''", "dup_count": "INTEGER DEFAULT 1",
+                "dup_scope": "TEXT DEFAULT 'none'",
+                "published_at_known": "INTEGER DEFAULT 1",
+                "matched_terms": "TEXT DEFAULT '[]'", "tickers": "TEXT DEFAULT '[]'",
+                "event_type": "TEXT DEFAULT ''"}
+    for c, t in new_cols.items():
+        if c not in have:
+            conn.execute(f"ALTER TABLE items ADD COLUMN {c} {t}")
+    conn.execute("""CREATE TABLE IF NOT EXISTS clusters(
+        cluster_id TEXT PRIMARY KEY, kind TEXT, representative_id TEXT,
+        first_seen TEXT, last_seen TEXT, report_count INTEGER DEFAULT 1,
+        source_count INTEGER DEFAULT 1, created_at TEXT, updated_at TEXT)""")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_items_time ON items(time DESC)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_items_source ON items(source_id)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_items_kind_time ON items(kind, time DESC)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_items_cluster ON items(cluster_id)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_items_canon ON items(canonical_url)")
+    conn.execute("INSERT OR REPLACE INTO schema_meta VALUES('schema_version', ?)",
+                 (str(SCHEMA_VERSION),))
+    conn.commit()
 
 
-def _norm_time(raw: str, fallback: str) -> str:
-    """归一为北京时间 "YYYY-MM-DD HH:MM"(终端时效显示的生命线, 2026-09-01)。
+# ── URL 规范化(层1去重) ──────────────────────────────────────────────────────
 
-    处理: ISO8601(带T/Z) / RFC2822 / "MM-DD HH:MM" 缺年 / "HH:MM" 缺日期 /
-    空值兜底 fetched_at。无法解析时也回退 fallback, 绝不留残缺格式出库。
-    """
-    import re as _re
-    from datetime import timezone as _tz, timedelta as _td
-    s = (raw or "").strip()
-    bj = _tz(_td(hours=8))
+_TRACK_KEYS = {"spm", "spm_id", "scm", "scm_id", "gclid", "fbclid", "msclkid",
+               "ttclid", "yclid", "dclid", "igshid", "mc_cid", "mc_eid",
+               "click_id", "clickid", "sharefrom", "share_from", "share_token",
+               "shareid", "share_id", "ref_src", "refsrc", "trackid",
+               "tracking_id", "tracker", "trace_id", "traceid", "pvid", "pv_id",
+               "request_id", "requestid", "reqid", "scene", "scene_id",
+               "abtest", "ab_id", "jumpfrom", "jump_from", "_t", "_ts", "_r", "_s"}
+_CONTENT_KEYS = {"id", "aid", "nid", "news_id", "newsid", "article_id", "item_id",
+                 "content_id", "post_id", "msg_id", "flash_id", "docid", "doc_id",
+                 "unique_id", "mid", "cid", "pid", "code", "stock", "symbol", "s",
+                 "ticker", "date", "day", "page", "p", "pageno", "offset",
+                 "report_id", "announce_id", "notice_id"}
+
+
+def canonicalize_url(url: str) -> str:
+    """剥跟踪参/fragment/尾斜杠后的规范化 URL(只做键, 展示永远用原文)。"""
+    from urllib.parse import urlparse, parse_qsl, urlencode, urlunparse
+    s = (url or "").strip()
+    if not s.lower().startswith(("http://", "https://")):
+        return ""
     try:
-        if _re.fullmatch(r"\d{4}-\d{2}-\d{2} \d{2}:\d{2}(:\d{2})?", s):
-            return s[:16]
-        if _re.match(r"\d{4}-\d{2}-\d{2}T", s):                 # ISO8601
+        u = urlparse(s)
+        host = (u.netloc or "").lower().rstrip(".")
+        for p in (":80", ":443"):
+            if host.endswith(p):
+                host = host[: -len(p)]
+        if host.startswith("www."):
+            host = host[4:]
+        path = re.sub(r"%([0-9a-f]{2})", lambda m: "%" + m.group(1).upper(), u.path or "")
+        if len(path) > 1 and path.endswith("/"):
+            path = path.rstrip("/")
+        kept = []
+        for k, v in parse_qsl(u.query, keep_blank_values=True):
+            lk = k.lower()
+            if lk.startswith("utm_") or lk in _TRACK_KEYS:
+                continue
+            if lk in ("t", "ts", "timestamp") and re.fullmatch(r"\d{10,13}", v):
+                continue
+            kept.append((k, v))                        # 未知参数默认保留(误删>误留)
+        kept.sort(key=lambda kv: (kv[0].lower(), kv[1]))
+        return urlunparse((u.scheme.lower(), host, path, "", urlencode(kept), ""))
+    except Exception:
+        return ""
+
+
+# ── 标题规范化与 bigram(层2模糊簇用) ─────────────────────────────────────────
+
+_STOP_CHARS = set("的了吗呢啊吧着过和与及或在于对将把被让从到也又还就都")
+_PREFIX_RE = re.compile(r"^(【[^】]*】|\[[^\]]*\]|财联社.{0,8}电|快讯[:：]|金十.{0,4}[:：]|见闻[:：])+")
+
+
+def normalize_title(text: str) -> str:
+    s = (text or "")[:200]
+    s = re.sub(r"<[^>]+>", "", s)
+    import unicodedata
+    s = unicodedata.normalize("NFKC", s).lower()
+    s = _PREFIX_RE.sub("", s)
+    s = "".join(c for c in s if re.match(r"[一-鿿0-9a-z.%]", c))
+    s = "".join(c for c in s if c not in _STOP_CHARS)
+    return s
+
+
+def _bigrams(s: str) -> set:
+    return {s[i:i + 2] for i in range(len(s) - 1)} if len(s) >= 2 else set()
+
+
+_NUM_RE = re.compile(r"\d+(?:\.\d+)?(?:%|bp|基点|亿|万|倍|元|美元|亿元|万亿)?")
+_POLAR = [("涨", "跌"), ("升", "降"), ("加息", "降息"), ("利好", "利空"),
+          ("增持", "减持"), ("买入", "卖出"), ("通过", "否决"), ("扩张", "收缩"),
+          ("暂停", "重启"), ("上调", "下调"), ("surge", "plunge"), ("beat", "miss")]
+
+
+def _hard_veto(a_raw: str, b_raw: str) -> bool:
+    """数字集不等/代码无交集/极性对立 → 拒绝合并。"""
+    na, nb = set(_NUM_RE.findall(a_raw)), set(_NUM_RE.findall(b_raw))
+    if na and nb and na != nb:
+        return True
+    ca = set(re.findall(r"(?<!\d)\d{6}(?!\d)", a_raw)) | set(re.findall(r"\b[A-Z]{2,5}\b", a_raw))
+    cb = set(re.findall(r"(?<!\d)\d{6}(?!\d)", b_raw)) | set(re.findall(r"\b[A-Z]{2,5}\b", b_raw))
+    if ca and cb and not (ca & cb):
+        return True
+    for x, y in _POLAR:
+        ax, ay = x in a_raw, y in a_raw
+        bx, by = x in b_raw, y in b_raw
+        if (ax and by and not (ay or bx)) or (ay and bx and not (ax or by)):
+            return True
+    return False
+
+
+# ── 时间归一(含可信位) ──────────────────────────────────────────────────────
+
+def _norm_time(raw: str, fallback: str) -> tuple[str, int]:
+    """归一北京时间, 返回 (time, published_at_known)。fallback 命中 → known=0。"""
+    s = (raw or "").strip()
+    bj = __import__("datetime").timezone(__import__("datetime").timedelta(hours=8))
+    try:
+        if re.fullmatch(r"\d{4}-\d{2}-\d{2} \d{2}:\d{2}(:\d{2})?", s):
+            return s[:16], 1
+        if re.match(r"\d{4}-\d{2}-\d{2}T", s):
             dt = datetime.fromisoformat(s.replace("Z", "+00:00"))
             if dt.tzinfo is None:
                 dt = dt.replace(tzinfo=bj)
-            return dt.astimezone(bj).strftime("%Y-%m-%d %H:%M")
-        if "," in s:                                   # RFC2822 (RSS pubDate)
+            return dt.astimezone(bj).strftime("%Y-%m-%d %H:%M"), 1
+        if "," in s:
             from email.utils import parsedate_to_datetime
-            return parsedate_to_datetime(s).astimezone(bj).strftime("%Y-%m-%d %H:%M")
-        m = _re.fullmatch(r"(\d{1,2})-(\d{1,2}) (\d{1,2}):(\d{2})", s)   # 缺年
+            return parsedate_to_datetime(s).astimezone(bj).strftime("%Y-%m-%d %H:%M"), 1
+        m = re.fullmatch(r"(\d{1,2})-(\d{1,2}) (\d{1,2}):(\d{2})", s)
         if m:
-            return f"{datetime.now().year}-{int(m[1]):02d}-{int(m[2]):02d} {int(m[3]):02d}:{m[4]}"
-        m = _re.fullmatch(r"(\d{1,2}):(\d{2})", s)                        # 缺日期
+            return f"{datetime.now().year}-{int(m[1]):02d}-{int(m[2]):02d} {int(m[3]):02d}:{m[4]}", 1
+        m = re.fullmatch(r"(\d{1,2}):(\d{2})", s)
         if m:
-            return f"{datetime.now().strftime('%Y-%m-%d')} {int(m[1]):02d}:{m[2]}"
-        m = _re.fullmatch(r"(\d{4})-(\d{2})-(\d{2})", s)                  # 只有日期
-        if m:
-            return s + " 00:00"
+            return f"{datetime.now().strftime('%Y-%m-%d')} {int(m[1]):02d}:{m[2]}", 0
+        if re.fullmatch(r"\d{4}-\d{2}-\d{2}", s):
+            return s + " 00:00", 0
     except Exception:
         pass
-    return fallback
+    return fallback, 0
 
+
+def _item_id(source_id: str, canon: str, text: str) -> str:
+    key = canon or "".join((text or "").split())[:60]
+    return hashlib.md5(f"{source_id}|{key}".encode("utf-8")).hexdigest()
+
+
+# ── 入库 ────────────────────────────────────────────────────────────────────
 
 def put(source_id: str, meta: dict, items: list) -> int:
-    """入库(幂等)。返回新增条数。meta 提供源四标签, 逐条打平避免查询再 join。"""
+    """入库(幂等 + 规则打标 + 精确去重)。返回新增条数。"""
     if not items:
         return 0
     now = datetime.now().strftime("%Y-%m-%d %H:%M")
     info_default = KIND_TO_INFO_TYPE.get(meta.get("kind", ""), "news")
+    kind = meta.get("kind", "")
     rows = []
     for it in items:
+        text = it.get("text", "") or ""
+        canon = canonicalize_url(it.get("url", "") or "")
+        t_norm = normalize_title(text)
+        t_str, t_known = _norm_time(it.get("time", ""), now)
+        tag = _tagger.enrich(text, kind=kind)
+        sectors = it.get("sectors") or tag["sectors"]
         rows.append((
-            _item_id(source_id, it), source_id, it.get("source") or meta.get("title", ""),
-            _norm_time(it.get("time", ""), now), it.get("text", "") or "",
+            _item_id(source_id, canon, text), source_id,
+            it.get("source") or meta.get("title", ""), t_str, text,
             it.get("title", "") or "", it.get("url", "") or "", it.get("media", "") or "",
-            meta.get("kind", ""), meta.get("form", ""), meta.get("channel", ""),
-            meta.get("risk", ""),
+            kind, meta.get("form", ""), meta.get("channel", ""), meta.get("risk", ""),
             json.dumps(it.get("markets") or meta.get("markets") or [], ensure_ascii=False),
             meta.get("lang", ""),
             it.get("info_type") or info_default,
-            json.dumps(it.get("sectors") or [], ensure_ascii=False),
-            it.get("sentiment") or "", now))
+            json.dumps(sectors, ensure_ascii=False),
+            it.get("sentiment") or tag["sentiment"], now,
+            canon, t_norm, "", 1, "none", t_known,
+            json.dumps(tag["matched_terms"], ensure_ascii=False),
+            json.dumps(it.get("tickers") or tag["tickers"], ensure_ascii=False),
+            it.get("event_type") or tag["event_type"]))
+    sql = ("INSERT OR IGNORE INTO items(" + ",".join(_COLS) + ") VALUES(" +
+           ",".join("?" * len(_COLS)) + ")")
     conn = _connect()
     try:
-        cur = conn.executemany(
-            "INSERT OR IGNORE INTO items VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)", rows)
+        cur = conn.executemany(sql, rows)
         conn.commit()
         return cur.rowcount
     finally:
         conn.close()
 
 
+# ── 轮末模糊归并(link_dups) ──────────────────────────────────────────────────
+
+_WINDOW_H = {"flash": 6, "peer_article": 12}
+_J_T = {"flash": 0.65, "peer_article": 0.70}
+_C_T = {"flash": 0.80, "peer_article": 0.82}
+
+
+def _similar(a: dict, b: dict, kind: str) -> bool:
+    """Jaccard 主判据 + 包含度补充(标题⊂长文放行, 需短者≥10字+包含度≥0.9)。"""
+    if _hard_veto(a["text"], b["text"]):
+        return False
+    A, B = a["grams"], b["grams"]
+    if not A or not B:
+        return a["norm"] == b["norm"] and bool(a["norm"])
+    inter = len(A & B)
+    if not inter:
+        return False
+    j = inter / len(A | B)
+    if j >= _J_T[kind]:
+        return True
+    c = inter / min(len(A), len(B))
+    if c >= _C_T[kind]:
+        la, lb = len(a["norm"]), len(b["norm"])
+        ratio = min(la, lb) / max(la, lb)
+        if ratio >= 0.65:                          # 相近长度的扩写
+            return True
+        if min(la, lb) >= 10 and c >= 0.9:         # 快讯标题被长文全文包含
+            return True
+    return False
+
+
+def link_dups() -> dict:
+    """refresh 轮末调用: 近窗代表条 bigram 倒排 + 并查集, 簇写入 clusters 表。
+    只对 flash/peer_article 做模糊簇; 条目不删除只挂 cluster_id。"""
+    conn = _connect()
+    stats = {"scanned": 0, "linked": 0, "clusters": 0}
+    try:
+        for kind, win_h in _WINDOW_H.items():
+            since = (datetime.now() - timedelta(hours=win_h)).strftime("%Y-%m-%d %H:%M")
+            rows = conn.execute(
+                "SELECT id, source_id, time, text, title_norm FROM items "
+                "WHERE kind=? AND time>=? ORDER BY time ASC, id ASC",
+                (kind, since)).fetchall()
+            if not rows:
+                continue
+            reps = [{"id": r[0], "sid": r[1], "time": r[2], "text": r[3],
+                     "norm": r[4], "grams": _bigrams(r[4])} for r in rows]
+            stats["scanned"] += len(reps)
+            inv: dict[str, list[int]] = {}          # bigram 倒排
+            for i, r in enumerate(reps):
+                for g in r["grams"]:
+                    inv.setdefault(g, []).append(i)
+            parent = list(range(len(reps)))
+
+            def find(x):
+                while parent[x] != x:
+                    parent[x] = parent[parent[x]]
+                    x = parent[x]
+                return x
+
+            seen_pairs = set()
+            for g, idxs in inv.items():
+                if len(idxs) < 2 or len(idxs) > 64:   # 高频 bigram 无区分度
+                    continue
+                for x in range(len(idxs)):
+                    for y in range(x + 1, len(idxs)):
+                        i, j = idxs[x], idxs[y]
+                        key = (i, j)
+                        if key in seen_pairs:
+                            continue
+                        seen_pairs.add(key)
+                        if find(i) == find(j):
+                            continue
+                        if _similar(reps[i], reps[j], kind):
+                            parent[find(i)] = find(j)
+                            stats["linked"] += 1
+            # 成簇: 只保留 size>=2 的组
+            groups: dict[int, list[int]] = {}
+            for i in range(len(reps)):
+                groups.setdefault(find(i), []).append(i)
+            now = datetime.now().strftime("%Y-%m-%d %H:%M")
+            for root, members in groups.items():
+                if len(members) < 2:
+                    continue
+                members.sort(key=lambda i: (reps[i]["time"], reps[i]["id"]))
+                rep = reps[members[0]]                   # 最早发布=代表
+                cid = hashlib.md5(f"cluster|{rep['id']}".encode()).hexdigest()[:24]
+                sids = {reps[i]["sid"] for i in members}
+                scope = "same_source" if len(sids) == 1 else "cross_source"
+                first, last = reps[members[0]]["time"], reps[members[-1]]["time"]
+                conn.execute(
+                    "INSERT INTO clusters VALUES(?,?,?,?,?,?,?,?,?) "
+                    "ON CONFLICT(cluster_id) DO UPDATE SET "
+                    "representative_id=excluded.representative_id, "
+                    "last_seen=excluded.last_seen, report_count=excluded.report_count, "
+                    "source_count=excluded.source_count, updated_at=excluded.updated_at",
+                    (cid, kind, rep["id"], first, last, len(members), len(sids), now, now))
+                for i in members:
+                    conn.execute(
+                        "UPDATE items SET cluster_id=?, dup_count=?, dup_scope=? WHERE id=?",
+                        (cid, len(members), scope, reps[i]["id"]))
+                stats["clusters"] += 1
+        conn.commit()
+    finally:
+        conn.close()
+    return stats
+
+
+# ── 清理 ────────────────────────────────────────────────────────────────────
+
 def prune() -> int:
-    """按保留窗清理。返回删除条数。"""
     conn = _connect()
     total = 0
     try:
@@ -130,55 +377,81 @@ def prune() -> int:
             cutoff = (datetime.now() - timedelta(hours=hours)).strftime("%Y-%m-%d %H:%M")
             cur = conn.execute("DELETE FROM items WHERE kind=? AND time<?", (kind, cutoff))
             total += cur.rowcount
+        # 清理空簇(成员被删光)
+        conn.execute("""DELETE FROM clusters WHERE cluster_id NOT IN
+                        (SELECT DISTINCT cluster_id FROM items WHERE cluster_id<>'')""")
         conn.commit()
     finally:
         conn.close()
     return total
 
 
+# ── 查询 ────────────────────────────────────────────────────────────────────
+
 def query(markets: list | None = None, kinds: list | None = None,
           info_types: list | None = None, channels: list | None = None,
           forms: list | None = None, source_ids: list | None = None,
-          since: str = "", limit: int = 200, cursor: str = "") -> tuple[list, str]:
-    """只读查询。返回 (items, next_cursor)。cursor = 上一页最后一条的 time|id。"""
+          tickers: list | None = None, sentiments: list | None = None,
+          event_types: list | None = None,
+          q: str = "", since: str = "", limit: int = 200, cursor: str = "",
+          dedup: bool = True) -> tuple[list, str]:
+    """只读查询。dedup=True(默认)只出簇代表条; q 拆词 LIKE AND。
+    cursor = "time|id" 完整 keyset(修同分钟跳项 bug)。"""
     sql, args = "SELECT * FROM items WHERE 1=1", []
+    if dedup:
+        sql += (" AND (cluster_id='' OR id IN "
+                "(SELECT representative_id FROM clusters))")
     if kinds:
         sql += f" AND kind IN ({','.join('?' * len(kinds))})"; args += kinds
     if info_types:
         sql += f" AND info_type IN ({','.join('?' * len(info_types))})"; args += info_types
+    if event_types:
+        sql += f" AND event_type IN ({','.join('?' * len(event_types))})"; args += event_types
     if channels:
         sql += f" AND channel IN ({','.join('?' * len(channels))})"; args += channels
     if forms:
         sql += f" AND form IN ({','.join('?' * len(forms))})"; args += forms
     if source_ids:
         sql += f" AND source_id IN ({','.join('?' * len(source_ids))})"; args += source_ids
+    if sentiments:
+        sql += f" AND sentiment IN ({','.join('?' * len(sentiments))})"; args += sentiments
     if since:
         sql += " AND time>?"; args.append(since)
-    if cursor:
-        sql += " AND (time<?)"; args.append(cursor.split("|")[0])
-    for mk in (markets or []):                    # markets 存 JSON 数组文本, LIKE 匹配
+    for mk in (markets or []):
         sql += " AND markets LIKE ?"; args.append(f'%"{mk}"%')
-    sql += " ORDER BY time DESC, id LIMIT ?"; args.append(min(limit, 1000) + 1)
+    for tk in (tickers or []):
+        sql += " AND tickers LIKE ?"; args.append(f'%"{tk}"%')
+    for w in [w for w in re.split(r"\s+", (q or "").strip()) if w]:
+        sql += " AND text LIKE ?"; args.append(f"%{w}%")
+    if cursor:
+        ct, _, cid = cursor.partition("|")
+        if ct and cid:                                # 完整 keyset: 同分钟不跳项
+            sql += " AND (time<? OR (time=? AND id>?))"
+            args += [ct, ct, cid]
+        elif ct:
+            sql += " AND time<?"; args.append(ct)
+    sql += " ORDER BY time DESC, id ASC LIMIT ?"
+    lim = min(limit, 1000)
+    args.append(lim + 1)
     conn = _connect()
     try:
         rows = conn.execute(sql, args).fetchall()
     finally:
         conn.close()
-    cols = ["id", "source_id", "source", "time", "text", "title", "url", "media",
-            "kind", "form", "channel", "risk", "markets", "lang", "info_type",
-            "sectors", "sentiment", "fetched_at"]
-    page = rows[:min(limit, 1000)]
-    next_cursor = f"{page[-1][3]}|{page[-1][0]}" if len(rows) > len(page) and page else ""
-    out = []
-    for r in page:
-        d = dict(zip(cols, r))
-        for k in ("markets", "sectors"):
-            try:
-                d[k] = json.loads(d[k] or "[]")
-            except Exception:
-                d[k] = []
-        out.append(d)
-    return out, next_cursor
+    page = rows[:lim]
+    next_cursor = (f"{page[-1][3]}|{page[-1][0]}"
+                   if len(rows) > len(page) and page else "")
+    return [_row_to_dict(r) for r in page], next_cursor
+
+
+def _row_to_dict(r) -> dict:
+    d = dict(zip(_COLS, r))
+    for k in ("markets", "sectors", "matched_terms", "tickers"):
+        try:
+            d[k] = json.loads(d[k] or "[]")
+        except Exception:
+            d[k] = []
+    return d
 
 
 def stats() -> dict:
@@ -188,25 +461,22 @@ def stats() -> dict:
         latest = conn.execute("SELECT MAX(time) FROM items").fetchone()[0]
         per_kind = dict(conn.execute(
             "SELECT kind, COUNT(*) FROM items GROUP BY kind").fetchall())
+        clusters = conn.execute("SELECT COUNT(*) FROM clusters").fetchone()[0]
         return {"items": n, "latest_time": latest, "per_kind": per_kind,
-                "db": str(db_path())}
+                "clusters": clusters, "db": str(db_path())}
     finally:
         conn.close()
 
 
 def export_snapshot(out_dir: Path | None = None) -> dict:
-    """全量导出: latest.json.gz + by-market/*.json.gz + manifest.json(原子替换)。"""
     dist = out_dir or (_serve_dir().parent / "dist")
     dist.mkdir(parents=True, exist_ok=True)
     conn = _connect()
     try:
-        rows = conn.execute("SELECT * FROM items ORDER BY time DESC").fetchall()
+        rows = conn.execute("SELECT * FROM items ORDER BY time DESC, id ASC").fetchall()
     finally:
         conn.close()
-    cols = ["id", "source_id", "source", "time", "text", "title", "url", "media",
-            "kind", "form", "channel", "risk", "markets", "lang", "info_type",
-            "sectors", "sentiment", "fetched_at"]
-    items = [dict(zip(cols, r)) for r in rows]
+    items = [_row_to_dict(r) for r in rows]
 
     def _write_gz(path: Path, payload: list) -> None:
         tmp = path.with_suffix(".tmp")
@@ -218,17 +488,13 @@ def export_snapshot(out_dir: Path | None = None) -> dict:
     _write_gz(dist / "latest.json.gz", items)
     by_mk: dict[str, list] = {}
     for d in items:
-        try:
-            mks = json.loads(d.get("markets") or "[]")
-        except Exception:
-            mks = []
-        for mk in (mks or ["未标注"]):
+        for mk in (d.get("markets") or ["未标注"]):
             by_mk.setdefault(mk, []).append(d)
     (dist / "by-market").mkdir(exist_ok=True)
     for mk, arr in by_mk.items():
         _write_gz(dist / "by-market" / f"{mk}.json.gz", arr)
     manifest = {"generated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                "schema_version": 1, "items": len(items),
+                "schema_version": SCHEMA_VERSION, "items": len(items),
                 "by_market": {k: len(v) for k, v in by_mk.items()}}
     tmp = dist / "manifest.json.tmp"
     tmp.write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")

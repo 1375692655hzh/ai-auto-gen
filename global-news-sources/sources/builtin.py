@@ -250,7 +250,7 @@ def _finnhub(conf):
 
 
 @source("alphavantage_news", "flash", "备用|AlphaVantage美股新闻+情绪标签(免费仅25次/天, 应急)",
-        auth="apiKey", ttl_min=60)
+        auth="apiKey", ttl_min=120)
 def _av(conf):
     return gs.fetch_alphavantage_news(int(conf.get("page_size", 30)))
 

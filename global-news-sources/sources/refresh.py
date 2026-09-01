@@ -111,6 +111,17 @@ def run(dry_run: bool = False, export: bool = True) -> dict:
                                       "new": n, "ms": int((time.time() - t0) * 1000)}
 
     rep["elapsed_s"] = int(time.time() - started)
+    # 轮末收尾: 模糊归并(不丢弃只挂簇) → M4 LLM 精标(规则兜底) → prune+快照
+    try:
+        from sources import store as _st
+        rep["dedup"] = _st.link_dups()
+    except Exception as ex:
+        rep["failures"].append(f"link_dups({type(ex).__name__}: {str(ex)[:60]})")
+    try:
+        from sources import llm_tag
+        rep["llm_tag"] = llm_tag.run(rep["started_at"])
+    except Exception as ex:
+        rep["failures"].append(f"llm_tag({type(ex).__name__}: {str(ex)[:60]})")
     ledger["round_elapsed_s"] = rep["elapsed_s"]
     ledger["round_finished_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     ledger["totals"] = {k: rep[k] for k in ("planned", "ok", "empty", "failed", "skipped", "stored")}
