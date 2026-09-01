@@ -97,8 +97,12 @@ def _access_log(kdef: dict, path: str, n: int, ms: int, status: int = 200) -> No
 def create_app():
     from fastapi import FastAPI, Request
     from fastapi.responses import JSONResponse, FileResponse
+    from fastapi.middleware.cors import CORSMiddleware
 
     app = FastAPI(title="aag-sources", version="1.0", docs_url=None, redoc_url=None)
+    # 同事的工作台若是浏览器页面直连, 需要 CORS 放行(只读 API + Key 鉴权, 内网场景)
+    app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["GET"],
+                       allow_headers=["Authorization", "X-API-Key"])
 
     @app.middleware("http")
     async def guard(request: Request, call_next):
