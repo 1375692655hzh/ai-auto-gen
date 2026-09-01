@@ -5,16 +5,26 @@
 
 import hashlib
 import json
+import os
 import time
 from pathlib import Path
 
-CACHE_DIR = Path(__file__).resolve().parents[2] / "data" / "cache" / "sources"
+
+def _cache_dir() -> Path:
+    """GNS_DATA_DIR > AAG_ROOT/data > 布局兜底(调用时求值, env 后设也生效)。"""
+    env = os.environ.get("GNS_DATA_DIR")
+    if env:
+        return Path(env) / "cache" / "sources"
+    root = os.environ.get("AAG_ROOT")
+    if root:
+        return Path(root) / "data" / "cache" / "sources"
+    return Path(__file__).resolve().parents[2] / "data" / "cache" / "sources"
 
 
 def _key(source_id: str, conf: dict) -> Path:
     raw = json.dumps(conf or {}, sort_keys=True, ensure_ascii=False)
     h = hashlib.md5(raw.encode("utf-8")).hexdigest()[:8]
-    return CACHE_DIR / f"{source_id}__{h}.json"
+    return _cache_dir() / f"{source_id}__{h}.json"
 
 
 def load(source_id: str, conf: dict, ttl_min: int) -> list | None:
@@ -33,7 +43,7 @@ def load(source_id: str, conf: dict, ttl_min: int) -> list | None:
 
 def save(source_id: str, conf: dict, items: list) -> None:
     try:
-        CACHE_DIR.mkdir(parents=True, exist_ok=True)
+        _cache_dir().mkdir(parents=True, exist_ok=True)
         _key(source_id, conf).write_text(
             json.dumps({"ts": time.time(), "items": items}, ensure_ascii=False),
             encoding="utf-8")
