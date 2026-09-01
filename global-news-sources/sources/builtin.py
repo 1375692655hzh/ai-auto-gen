@@ -141,6 +141,20 @@ def _threads_kol(conf):
     return gs.fetch_threads_kol_digest(conf)
 
 
+@source("twitter_kol_flash", "flash",
+        "X大V快讯(FxTwitter免登录池·媒体官号/数据平台/官方机构)",
+        ttl_min=30)
+def _tw_flash(conf):
+    return gs.fetch_twitter_kol(conf, mode="flash")
+
+
+@source("twitter_kol_views", "peer_article",
+        "X大V观点(FxTwitter免登录池·分析师/交易员/KOL/内部人士)",
+        ttl_min=60)
+def _tw_views(conf):
+    return gs.fetch_twitter_kol(conf, mode="views")
+
+
 @source("etnet_open", "peer_article", "etnet經濟通開市Go港股晨报(工作日08:30)", ttl_min=120)
 def _etnet(conf):
     r = ges.fetch_etnet_open()

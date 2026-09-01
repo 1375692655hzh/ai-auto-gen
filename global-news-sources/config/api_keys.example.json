@@ -1,0 +1,7 @@
+{
+  "_comment": "复制本文件为 api_keys.local.json 并换成真密钥(gitignored)。localhost 且 local 文件无键时免密。",
+  "keys": [
+    {"name": "example", "key": "ak_live_REPLACE_ME", "enabled": true,
+     "rpm": 60, "daily_items": 200000, "daily_snapshot": 10}
+  ]
+}

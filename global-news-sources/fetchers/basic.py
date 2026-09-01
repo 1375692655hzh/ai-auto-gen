@@ -308,6 +308,148 @@ def fetch_threads_kol_digest(conf: dict | None = None) -> list:
              "text": text}]
 
 
+# ── X/Twitter 大V池(源: twitter_kol_flash / twitter_kol_views) ────────────────
+# 池文件: config/twitter_pool.yaml(格式见 docs/X账号录入规范.md)
+# 通路: api.fxtwitter.com/2/profile/<handle>/statuses 免登录(2026-09-01 实测零限流)
+
+TW_POOL_DEFAULT = Path(__file__).resolve().parent.parent / "config" / "twitter_pool.yaml"
+TW_ROLE_FLASH = {"media", "data_bot", "company", "breaks"}
+TW_ROLE_VIEWS = {"analyst", "trader", "kol", "insider"}
+_TW_PRIORITY = {"high": 3, "medium": 2, "low": 1}
+
+
+def _tw_fetch_statuses(handle: str, count: int, with_replies: bool) -> list:
+    """v2 时间线一页起步(有 cursor 最多翻 3 页)。204/空结果返回 []。"""
+    params = {"count": count, "groupthreads": "true"}
+    if with_replies:
+        params["with_replies"] = "true"
+    out, cursor, pages = [], None, 0
+    while pages < 3:
+        if cursor:
+            params["cursor"] = cursor
+        r = requests.get(f"https://api.fxtwitter.com/2/profile/{handle}/statuses",
+                         params=params,
+                         headers={"User-Agent": UA, "Accept": "application/json"},
+                         timeout=15)
+        r.raise_for_status()
+        if r.status_code == 204:
+            break
+        d = r.json()
+        if d.get("code") != 200:
+            raise RuntimeError(f"fxtwitter code={d.get('code')}")
+        res = d.get("results") or []
+        out.extend(res)
+        cursor = (d.get("cursor") or {}).get("bottom") or None
+        pages += 1
+        if not cursor or not res:
+            break
+    return out
+
+
+def fetch_twitter_kol(conf: dict | None = None, mode: str = "views") -> list:
+    """X 大V池 → 标准条目流。
+
+    mode=flash : role∈{media,data_bot,company,breaks}, 逐推一条(快讯消费面)
+    mode=views : role∈{analyst,trader,kol,insider}(peer_article 消费面)
+    conf: pool_file / hours(时间窗,默认24) / markets / tiers / min_priority / count
+    异常纪律: 池文件缺失=配置故障抛; 选中账号全失败=故障抛;
+              单账号失败=跳过计数不炸池; 时间窗内没发帖=正常返回空。
+    """
+    import yaml
+    conf = conf or {}
+    pool_path = Path(str(conf.get("pool_file") or TW_POOL_DEFAULT))
+    if not pool_path.is_file():
+        raise RuntimeError(f"twitter_kol 池文件不存在: {pool_path}")
+    pool = yaml.safe_load(pool_path.read_text(encoding="utf-8")) or {}
+    # 本机追加池(分发场景): twitter_pool.local.yaml(gitignored) 的账号并入,
+    # 同 handle 覆盖池内条目——同事私加账号不动库文件, git pull 不冲突。
+    loc = pool_path.with_name("twitter_pool.local.yaml")
+    if loc.is_file():
+        try:
+            lp = yaml.safe_load(loc.read_text(encoding="utf-8")) or {}
+            extra = lp.get("accounts") or []
+            base = {str(a.get("handle", "")).lower(): a for a in (pool.get("accounts") or [])}
+            for a in extra:
+                base[str(a.get("handle", "")).lower()] = a
+            pool["accounts"] = list(base.values())
+            for k in ("defaults", "filters"):
+                if lp.get(k):
+                    merged = dict(pool.get(k) or {})
+                    merged.update(lp[k])
+                    pool[k] = merged
+        except Exception:
+            pass
+    accounts = [a for a in (pool.get("accounts") or [])
+                if a.get("enabled", True) and a.get("handle")]
+    defaults = pool.get("defaults") or {}
+    filters = pool.get("filters") or {}
+    if not accounts:
+        raise RuntimeError(f"twitter_kol 池为空: {pool_path}")
+
+    roles = TW_ROLE_FLASH if mode == "flash" else TW_ROLE_VIEWS
+    markets = {str(m).lower() for m in (conf.get("markets") or [])}
+    tiers = {str(t).lower() for t in (conf.get("tiers") or [])}
+    min_p = _TW_PRIORITY.get(str(conf.get("min_priority")
+                                 or defaults.get("min_priority") or "low").lower(), 1)
+    hours = float(conf.get("hours", 24))
+    count = int(conf.get("count") or defaults.get("per_account_limit") or 50)
+    delay = float(defaults.get("account_delay_seconds") or 1)
+    cutoff = time.time() - hours * 3600
+
+    sel = [a for a in accounts
+           if a.get("role") in roles
+           and (not markets or markets & {str(m).lower() for m in (a.get("markets") or [])})
+           and (not tiers or str(a.get("tier", "")).lower() in tiers)
+           and _TW_PRIORITY.get(str(a.get("priority", "medium")).lower(), 2) >= min_p]
+
+    inc = [k.lower() for k in (filters.get("include_keywords") or [])]
+    exc = [k.lower() for k in (filters.get("exclude_keywords") or [])]
+    bj_tz = datetime.timezone(datetime.timedelta(hours=8))
+    out, seen, failed = [], set(), []
+    for a in sel:
+        h = str(a["handle"]).lstrip("@")
+        try:
+            res = _tw_fetch_statuses(h, min(count, 100), bool(a.get("replies")))
+        except Exception as e:
+            failed.append(f"{h}({type(e).__name__}: {str(e)[:40]})")
+            time.sleep(delay)
+            continue
+        n = 0
+        for it in res:
+            posts = it.get("statuses") or [] if it.get("type") == "thread" else [it]
+            for s in posts:
+                au = s.get("author") or {}
+                if str(au.get("screen_name", "")).lower() != h.lower():
+                    continue                      # 转推/线程他人帖, 只收本人
+                if s.get("reposted_by"):
+                    continue
+                ts = s.get("created_timestamp")
+                if not isinstance(ts, (int, float)) or ts < cutoff:
+                    continue
+                sid = str(s.get("id") or "")
+                text = str(((s.get("raw_text") or {}).get("text")) or s.get("text") or "").strip()
+                if not sid or sid in seen or not text:
+                    continue
+                low = text.lower()
+                if any(k in low for k in exc):
+                    continue
+                if mode == "views" and inc and not any(k in low for k in inc):
+                    continue
+                seen.add(sid)
+                out.append({"time": datetime.datetime.fromtimestamp(ts, bj_tz).strftime("%Y-%m-%d %H:%M"),
+                            "text": f"@{au.get('screen_name', h)}: {text}",
+                            "source": f"X·{a.get('name') or au.get('name') or h}",
+                            "url": s.get("url") or f"https://x.com/{h}/status/{sid}"})
+                n += 1
+                if n >= count:
+                    break
+        time.sleep(delay)
+    if failed and len(failed) == len(sel):
+        raise RuntimeError(f"twitter_kol 全部账号失败: {', '.join(failed[:5])}")
+    out.sort(key=lambda x: x["time"])
+    return out
+
+
 REF_FETCHERS = {
     "eastmoney_zaozhidao": lambda conf: fetch_eastmoney_zaozhidao(conf.get("keywords")),
     "wscn_breakfast": lambda conf: fetch_wscn_breakfast(int(conf.get("count", 2))),

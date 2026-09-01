@@ -1,0 +1,706 @@
+# twitter_pool.yaml —— X 账号池（X账号录入规范.md 的结构化形态）
+# markets 一律用分类体系中文全称（A股/港股/美股/日本/韩国/台湾/土耳其/全球/外汇/大宗）
+defaults:
+  per_account_limit: 50
+  account_delay_seconds: 1
+  window: yesterday_start_to_now
+  min_priority: low
+filters:
+  include_keywords:
+  - piyasa
+  - borsa
+  - hisse
+  - faiz
+  - enflasyon
+  - dolar
+  - bilanço
+  - teknik analiz
+  - destek
+  - direnç
+  - hedef fiyat
+  - KAP
+  - temettü
+  - market
+  - stocks
+  - inflation
+  - Fed
+  - rates
+  - 投资
+  - 股市
+  - 利率
+  - 台股
+  - 籌碼
+  - 匯率
+  - 半導體
+  - 台積電
+  - earnings
+  - revenue
+  - guidance
+  - options
+  - ETF
+  - bitcoin
+  - BTC
+  - crypto
+  - margin
+  - capex
+  - valuation
+  - IPO
+  - NVDA
+  - tariff
+  - CPI
+  - yield
+  - Treasury
+  - Nasdaq
+  - S&P
+  - 原油
+  - 黄金
+  - 美元
+  - 美股
+  - 港股
+  exclude_keywords:
+  - giveaway
+  - merch
+  - birthday
+  - vacation
+  - meme
+  - 抽奖
+  - 生日
+  - 表情包
+accounts:
+- handle: altinhisseler
+  uid: '1204859131590516738'
+  name: ALTIN HİSSELER
+  homepage: https://x.com/altinhisseler
+  markets:
+  - 土耳其
+  role: kol
+  lang: tr
+  tier: core
+  rank: 1
+  priority: high
+  risk: medium
+  replies: false
+  note: BIST影响榜前列，财报拆解非常细致，常给目标价和逻辑，中线基本面交易者必看
+- handle: TuncayTursucu
+  uid: '864765082512838657'
+  name: Tuncay Turşucu
+  homepage: https://x.com/TuncayTursucu
+  markets:
+  - 土耳其
+  role: analyst
+  lang: tr
+  tier: core
+  rank: 2
+  priority: high
+  risk: low
+  replies: false
+  note: SPK持牌分析师，数学工程师背景，财务报表分析专业严谨（12万粉）
+- handle: fintables
+  uid: '4797162376'
+  name: Fintables
+  homepage: https://x.com/fintables
+  markets:
+  - 土耳其
+  role: data_bot
+  lang: tr
+  tier: core
+  rank: 3
+  priority: high
+  risk: medium
+  replies: false
+  note: BIST最好用的数据平台（41万粉）：财务数据/持仓/比率，决策前验证必看
+- handle: baymucize
+  uid: '1959969258'
+  name: Borsa Takipçisi
+  homepage: https://x.com/baymucize
+  markets:
+  - 土耳其
+  role: trader
+  lang: tr
+  tier: core
+  rank: 4
+  priority: high
+  risk: medium
+  replies: false
+  note: 技术图形+KAP资讯+具体买卖点，短线/波段交易党常用
+- handle: Viop_Analiz
+  uid: ''
+  verify_pending: true
+  name: VİOP Analiz
+  homepage: https://x.com/Viop_Analiz
+  markets:
+  - 土耳其
+  role: trader
+  lang: tr
+  tier: core
+  rank: 5
+  priority: high
+  risk: medium
+  replies: false
+  note: 技术+基本面结合，VİOP期货分析，期货股票双做者适用
+- handle: Borsayolundaa
+  uid: '2647570873'
+  name: BORSA YOLUNDA
+  homepage: https://x.com/Borsayolundaa
+  markets:
+  - 土耳其
+  role: kol
+  lang: tr
+  tier: core
+  rank: 6
+  priority: high
+  risk: medium
+  replies: false
+  note: 个股分析与逻辑分享，量大有深度，找潜力股的中线投资者适用
+- handle: KadirCalimbay
+  uid: '2383795543'
+  name: Kadir Çalımbay
+  homepage: https://x.com/KadirCalimbay
+  markets:
+  - 土耳其
+  role: kol
+  lang: tr
+  tier: core
+  rank: 7
+  priority: high
+  risk: medium
+  replies: false
+  note: 影响力较高（36万粉），个股点评多，有关注个股价值
+- handle: SerkannnKayaaaa
+  uid: '1737274573408591872'
+  name: Serkan Kaya | Borsa Analisti
+  homepage: https://x.com/SerkannnKayaaaa
+  markets:
+  - 土耳其
+  role: analyst
+  lang: tr
+  tier: core
+  rank: 8
+  priority: high
+  risk: medium
+  replies: false
+  note: 22年BIST经验，前İş Bankası & Garanti BBVA资深分析师
+- handle: borsaistanbul
+  uid: '1070609989'
+  name: Borsa İstanbul
+  homepage: https://x.com/borsaistanbul
+  markets:
+  - 土耳其
+  role: media
+  lang: tr
+  priority: high
+  risk: low
+  note: 交易所官方（52万粉）：收盘数据、IPO、官方公告，最权威来源
+- handle: memetsimsek
+  uid: '183665035'
+  name: Mehmet Simsek
+  homepage: https://x.com/memetsimsek
+  markets:
+  - 土耳其
+  role: insider
+  lang: tr
+  priority: high
+  risk: low
+  note: 土耳其财政部部长（263万粉），财政政策声明与宏观表态
+- handle: InvestTurkey
+  uid: '1388812572'
+  name: Invest in Türkiye
+  homepage: https://x.com/InvestTurkey
+  markets:
+  - 土耳其
+  role: media
+  lang: tr
+  priority: medium
+  risk: low
+  note: 官方投资办公室，宏观政策/投资环境/官方数据
+- handle: YFinansman
+  uid: '555978794'
+  name: Yatırım Finansman
+  homepage: https://x.com/YFinansman
+  markets:
+  - 土耳其
+  role: media
+  lang: tr
+  priority: medium
+  risk: low
+  note: 土耳其最老牌经纪商（İş Bankası系），教育性内容多
+- handle: ibrahimmturhan2
+  uid: '752888409824296960'
+  name: Ibrahim M. Turhan
+  homepage: https://x.com/ibrahimmturhan2
+  markets:
+  - 土耳其
+  role: analyst
+  lang: tr
+  priority: high
+  risk: low
+  note: 前Borsa İstanbul主席、央行前副主席，银行体系与政策权威
+- handle: AS_Akat
+  uid: '1285775534'
+  name: Asaf Savaş Akat
+  homepage: https://x.com/AS_Akat
+  markets:
+  - 土耳其
+  role: analyst
+  lang: tr
+  priority: medium
+  risk: low
+  note: 资深经济学家（37万粉），宏观政策学术深度
+- handle: guskuay
+  uid: '371894476'
+  name: Gökhan Uskuay
+  homepage: https://x.com/guskuay
+  markets:
+  - 土耳其
+  role: analyst
+  lang: tr
+  priority: medium
+  risk: low
+  note: 专业投资策略师，美元/利率/国际市场联动
+- handle: elerianm
+  uid: '332617373'
+  name: Mohamed A. El-Erian
+  homepage: https://x.com/elerianm
+  markets:
+  - 全球
+  role: analyst
+  lang: en
+  priority: medium
+  risk: low
+  note: Allianz首席经济顾问/前PIMCO CEO（388万粉），全球宏观大框架参考
+- handle: BORSAIZINDE
+  uid: '741553965444239360'
+  name: BORSA İZİNDE
+  homepage: https://x.com/BORSAIZINDE
+  markets:
+  - 土耳其
+  role: kol
+  lang: tr
+  priority: high
+  risk: medium
+  note: 潜力股跟踪、实用风格，选股思路清晰
+- handle: PiyasaTturkiye
+  uid: '1521020097292378112'
+  name: Piyasa Türkiye
+  homepage: https://x.com/PiyasaTturkiye
+  markets:
+  - 土耳其
+  role: media
+  lang: tr
+  priority: high
+  risk: medium
+  note: 市场综合分析（26万粉），市场日历与热点汇总
+- handle: muratcigerciogu
+  uid: '1173190282952814593'
+  name: Murat Ciğercioğulları
+  homepage: https://x.com/muratcigerciogu
+  markets:
+  - 土耳其
+  role: trader
+  lang: tr
+  priority: high
+  risk: medium
+  note: 技术分析、BIST100图表点评，图表分析专业
+- handle: borsanalist_
+  uid: '1053991889681158146'
+  name: BORSANALİST
+  homepage: https://x.com/borsanalist_
+  markets:
+  - 土耳其
+  role: kol
+  lang: tr
+  priority: medium
+  risk: medium
+  note: BIST分析，风格谨慎带免责声明
+- handle: taaardu
+  uid: '1451911567'
+  name: Tardu
+  homepage: https://x.com/taaardu
+  markets:
+  - 土耳其
+  role: kol
+  lang: tr
+  priority: medium
+  risk: medium
+  note: 长期投资视角（9万粉），近年聚焦 Halka Arz（IPO）与 BIST100
+- handle: barissoydan
+  uid: '25826831'
+  name: Barış Soydan
+  homepage: https://x.com/barissoydan
+  markets:
+  - 土耳其
+  role: kol
+  lang: tr
+  priority: medium
+  risk: medium
+  note: 市场评论与分析（15万粉）
+- handle: ridvanozturgut
+  uid: '497128903'
+  name: Rıdvan Özturgut
+  homepage: https://x.com/ridvanozturgut
+  markets:
+  - 土耳其
+  role: kol
+  lang: tr
+  priority: medium
+  risk: medium
+  note: 活跃市场观点（8万粉）
+- handle: BorsaAnalyst
+  uid: '325644038'
+  name: Onurcan Deger
+  homepage: https://x.com/BorsaAnalyst
+  markets:
+  - 土耳其
+  role: trader
+  lang: tr
+  priority: medium
+  risk: medium
+  note: Trader风格，技术分析为主
+- handle: tahtaci_borsa
+  uid: '1616750979235315712'
+  name: Tahtacı
+  homepage: https://x.com/tahtaci_borsa
+  markets:
+  - 土耳其
+  role: trader
+  lang: tr
+  priority: medium
+  risk: medium
+  note: 技术派活跃账号（18万粉）
+- handle: analitikyatirim
+  uid: '1669260360287678464'
+  name: ANALİTİK YATIRIM
+  homepage: https://x.com/analitikyatirim
+  markets:
+  - 土耳其
+  role: media
+  lang: tr
+  priority: high
+  risk: medium
+  note: 技术研究机构：技术+基本+takas（订单流）结合
+- handle: fonanalisti
+  uid: '1777661280569995264'
+  name: Fon Analisti | Yatırım Stratejileri
+  homepage: https://x.com/fonanalisti
+  markets:
+  - 土耳其
+  role: analyst
+  lang: tr
+  priority: high
+  risk: low
+  note: SPK持牌基金分析师，基金对比与资产配置
+- handle: data_kapital
+  uid: '1310538387011534848'
+  name: DataKapital
+  homepage: https://x.com/data_kapital
+  markets:
+  - 土耳其
+  role: media
+  lang: tr
+  priority: medium
+  risk: medium
+  note: BIST内容生产与影响分析媒体
+- handle: arifcoskun05
+  uid: '3255556330'
+  name: Arif COŞKUN (Algoritmarif)
+  homepage: https://x.com/arifcoskun05
+  markets:
+  - 土耳其
+  role: kol
+  lang: tr
+  priority: medium
+  risk: medium
+  note: 算法/量化风格（37万粉）
+- handle: Borsaemiliano
+  uid: '1319609719154233347'
+  name: Borsa Emiliano
+  homepage: https://x.com/Borsaemiliano
+  markets:
+  - 土耳其
+  role: kol
+  lang: tr
+  priority: medium
+  risk: medium
+  note: 影响榜活跃的BIST讨论账号（7万粉）
+- handle: RealUncleBrent
+  uid: '916883323418435584'
+  name: 布蘭特大叔 Uncle Brent
+  homepage: https://x.com/RealUncleBrent
+  markets:
+  - 台湾
+  role: kol
+  lang: zh
+  tier: core
+  priority: high
+  risk: medium
+  replies: false
+  note: 筹码/汇率/宏观纯资讯无荐股(Threads侧5万粉A档); X号为本人(bio互链大叔日誌)但仅9粉基本不发, 主场在Threads, X抓取仅作补充
+- handle: SemiAnalysis_
+  uid: '1745106082790318080'
+  name: SemiAnalysis
+  homepage: https://x.com/SemiAnalysis_
+  markets:
+  - 全球
+  role: media
+  lang: en
+  priority: high
+  risk: low
+  note: 半导体权威研究机构官方号(15.9万粉), 台股池KOL(阿雪等)常引用的一手源; 注意handle带下划线, @SemiAnalysis 是仿号404
+- handle: unusual_whales
+  uid: '1200616796295847936'
+  name: unusual_whales
+  homepage: https://x.com/unusual_whales
+  markets:
+  - 美股
+  role: data_bot
+  lang: en
+  tier: core
+  priority: high
+  risk: medium
+  note: 期权资金流+突发+政治经济异动(527万粉); 学速度/数据/异动
+- handle: StockMKTNewz
+  uid: '1250830691824283648'
+  name: Evan
+  homepage: https://x.com/StockMKTNewz
+  markets:
+  - 美股
+  role: media
+  lang: en
+  tier: core
+  priority: high
+  risk: medium
+  note: 美股实时快讯, 极高频+Ticker化(112万粉)
+- handle: KobeissiLetter
+  uid: '3316376038'
+  name: The Kobeissi Letter
+  homepage: https://x.com/KobeissiLetter
+  markets:
+  - 美股
+  - 全球
+  role: analyst
+  lang: en
+  tier: core
+  priority: high
+  risk: medium
+  note: 宏观数据+一句强判断(258万粉); 学数据→结论→市场意义
+- handle: litcapital
+  uid: '932630991298007041'
+  name: litquidity
+  homepage: https://x.com/litcapital
+  markets:
+  - 美股
+  role: kol
+  lang: en
+  priority: medium
+  risk: medium
+  note: 华尔街梗/金融meme/投资圈八卦(163万粉); 学人格化表达
+- handle: burrytracker
+  uid: '1539636858170122242'
+  name: Michael Burry Stock Tracker
+  homepage: https://x.com/burrytracker
+  markets:
+  - 美股
+  role: data_bot
+  lang: en
+  priority: medium
+  risk: medium
+  note: 'Tracker账号模型: 专追踪Burry/基金持仓(56万粉)'
+- handle: GRDecter
+  uid: '1281457267582177280'
+  name: Genevieve Roch-Decter, CFA
+  homepage: https://x.com/GRDecter
+  markets:
+  - 美股
+  role: kol
+  lang: en
+  priority: medium
+  risk: medium
+  note: 财经新闻+个人IP(41万粉CFA); 真人感+简单解释
+- handle: charliebilello
+  uid: '1413027896'
+  name: Charlie Bilello
+  homepage: https://x.com/charliebilello
+  markets:
+  - 美股
+  - 全球
+  role: analyst
+  lang: en
+  tier: core
+  priority: high
+  risk: low
+  note: 'P1·E1表达方式对标: 长期市场数据/历史对比/图表解释(86万粉, 实名)'
+- handle: MacroAlf
+  uid: '1344759366671589376'
+  name: Alf
+  homepage: https://x.com/MacroAlf
+  markets:
+  - 全球
+  role: analyst
+  lang: en
+  priority: low
+  risk: medium
+  note: 'P3: 宏观变量→利率-美元-资产因果链; 观点强需回到数据'
+- handle: tier10k
+  uid: '2361601055'
+  name: db
+  homepage: https://x.com/tier10k
+  markets:
+  - 美股
+  role: media
+  lang: en
+  priority: medium
+  risk: medium
+  note: 'P2: SEC文件/公告/财报快讯(104万粉); 只学压缩方式不转载'
+- handle: 10kdiver
+  uid: '1248071584713076737'
+  name: 10-K Diver
+  homepage: https://x.com/10kdiver
+  markets:
+  - 美股
+  role: analyst
+  lang: en
+  tier: core
+  priority: high
+  risk: medium
+  note: 'P1·E1+C3共用: 财报/利润率/资本开支拆成因果链(29万粉)'
+- handle: DeItaone
+  uid: '2704294333'
+  name: '*Walter Bloomberg'
+  homepage: https://x.com/DeItaone
+  markets:
+  - 美股
+  - 全球
+  role: media
+  lang: en
+  priority: low
+  risk: medium
+  note: 'P3: 快讯聚合(191万粉); 注意handle是大写I不是小写L; 快讯≠已交叉验证事实'
+- handle: citrini
+  uid: '1365809270034477069'
+  name: Citrini
+  homepage: https://x.com/citrini
+  markets:
+  - 美股
+  role: analyst
+  lang: en
+  priority: medium
+  risk: medium
+  note: 'P2: 结构性主题/行业链/二阶受益者, 主题连续剧写法'
+- handle: KawzInvests
+  uid: '1447102056481837058'
+  name: KawzInvests
+  homepage: https://x.com/KawzInvests
+  markets:
+  - 美股
+  role: kol
+  lang: en
+  tier: core
+  priority: high
+  risk: medium
+  note: 'P1·E1主结构第一对标: 单公司(NVDA)持续更新不换热点(12万粉)'
+- handle: burak_finance
+  uid: '371876593'
+  name: Burak Finance
+  homepage: https://x.com/burak_finance
+  markets:
+  - 美股
+  role: analyst
+  lang: en
+  priority: low
+  risk: medium
+  note: 'P3: 科技公司/产业趋势图表研究; 用前复核近期稳定性'
+- handle: PeterLBrandt
+  uid: '247857712'
+  name: The Factor Report
+  homepage: https://x.com/PeterLBrandt
+  markets:
+  - 全球
+  role: trader
+  lang: en
+  tier: core
+  priority: high
+  risk: medium
+  note: 'P1·E3主结构: 价格结构/情景概率/失效位置(130万粉); 不照搬价格预测'
+- handle: NorthstarCharts
+  uid: '1097211439159365632'
+  name: Northstar
+  homepage: https://x.com/northstarcharts
+  markets:
+  - 全球
+  role: trader
+  lang: en
+  tier: core
+  priority: high
+  risk: medium
+  note: 'P1·E3证据方式: 固定图表框架持续更新价格/广度/杠杆(17万粉)'
+- handle: BitcoinMagazine
+  uid: '361289499'
+  name: Bitcoin Magazine
+  homepage: https://x.com/BitcoinMagazine
+  markets:
+  - 全球
+  role: media
+  lang: en
+  tier: core
+  priority: high
+  risk: medium
+  note: 'P1·E3事件雷达: 比特币行业新闻(446万粉); 媒体号不作唯一事实来源'
+- handle: BrianFeroldi
+  uid: '61558281'
+  name: Brian Feroldi
+  homepage: https://x.com/BrianFeroldi
+  markets:
+  - 美股
+  role: analyst
+  lang: en
+  tier: core
+  priority: high
+  risk: low
+  note: 'P1·C3证据方式: 投资概念→清单/评分/可执行问题(67万粉, 实名)'
+- handle: morganhousel
+  uid: '284278132'
+  name: Morgan Housel
+  homepage: https://x.com/morganhousel
+  markets:
+  - 美股
+  role: kol
+  lang: en
+  tier: core
+  priority: high
+  risk: low
+  note: 'P1·C3表达方式: 投资心理/历史故事/长期原则(70万粉, 实名作家); 只学叙事'
+- handle: mingchikuo
+  uid: '267509471'
+  name: 郭明錤｜Ming-Chi Kuo
+  homepage: https://x.com/mingchikuo
+  markets:
+  - 全球
+  - 台湾
+  role: analyst
+  lang: en
+  tier: core
+  priority: high
+  risk: low
+  note: 'P2: 科技供应链/产品节奏一手信息(25万粉, 天风分析师); 观点需供应链披露验证'
+- handle: MikeFritzell
+  uid: '2471879203'
+  name: Michael Fritzell (Asian Century Stocks)
+  homepage: https://x.com/MikeFritzell
+  markets:
+  - 全球
+  role: analyst
+  lang: en
+  priority: medium
+  risk: medium
+  note: 'P2: 亚洲公司与区域市场研究, 英语圈覆盖较少的信息差'
+- handle: jyershixiong
+  uid: '1644184701316534273'
+  name: 交易所二师兄
+  homepage: https://x.com/jyershixiong
+  markets:
+  - 全球
+  role: kol
+  lang: zh
+  priority: low
+  risk: medium
+  note: 'P3: 亚洲市场观察, 美股叙事映射到香港/亚洲资产; 用前复核活跃度'
