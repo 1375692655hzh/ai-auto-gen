@@ -95,7 +95,7 @@
     <div id="drop" class="drop">点此选择文件,或把文件拖到这里</div>
     <input type="file" id="fileInput" multiple accept=".md,.docx" style="display:none">
     <div class="hint" style="margin-top:12px">或粘贴<b>腾讯文档</b>链接直接导入
-      (文档需开"任何人可查看";文字导入,图片不抓)。</div>
+      (OpenAPI 图文完整导出, 需本机 mcporter 已授权; 不可用时降级纯文本)。</div>
     <div style="display:flex; gap:10px;">
       <input type="text" id="docUrl" placeholder="https://docs.qq.com/doc/xxxxxx"
              style="flex:1">
@@ -213,11 +213,11 @@ async function del(name) {
 async function importDoc() {
   const url = document.getElementById('docUrl').value.trim();
   if (!url) return;
-  msg('uploadMsg','拉取腾讯文档中…','');
+  msg('uploadMsg','导出腾讯文档中(图文导出约需 10-30 秒)…','');
   const r = await (await fetch('/api/import_doc',{method:'POST',
     headers:{'Content-Type':'application/json'},body:JSON.stringify({url})})).json();
   if (r.ok) {
-    msg('uploadMsg', `已导入「${r.saved}」(${r.paragraphs} 段)`, 'ok');
+    msg('uploadMsg', `已导入「${r.saved}」(${r.mode})`, 'ok');
     document.getElementById('docUrl').value = '';
     refresh();
   } else msg('uploadMsg', r.message, 'bad');

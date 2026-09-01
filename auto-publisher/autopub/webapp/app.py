@@ -182,25 +182,38 @@ def api_delete():
 
 @app.route("/api/import_doc", methods=["POST"])
 def api_import_doc():
-    """腾讯文档链接 → 拉正文 → 存成 md 进待发队列(首行=标题, 满足 load_article 约定)。"""
+    """腾讯文档链接 → 导入待发队列。
+
+    主路径: OpenAPI 导出 docx(图文+格式全保真, 需 mcporter 已授权)。
+    降级路径: dop-api 拉纯文本存 md(仅"任何人可查看"的文档, 无图)。
+    """
     url = (request.get_json(force=True) or {}).get("url", "").strip()
     if not url:
         return jsonify({"ok": False, "message": "请粘贴腾讯文档链接"}), 400
-    import tencent_doc
-    r = tencent_doc.fetch_doc(url)
-    if not r.get("ok"):
-        return jsonify({"ok": False, "message":
-                        f"拉取失败: {r.get('error', '')}(仅支持'任何人可查看'的文档)"}), 400
     ARTICLES_DIR.mkdir(parents=True, exist_ok=True)
-    name = (r.get("title") or "腾讯文档").replace("/", "_").replace("\\", "_").lstrip(".").strip()
-    f = ARTICLES_DIR / f"{name}.md"
-    if f.exists():      # 同名不覆盖, 加时间后缀
-        from datetime import datetime
-        f = ARTICLES_DIR / f"{name}-{datetime.now():%H%M%S}.md"
-    f.write_text(f"{r['title']}\n\n{r.get('body') or ''}", encoding="utf-8")
-    return jsonify({"ok": True, "saved": f.name,
-                    "paragraphs": len(r.get("paragraphs") or []),
-                    "articles": list_articles()})
+    import import_tencent_doc
+    r = import_tencent_doc.import_doc(url, ARTICLES_DIR)
+    if r.get("ok"):
+        return jsonify({"ok": True, "saved": r["saved"], "mode": "docx(图文)",
+                        "bytes": r.get("bytes"),
+                        "articles": list_articles()})
+    # OpenAPI 不可用 → 退 dop-api 纯文本, 并如实告知差异
+    import tencent_doc
+    t = tencent_doc.fetch_doc(url)
+    if t.get("ok"):
+        name = (t.get("title") or "腾讯文档").replace("/", "_").replace("\\", "_") \
+                                    .lstrip(".").strip()
+        f = ARTICLES_DIR / f"{name}.md"
+        if f.exists():      # 同名不覆盖, 加时间后缀
+            from datetime import datetime
+            f = ARTICLES_DIR / f"{name}-{datetime.now():%H%M%S}.md"
+        f.write_text(f"{t['title']}\n\n{t.get('body') or ''}", encoding="utf-8")
+        return jsonify({"ok": True, "saved": f.name, "mode": "纯文本(无图)",
+                        "paragraphs": len(t.get("paragraphs") or []),
+                        "articles": list_articles()})
+    return jsonify({"ok": False, "message":
+                    f"导入失败。图文导出: {r.get('error', '')}; "
+                    f"纯文本降级: {t.get('error', '')}"}), 400
 
 
 # ---------- 发布 ----------
