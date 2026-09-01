@@ -57,6 +57,41 @@ def _item_id(source_id: str, it: dict) -> str:
     return hashlib.md5(f"{source_id}|{key}".encode("utf-8")).hexdigest()
 
 
+def _norm_time(raw: str, fallback: str) -> str:
+    """归一为北京时间 "YYYY-MM-DD HH:MM"(终端时效显示的生命线, 2026-09-01)。
+
+    处理: ISO8601(带T/Z) / RFC2822 / "MM-DD HH:MM" 缺年 / "HH:MM" 缺日期 /
+    空值兜底 fetched_at。无法解析时也回退 fallback, 绝不留残缺格式出库。
+    """
+    import re as _re
+    from datetime import timezone as _tz, timedelta as _td
+    s = (raw or "").strip()
+    bj = _tz(_td(hours=8))
+    try:
+        if _re.fullmatch(r"\d{4}-\d{2}-\d{2} \d{2}:\d{2}(:\d{2})?", s):
+            return s[:16]
+        if _re.match(r"\d{4}-\d{2}-\d{2}T", s):                 # ISO8601
+            dt = datetime.fromisoformat(s.replace("Z", "+00:00"))
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=bj)
+            return dt.astimezone(bj).strftime("%Y-%m-%d %H:%M")
+        if "," in s:                                   # RFC2822 (RSS pubDate)
+            from email.utils import parsedate_to_datetime
+            return parsedate_to_datetime(s).astimezone(bj).strftime("%Y-%m-%d %H:%M")
+        m = _re.fullmatch(r"(\d{1,2})-(\d{1,2}) (\d{1,2}):(\d{2})", s)   # 缺年
+        if m:
+            return f"{datetime.now().year}-{int(m[1]):02d}-{int(m[2]):02d} {int(m[3]):02d}:{m[4]}"
+        m = _re.fullmatch(r"(\d{1,2}):(\d{2})", s)                        # 缺日期
+        if m:
+            return f"{datetime.now().strftime('%Y-%m-%d')} {int(m[1]):02d}:{m[2]}"
+        m = _re.fullmatch(r"(\d{4})-(\d{2})-(\d{2})", s)                  # 只有日期
+        if m:
+            return s + " 00:00"
+    except Exception:
+        pass
+    return fallback
+
+
 def put(source_id: str, meta: dict, items: list) -> int:
     """入库(幂等)。返回新增条数。meta 提供源四标签, 逐条打平避免查询再 join。"""
     if not items:
@@ -67,7 +102,7 @@ def put(source_id: str, meta: dict, items: list) -> int:
     for it in items:
         rows.append((
             _item_id(source_id, it), source_id, it.get("source") or meta.get("title", ""),
-            it.get("time", ""), it.get("text", "") or "",
+            _norm_time(it.get("time", ""), now), it.get("text", "") or "",
             it.get("title", "") or "", it.get("url", "") or "", it.get("media", "") or "",
             meta.get("kind", ""), meta.get("form", ""), meta.get("channel", ""),
             meta.get("risk", ""),
