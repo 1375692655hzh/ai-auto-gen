@@ -180,6 +180,29 @@ def api_delete():
     return jsonify({"ok": True, "articles": list_articles()})
 
 
+@app.route("/api/import_doc", methods=["POST"])
+def api_import_doc():
+    """腾讯文档链接 → 拉正文 → 存成 md 进待发队列(首行=标题, 满足 load_article 约定)。"""
+    url = (request.get_json(force=True) or {}).get("url", "").strip()
+    if not url:
+        return jsonify({"ok": False, "message": "请粘贴腾讯文档链接"}), 400
+    import tencent_doc
+    r = tencent_doc.fetch_doc(url)
+    if not r.get("ok"):
+        return jsonify({"ok": False, "message":
+                        f"拉取失败: {r.get('error', '')}(仅支持'任何人可查看'的文档)"}), 400
+    ARTICLES_DIR.mkdir(parents=True, exist_ok=True)
+    name = (r.get("title") or "腾讯文档").replace("/", "_").replace("\\", "_").lstrip(".").strip()
+    f = ARTICLES_DIR / f"{name}.md"
+    if f.exists():      # 同名不覆盖, 加时间后缀
+        from datetime import datetime
+        f = ARTICLES_DIR / f"{name}-{datetime.now():%H%M%S}.md"
+    f.write_text(f"{r['title']}\n\n{r.get('body') or ''}", encoding="utf-8")
+    return jsonify({"ok": True, "saved": f.name,
+                    "paragraphs": len(r.get("paragraphs") or []),
+                    "articles": list_articles()})
+
+
 # ---------- 发布 ----------
 
 @app.route("/api/run", methods=["POST"])

@@ -94,6 +94,13 @@
     <div class="hint">支持 <b>.docx</b> 和 <b>.md</b>。每个文件 = 一篇;第一行/首段 = 标题,其余 = 正文。</div>
     <div id="drop" class="drop">点此选择文件,或把文件拖到这里</div>
     <input type="file" id="fileInput" multiple accept=".md,.docx" style="display:none">
+    <div class="hint" style="margin-top:12px">或粘贴<b>腾讯文档</b>链接直接导入
+      (文档需开"任何人可查看";文字导入,图片不抓)。</div>
+    <div style="display:flex; gap:10px;">
+      <input type="text" id="docUrl" placeholder="https://docs.qq.com/doc/xxxxxx"
+             style="flex:1">
+      <button class="ghost" onclick="importDoc()">导入</button>
+    </div>
     <ul id="alist" class="alist"></ul>
     <div id="uploadMsg" class="msg"></div>
   </div>
@@ -202,6 +209,18 @@ async function del(name) {
   if (!confirm('删除 '+name+'?')) return;
   await fetch('/api/delete',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name})});
   refresh();
+}
+async function importDoc() {
+  const url = document.getElementById('docUrl').value.trim();
+  if (!url) return;
+  msg('uploadMsg','拉取腾讯文档中…','');
+  const r = await (await fetch('/api/import_doc',{method:'POST',
+    headers:{'Content-Type':'application/json'},body:JSON.stringify({url})})).json();
+  if (r.ok) {
+    msg('uploadMsg', `已导入「${r.saved}」(${r.paragraphs} 段)`, 'ok');
+    document.getElementById('docUrl').value = '';
+    refresh();
+  } else msg('uploadMsg', r.message, 'bad');
 }
 
 // 发布
