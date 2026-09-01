@@ -10,6 +10,7 @@ from .futu import FutuPublisher
 from .changqiao import ChangqiaoPublisher
 from .bilibili import BilibiliPublisher
 from .douyin import DouyinPublisher
+from .weixin import WeixinPublisher
 
 REGISTRY = {
     "laohu": LaohuPublisher,
@@ -22,6 +23,7 @@ REGISTRY = {
     "changqiao": ChangqiaoPublisher,
     "bilibili": BilibiliPublisher,
     "douyin": DouyinPublisher,
+    "weixin": WeixinPublisher,
 }
 
 

@@ -14,6 +14,7 @@ platforms:
   changqiao:  {engine: autopub, title: 长桥,     verified: published}
   bilibili:   {engine: autopub, title: B站,      verified: draft}
   douyin:     {engine: autopub, title: 抖音,      verified: draft}
+  weixin:     {engine: autopub, title: 微信公众号, verified: draft}   # md→内联样式HTML注入(doocs/md 方案); 真发只存草稿, 群发人工
   laohu:      {engine: autopub, title: 老虎社区,  verified: disabled-需实名}
   zhihu:      {engine: autopub, title: 知乎专栏,  verified: disabled-风控}
   tonghuashun: {engine: autopub, title: 同花顺,   verified: placeholder}

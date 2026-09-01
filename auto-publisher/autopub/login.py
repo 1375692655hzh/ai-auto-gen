@@ -29,6 +29,7 @@ LOGIN_URLS = {                            # 登录检测落点: 发文页(登录
     "bilibili": "https://member.bilibili.com/platform/upload/video/frame",
     "douyin": "https://creator.douyin.com/creator-micro/content/upload",
     "tonghuashun": "https://t.10jqka.com.cn/",
+    "weixin": "https://mp.weixin.qq.com/",
 }
 
 
