@@ -194,6 +194,8 @@ grok 报告在首轮提交后才返回（前两轮被服务端取消），带来
 | 源 id | 给什么信息 | 市场/形态 | 作息 | 启用条件 |
 |---|---|---|---|---|
 | `threads_kol_digest` | 台股 Threads KOL 情报日报（threads-tw-monitor 项目产物的本地 digest 文件，社媒观点/资讯/分析流，含 KOL 档位标注） | 台湾 / 同行(peer_article) | 每日（跟随监控项目产出） | 无网络依赖；digest 目录自动探测（`~/threads-tw-monitor` 或桌面 exa-SKILL 备份最新份），显式配置 `digests_dir`/`THREADS_TW_DIGESTS` 无效路径会抛异常冒泡；`max_age_days`（默认 1）内无新 digest 返回空 |
+| `twitter_kol_flash` | X 大V快讯（FxTwitter 免登录 v2 池，媒体官号/数据平台/官方机构，role∈{media,data_bot,company,breaks}） | 土耳其/台湾/美股/全球 / 快讯(flash) | 滚动(池内账号推文, 24h 窗口) | 无 key；池文件 `config/twitter_pool.yaml`；conf 支持 pool_file/hours/markets/tiers/min_priority/count |
+| `twitter_kol_views` | X 大V观点（FxTwitter 免登录 v2 池，分析师/交易员/KOL/内部人士，role∈{analyst,trader,kol,insider}） | 土耳其/台湾/美股/全球 / 同行(peer_article) | 滚动(池内账号推文, 24h 窗口) | 无 key；与 flash 共池分流；views 账号过池内 include_keywords 词表 |
 
 ## 其余来源
 
