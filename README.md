@@ -6,7 +6,7 @@ AI 财经内容 **来源采集 → 生成 → 发布** 一体化工具。仓库�
 
 | 板块 | 目录 | 干什么 | 独立运行 |
 |---|---|---|---|
-| **来源** | [`global-news-sources/`](global-news-sources/) | 108 个金融信息源的注册表 + 抓取实现（快讯/公告/行情/同行文章/日历），带 TTL 缓存与健康检查 | ✅ 完全独立（`sources` 包 + `fetchers/`），配置走板块根 `config.yaml` 兜底 |
+| **来源** | [`global-news-sources/`](global-news-sources/) | 110 个金融信息源的注册表 + 抓取实现（快讯/公告/行情/同行文章/日历/X大V池），带 TTL 缓存、健康检查与四标签分类（市场/渠道/形态/风险）；含单机数据站（30min 调度刷新 → SQLite → 只读 HTTP 供数，见 global-news-sources/docs/供数服务.md） | ✅ 完全独立（`sources` 包 + `fetchers/`），配置走板块根 `config.yaml` 兜底 |
 | **工作流** | [`ai-workflow/`](ai-workflow/) | 生成引擎：`flows/` YAML 编排工作流（断点续跑/审核挂起）+ `generator/` 生成实现 + `video/` Remotion 出片 | ⚠️ 依赖板块一的 fetchers 与板块三的模型配置 |
 | **发布** | [`auto-publisher/`](auto-publisher/) | 双引擎发布：`autopub/` 浏览器自动化（10 平台，CDP 接管日常 Chrome）+ `adapters-kit/` Node API 适配器（搜狐/头条/网易/值得买）+ `publish/` 平台矩阵门面 | ✅ 基本独立（LLM 配置自给自足） |
 
@@ -15,11 +15,13 @@ AI 财经内容 **来源采集 → 生成 → 发布** 一体化工具。仓库�
 ## 快速开始
 
 ```bash
-pip install -r ai-workflow/generator/requirements.txt -r auto-publisher/autopub/requirements.txt
+pip install -r ai-workflow/generator/requirements.txt -r auto-publisher/autopub/requirements.txt -r global-news-sources/requirements.txt
 playwright install chromium
 
-python cli.py doctor                 # 环境体检（密钥/浏览器/队列/账本）
-python cli.py sources list           # 板块一: 全部 108 源 + 启用/健康状态
+python cli.py doctor                 # 环境体检（密钥/浏览器/队列/账本/依赖）
+python cli.py sources list           # 板块一: 全部 110 源 + 四标签 + 启用/健康状态
+python cli.py sources refresh        # 板块一·数据站写侧: 到期源刷新入 SQLite+快照(任务计划每30min)
+python cli.py sources serve          # 板块一·数据站读侧: 只读 HTTP 供数(默认 127.0.0.1:8787)
 python cli.py flows list             # 板块二: 全部工作流包
 python cli.py flows run morning-paper --auto   # 跑每日早报(断点续跑, 审核挂起 exit 2)
 python cli.py publish status         # 板块三: 待发队列 + 发布账本

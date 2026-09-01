@@ -64,6 +64,13 @@ def doctor(json_out: bool = False) -> int:
         checks.append(_check("playwright", True))
     except ImportError:
         checks.append(_check("playwright", False, "pip install playwright && playwright install chromium"))
+    # FastAPI(供数服务 sources serve 才需要)
+    try:
+        import fastapi, uvicorn  # noqa
+        checks.append(_check("fastapi+uvicorn(供数服务)", True))
+    except ImportError:
+        checks.append(_check("fastapi+uvicorn(供数服务)", False,
+                             "pip install fastapi uvicorn (仅 sources serve 需要)", warn=True))
     # Node(视频/API适配器用)
     try:
         v = subprocess.run(["node", "--version"], capture_output=True, text=True,
@@ -165,7 +172,11 @@ def sources_cmd(args) -> int:
     from sources import health as health_mod
 
     if args.sub == "list":
-        srcs = list_sources()
+        def _csv(v):
+            return [s.strip() for s in v.split(",") if s.strip()] if v else None
+        srcs = list_sources(markets=_csv(getattr(args, "markets", None)),
+                            channels=_csv(getattr(args, "channels", None)),
+                            forms=_csv(getattr(args, "forms", None)))
         if args.json:
             print(json.dumps(srcs, ensure_ascii=False, indent=2))
             return EXIT_OK
@@ -214,6 +225,48 @@ def sources_cmd(args) -> int:
                 print(f"[{t}] {extra + ' ' if extra else ''}{body}")
             print(f"(共 {len(items)} 条, 显示 {len(shown)})")
         return EXIT_OK
+
+    if args.sub == "gather":
+        from sources import gather_by
+        def _csv(v):
+            return [s.strip() for s in v.split(",") if s.strip()] if v else None
+        import contextlib, io
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):     # fetcher 的 print 不污染 --json 输出
+            items, failed = gather_by(markets=_csv(args.markets), kinds=_csv(args.kinds),
+                                      channels=_csv(args.channels), forms=_csv(args.forms),
+                                      source_ids=_csv(args.ids), limit=args.limit,
+                                      fresh=args.fresh)
+        if args.json:
+            print(json.dumps({"items": items, "failed": failed}, ensure_ascii=False, indent=2))
+        else:
+            for it in items[:50]:
+                print(f"[{it.get('time','')}] {it.get('source','')} {it.get('text','')[:70]}")
+            print(f"(共 {len(items)} 条; 失败/空 {len(failed)} 源)")
+            for f in failed:
+                print(f"  ⚠ {f}")
+        return EXIT_OK if items else EXIT_FAIL
+
+    if args.sub == "refresh":
+        from sources import refresh as refresh_mod
+        import contextlib, io
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):     # fetcher 的 print 不污染 --json 输出
+            rep = refresh_mod.run(dry_run=args.dry_run)
+        if args.json:
+            print(json.dumps(rep, ensure_ascii=False, indent=2))
+        else:
+            print(f"本轮: 计划 {rep.get('planned',0)} 源 / 成功 {rep.get('ok',0)} / "
+                  f"空 {rep.get('empty',0)} / 失败 {rep.get('failed',0)} / "
+                  f"跳过 {rep.get('skipped',0)} | 入库 {rep.get('stored',0)} 条 | "
+                  f"耗时 {rep.get('elapsed_s',0)}s")
+            for f in rep.get("failures", [])[:20]:
+                print(f"  ⚠ {f}")
+        return EXIT_OK if rep.get("ok") or rep.get("empty") else EXIT_FAIL
+
+    if args.sub == "serve":
+        from sources import serve
+        return serve.run(host=args.bind or args.host, port=args.port)
     return EXIT_FAIL
 
 
@@ -348,7 +401,10 @@ def main() -> int:
 
     p_src = sub.add_parser("sources", help="来源库(板块一)")
     ssub = p_src.add_subparsers(dest="sub", required=True)
-    ps_l = ssub.add_parser("list", help="全部来源+启用/健康状态")
+    ps_l = ssub.add_parser("list", help="全部来源+启用/健康状态(可按标签过滤)")
+    ps_l.add_argument("--markets", default=None, help="市场过滤, 逗号分隔(如 美股,台湾)")
+    ps_l.add_argument("--channels", default=None, help="渠道过滤, 逗号分隔")
+    ps_l.add_argument("--forms", default=None, help="形态过滤, 逗号分隔")
     ps_l.add_argument("--json", action="store_true")
     ps_c = ssub.add_parser("check", help="实抓体检(更新健康标记, dead 自动跳过可复位)")
     ps_c.add_argument("--id", default=None, help="只查指定来源")
@@ -358,6 +414,23 @@ def main() -> int:
     ps_f.add_argument("--limit", type=int, default=5)
     ps_f.add_argument("--fresh", action="store_true", help="绕过缓存")
     ps_f.add_argument("--json", action="store_true")
+    ps_g = ssub.add_parser("gather", help="按标签聚合抓取(通用版, TTL 缓存)")
+    ps_g.add_argument("--markets", default=None, help="市场过滤, 逗号分隔")
+    ps_g.add_argument("--kinds", default=None, help="kind 过滤(flash/peer_article/...)")
+    ps_g.add_argument("--channels", default=None, help="渠道过滤")
+    ps_g.add_argument("--forms", default=None, help="形态过滤")
+    ps_g.add_argument("--ids", default=None, help="只要这些源, 逗号分隔")
+    ps_g.add_argument("--limit", type=int, default=0, help="条目上限(0=不限)")
+    ps_g.add_argument("--fresh", action="store_true", help="绕过缓存")
+    ps_g.add_argument("--json", action="store_true")
+    ps_rf = ssub.add_parser("refresh", help="到期源调度刷新并写入服务库(对外供数的写侧)")
+    ps_rf.add_argument("--interval", type=int, default=30, help="调度周期分钟(仅标记, 由任务计划触发)")
+    ps_rf.add_argument("--dry-run", action="store_true", help="只输出本轮计划, 不真抓")
+    ps_rf.add_argument("--json", action="store_true")
+    ps_sv = ssub.add_parser("serve", help="只读 HTTP 供数服务(默认 127.0.0.1)")
+    ps_sv.add_argument("--host", default="127.0.0.1")
+    ps_sv.add_argument("--port", type=int, default=8787)
+    ps_sv.add_argument("--bind", default=None, help="显式绑定地址(如 0.0.0.0, 覆盖 --host)")
 
     p_fl = sub.add_parser("flows", help="生成工作流(板块二)")
     fsub = p_fl.add_subparsers(dest="sub", required=True)

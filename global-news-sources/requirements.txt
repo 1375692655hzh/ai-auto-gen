@@ -1,0 +1,5 @@
+requests>=2.31
+pyyaml>=6.0
+# 供数服务(sources serve)才需要:
+fastapi>=0.110
+uvicorn>=0.29

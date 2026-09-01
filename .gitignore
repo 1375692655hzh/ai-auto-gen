@@ -40,3 +40,11 @@ Thumbs.db
 
 # 运行时数据根(P1+ 各板块缓存/健康/运行产物/账本)
 /data/
+
+# 对外供数服务的 API 密钥(严禁提交)
+/global-news-sources/config/api_keys.local.json
+
+# 本机覆盖配置(分发场景: 同事本机调参/私加账号不进库)
+/ai-workflow/generator/config.local.yaml
+/global-news-sources/config.local.yaml
+/global-news-sources/config/twitter_pool.local.yaml

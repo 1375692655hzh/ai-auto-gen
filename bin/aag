@@ -1,0 +1,3 @@
+#!/bin/sh
+# ai-auto-gen 统一入口(macOS/Linux): ./bin/aag <doctor|sources|flows|publish|video> ...
+exec python3 "$(dirname "$0")/../cli.py" "$@"

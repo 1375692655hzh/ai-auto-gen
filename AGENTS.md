@@ -15,7 +15,10 @@
 | 命令 | 作用 | 副作用 |
 |---|---|---|
 | `python cli.py doctor [--json]` | 环境体检（密钥/浏览器/队列/账本） | 无 |
-| `python cli.py sources list/check/fetch <id>` | 来源库（107 源+健康+缓存） | `check/fetch` 会请求外网 |
+| `python cli.py sources list/check/fetch <id>` | 来源库（110 源+四标签+健康+缓存，list 支持 --markets/--channels/--forms 过滤） | `check/fetch` 会请求外网 |
+| `python cli.py sources gather [--markets/--ids/--fresh] [--json]` | 按标签聚合抓取（显式 --ids 不受 enabled 约束） | 会请求外网（TTL 内走缓存） |
+| `python cli.py sources refresh [--dry-run]` | 数据站写侧：到期源调度刷新→SQLite 服务库+快照（详见 global-news-sources/docs/供数服务.md） | **真抓外网**，任务计划每 30min 触发 |
+| `python cli.py sources serve [--bind/--port]` | 数据站读侧：只读 HTTP 供数（默认 127.0.0.1:8787，Bearer Key 鉴权） | 常驻进程 |
 | `python cli.py flows list/lint/run <wf>/status/new/export/import` | 生成工作流（断点续跑/审核挂起 exit 2） | `run` 会调 LLM |
 | `python cli.py gen <args>` | 生成模块透传（旧入口，等价 flows） | `run` 会调 LLM |
 | `python cli.py publish status [--json]` | 待发队列 + 发布账本 | 无 |
