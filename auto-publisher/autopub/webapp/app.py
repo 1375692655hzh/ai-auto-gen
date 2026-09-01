@@ -22,6 +22,7 @@ sys.path.insert(0, str(ROOT))
 
 import yaml
 import llm
+import tdoc_client
 from state import State
 from publishers import REGISTRY
 
@@ -148,6 +149,37 @@ def api_model_save():
 def api_model_test():
     ok, msg = llm.test_connection()
     return jsonify({"ok": ok, "message": msg})
+
+
+# ---------- 腾讯文档授权 ----------
+
+_tdoc_code = {"code": ""}       # 本会话的授权 code(auth_start 发起, auth_poll 轮询)
+
+
+@app.route("/api/tdoc/status")
+def api_tdoc_status():
+    return jsonify({"authorized": bool(tdoc_client.load_token())})
+
+
+@app.route("/api/tdoc/auth_start", methods=["POST"])
+def api_tdoc_auth_start():
+    code = tdoc_client.make_auth_code()
+    _tdoc_code["code"] = code
+    return jsonify({"ok": True, "url": tdoc_client.auth_url(code)})
+
+
+@app.route("/api/tdoc/auth_poll")
+def api_tdoc_auth_poll():
+    code = _tdoc_code["code"]
+    if not code:
+        return jsonify({"done": False, "message": "请先点'去授权'"})
+    st, val = tdoc_client.poll_token(code)
+    if st == "ok":
+        tdoc_client.save_token(val)
+        return jsonify({"done": True, "message": "授权成功, 可以图文导入了"})
+    if st == "error":
+        return jsonify({"done": False, "error": val})
+    return jsonify({"done": False, "message": "等待浏览器完成授权…"})
 
 
 # ---------- 文章 ----------

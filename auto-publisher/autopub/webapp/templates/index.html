@@ -95,7 +95,8 @@
     <div id="drop" class="drop">点此选择文件,或把文件拖到这里</div>
     <input type="file" id="fileInput" multiple accept=".md,.docx" style="display:none">
     <div class="hint" style="margin-top:12px">或粘贴<b>腾讯文档</b>链接直接导入
-      (OpenAPI 图文完整导出, 需本机 mcporter 已授权; 不可用时降级纯文本)。</div>
+      (授权后图文完整导出 docx; 未授权自动降级纯文本)。</div>
+    <div id="tdocStat" class="hint"></div>
     <div style="display:flex; gap:10px;">
       <input type="text" id="docUrl" placeholder="https://docs.qq.com/doc/xxxxxx"
              style="flex:1">
@@ -169,6 +170,8 @@ async function refresh() {
   const running = DATA.running;
   document.getElementById('runBtn').disabled = running;
   document.getElementById('stopBtn').style.display = running ? 'inline-block' : 'none';
+  // 腾讯文档授权状态(轻接口, 每次刷新顺带更新)
+  tdocStatus();
 }
 
 async function saveModel() {
@@ -221,6 +224,26 @@ async function importDoc() {
     document.getElementById('docUrl').value = '';
     refresh();
   } else msg('uploadMsg', r.message, 'bad');
+}
+
+// 腾讯文档授权(扫码一次, 之后长期有效)
+async function tdocStatus() {
+  const s = await (await fetch('/api/tdoc/status')).json();
+  const el = document.getElementById('tdocStat');
+  el.innerHTML = s.authorized
+    ? '✅ 腾讯文档已授权(图文完整导出)'
+    : '⚠️ 腾讯文档未授权(导入将降级为纯文本) <button class="ghost" onclick="tdocAuth()">去授权</button>';
+}
+async function tdocAuth() {
+  const r = await (await fetch('/api/tdoc/auth_start',{method:'POST'})).json();
+  window.open(r.url, '_blank');
+  const el = document.getElementById('tdocStat');
+  el.innerHTML = '⏳ 已打开授权页, 请用 QQ/微信 扫码(自动检测, 完成前勿关本页)…';
+  const t = setInterval(async () => {
+    const p = await (await fetch('/api/tdoc/auth_poll')).json();
+    if (p.done) { clearInterval(t); tdocStatus(); }
+    else if (p.error) { clearInterval(t); el.innerHTML = '❌ 授权失败: '+p.error; }
+  }, 3000);
 }
 
 // 发布

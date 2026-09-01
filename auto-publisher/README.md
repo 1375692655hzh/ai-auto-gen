@@ -10,6 +10,8 @@ autopub/            浏览器发布引擎(10 平台, CDP 接管用户日常 Chro
   publish_video.py  B站/抖音视频投稿
   login.py          一键登录(弹浏览器人工扫码)
   webapp/           Flask 本地控制台(127.0.0.1:5001, 模型配置/账本/队列)
+  tdoc_client.py    腾讯文档 OpenAPI 直连客户端(内置授权向导, 无外部依赖)
+  import_tencent_doc.py  腾讯文档链接→docx 图文导入(详见 腾讯文档导入指南.md)
   state.json        发布账本(防重发唯一依据, 原子写+损坏熔断, 不手编)
   articles/         待发队列(发完全平台自动归档 _done/)
 adapters-kit/       Node API 适配器(搜狐/头条/网易/值得买; 92 单测)
