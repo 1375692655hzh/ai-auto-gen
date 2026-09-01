@@ -439,7 +439,9 @@ def fetch_twitter_kol(conf: dict | None = None, mode: str = "views") -> list:
                 out.append({"time": datetime.datetime.fromtimestamp(ts, bj_tz).strftime("%Y-%m-%d %H:%M"),
                             "text": f"@{au.get('screen_name', h)}: {text}",
                             "source": f"X·{a.get('name') or au.get('name') or h}",
-                            "url": s.get("url") or f"https://x.com/{h}/status/{sid}"})
+                            "url": s.get("url") or f"https://x.com/{h}/status/{sid}",
+                            "author_role": a.get("role") or "",
+                            "author_handle": au.get("screen_name") or h})
                 n += 1
                 if n >= count:
                     break

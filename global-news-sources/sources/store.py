@@ -23,16 +23,17 @@ from pathlib import Path
 
 from sources import tagger as _tagger
 
-KIND_TO_INFO_TYPE = {"flash": "news", "peer_article": "insight",
+KIND_TO_INFO_TYPE = {"flash": "news", "peer_article": "analysis",
                      "announcement": "filing", "market": "data", "calendar": "calendar"}
 RETENTION_HOURS = {"flash": 48, "peer_article": 24 * 7, "announcement": 24 * 7,
                    "market": 24 * 7, "calendar": 24 * 7}
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 _COLS = ["id", "source_id", "source", "time", "text", "title", "url", "media",
          "kind", "form", "channel", "risk", "markets", "lang", "info_type",
          "sectors", "sentiment", "fetched_at",
          "canonical_url", "title_norm", "cluster_id", "dup_count", "dup_scope",
-         "published_at_known", "matched_terms", "tickers", "event_type"]
+         "published_at_known", "matched_terms", "tickers", "event_type",
+         "author_role", "author_handle"]
 
 
 def _serve_dir() -> Path:
@@ -73,10 +74,14 @@ def _migrate(conn: sqlite3.Connection) -> None:
                 "dup_scope": "TEXT DEFAULT 'none'",
                 "published_at_known": "INTEGER DEFAULT 1",
                 "matched_terms": "TEXT DEFAULT '[]'", "tickers": "TEXT DEFAULT '[]'",
-                "event_type": "TEXT DEFAULT ''"}
+                "event_type": "TEXT DEFAULT ''",
+                "author_role": "TEXT DEFAULT ''", "author_handle": "TEXT DEFAULT ''"}
     for c, t in new_cols.items():
         if c not in have:
             conn.execute(f"ALTER TABLE items ADD COLUMN {c} {t}")
+    # 2026-09-02 六值裁决: 存量 rating/insight/stance 一次性并入 analysis
+    conn.execute("UPDATE items SET info_type='analysis' "
+                 "WHERE info_type IN ('insight','rating','stance')")
     conn.execute("""CREATE TABLE IF NOT EXISTS clusters(
         cluster_id TEXT PRIMARY KEY, kind TEXT, representative_id TEXT,
         first_seen TEXT, last_seen TEXT, report_count INTEGER DEFAULT 1,
@@ -219,6 +224,20 @@ def _item_id(source_id: str, canon: str, text: str) -> str:
 
 # ── 入库 ────────────────────────────────────────────────────────────────────
 
+def _decide_info_type(it: dict, kind: str, text: str) -> str:
+    """六值类型瀑布(2026-09-02 裁决): fetcher显式 > rumor否决 > kind锁 > 观点信号 > 缺省。"""
+    if it.get("info_type"):
+        return it["info_type"]
+    if _tagger.rumor_hit(text):
+        return "rumor"
+    locked = {"announcement": "filing", "market": "data", "calendar": "calendar"}.get(kind)
+    if locked:
+        return locked
+    if kind in ("flash", "peer_article") and _tagger.opinion_hit(text):
+        return "analysis"
+    return KIND_TO_INFO_TYPE.get(kind, "news")
+
+
 def put(source_id: str, meta: dict, items: list) -> int:
     """入库(幂等 + 规则打标 + 精确去重)。返回新增条数。"""
     if not items:
@@ -241,13 +260,14 @@ def put(source_id: str, meta: dict, items: list) -> int:
             kind, meta.get("form", ""), meta.get("channel", ""), meta.get("risk", ""),
             json.dumps(it.get("markets") or meta.get("markets") or [], ensure_ascii=False),
             meta.get("lang", ""),
-            it.get("info_type") or info_default,
+            _decide_info_type(it, kind, text),
             json.dumps(sectors, ensure_ascii=False),
             it.get("sentiment") or tag["sentiment"], now,
             canon, t_norm, "", 1, "none", t_known,
             json.dumps(tag["matched_terms"], ensure_ascii=False),
             json.dumps(it.get("tickers") or tag["tickers"], ensure_ascii=False),
-            it.get("event_type") or tag["event_type"]))
+            it.get("event_type") or tag["event_type"],
+            it.get("author_role") or "", it.get("author_handle") or ""))
     sql = ("INSERT OR IGNORE INTO items(" + ",".join(_COLS) + ") VALUES(" +
            ",".join("?" * len(_COLS)) + ")")
     conn = _connect()

@@ -4,7 +4,7 @@
 词典为冷启动种子(2026-09-01), 持续维护: 直接改 TICKERS/别名/blocklist。
 设计参照 numichart-news 三通道(代码/名称/别名) + newsboard 关键词分类,
 按中文场景改造(裸词通道不可用于中文, 以公司名/代码匹配为主)。
-insight 类(peer_article)不打赛道(2026-09-01 用户裁决), 但 ticker/事件/情绪照打。
+2026-09-02 裁决: 全类型一视同仁打赛道/情绪/ticker(含分析类, 无类型豁免)。
 """
 
 import re
@@ -156,6 +156,24 @@ def enrich(text: str, kind: str = "") -> dict:
         out["sentiment"] = "bearish"
     elif out["event_type"] in _EVENT_SENT:
         out["sentiment"] = _EVENT_SENT[out["event_type"]]
-    if kind == "peer_article":                        # insight 类不打赛道(用户裁决)
-        out["sectors"] = []
     return out
+
+
+# ── 类型瀑布用的内容信号(store.put 调用, 2026-09-02 六值裁决) ───────────────
+
+_RUMOR_RE = re.compile(r"据传|传言|据悉|消息人士|未经证实|未经确认|rumor|reportedly|"
+                       r"unconfirmed|听说|坊间|爆料", re.I)
+_OPINION_RE = re.compile(r"我认为|我看|看多|看空|预计|预期|建议|估值|目标价|评级|"
+                         r"上调|下调|研报|解读|复盘|分析|观点|overweight|underweight|"
+                         r"upgrade|downgrade|outperform|underperform|price target|"
+                         r"hedef fiyat|analiz|tavsiye", re.I)
+
+
+def rumor_hit(text: str) -> bool:
+    """命中未证实标记(传言层, 类型瀑布第2层)。"""
+    return bool(text) and bool(_RUMOR_RE.search(text))
+
+
+def opinion_hit(text: str) -> bool:
+    """命中判断性信号(评级/观点/推演词, 类型瀑布观点层→analysis)。"""
+    return bool(text) and bool(_OPINION_RE.search(text))

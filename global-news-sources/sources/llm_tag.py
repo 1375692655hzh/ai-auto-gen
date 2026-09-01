@@ -17,8 +17,9 @@ DEFAULT_MODEL = "deepseek-v4-flash"
 BATCH = 20
 MAX_CHARS = 1500
 
-_SYS = """你是财经信息打标器。对每条输入输出: sectors(赛道数组, 形如"板块>赛道", 板块从[宏观与政策/半导体/AI与算力/互联网与传媒/消费电子/通信与卫星/汽车与智能驾驶/新能源与电力/油气与能源/金属与矿业/化工与新材料/医药生物/金融与加密/地产与基建/消费/军工与航空航天/工业与机器人/交通运输/农业与食品]选, 无赛道属性给[])、sentiment(bullish/bearish/neutral)、event_type(从[earnings/guidance/rating/mna/dividend/offering/fda/legal/policy/macro/contract/personnel/product]选, 都不是给"")。
-只输出 JSON 数组, 每个元素 {"i":序号, "sectors":[...], "sentiment":"...", "event_type":"..."}, 不要任何多余文字。"""
+_SYS = """你是财经信息打标器。对每条输入输出: sectors(赛道数组, 形如"板块>赛道", 板块从[宏观与政策/半导体/AI与算力/互联网与传媒/消费电子/通信与卫星/汽车与智能驾驶/新能源与电力/油气与能源/金属与矿业/化工与新材料/医药生物/金融与加密/地产与基建/消费/军工与航空航天/工业与机器人/交通运输/农业与食品]选, 无赛道属性给[])、sentiment(bullish/bearish/neutral)、event_type(从[earnings/guidance/rating/mna/dividend/offering/fda/legal/policy/macro/contract/personnel/product]选, 都不是给"")、type(内容类型纠偏: 客观事实报道给news, 含主观研判/评级/目标价/推演/观点给analysis, 拿不准给""不改动)。
+所有条目一视同仁——分析/观点/研报/KOL帖同样必须输出 sectors 与 sentiment。
+只输出 JSON 数组, 每个元素 {"i":序号, "sectors":[...], "sentiment":"...", "event_type":"...", "type":"..."}, 不要任何多余文字。"""
 
 
 def _conf() -> dict:
@@ -109,6 +110,7 @@ def run(since_fetched_at: str) -> dict:
                     sent = d.get("sentiment") if d.get("sentiment") in (
                         "bullish", "bearish", "neutral") else ""
                     etype = d.get("event_type") or ""
+                    ttype = d.get("type") if d.get("type") in ("news", "analysis") else ""
                     sets, args = [], []
                     if sectors:
                         sets.append("sectors=?")
@@ -117,6 +119,8 @@ def run(since_fetched_at: str) -> dict:
                         sets.append("sentiment=?"); args.append(sent)
                     if etype:
                         sets.append("event_type=?"); args.append(etype)
+                    if ttype:                          # 仅允许 news↔analysis 纠偏
+                        sets.append("info_type=?"); args.append(ttype)
                     if sets:
                         conn.execute(
                             f"UPDATE items SET {','.join(sets)} WHERE id=?",
