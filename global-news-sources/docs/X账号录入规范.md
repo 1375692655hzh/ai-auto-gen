@@ -179,7 +179,11 @@ accounts:
 
 **失败清单(按规范不猜 handle, 留待用户提供更正)**:
 - `@Jukanlosreve` — 双通路(RSS+v2) 404, 疑似改名/注销。调研文档标注"韩国存储/HBM供应链·粉丝未读取到", 高价值账号, 建议用户核实新 handle。
-- `@FoolAllTheTime`(Fabricated Knowledge) / `@SuperMugatu`(Dan McMurtrie) — 双通路 500, FxTwitter 对其内容解析故障, 账号本身在册活跃。标 verify_pending 暂缓录入, 后续重验。
+- ~~`@FoolAllTheTime`(Fabricated Knowledge) / `@SuperMugatu`(Dan McMurtrie) — 双通路 500~~ **2026-09-03 grok 核实结案**: 500 根因是两个号都设了 **protected(私密)**, FxTwitter 无法解析。SuperMugatu 确认=Dan McMurtrie 本人(蓝标, 近帖 2026-07); FoolAllTheTime 确认=Doug O'Laughlin 本人但私密不活跃, 其公开发言已迁品牌号 → 改录 **@fabknowledge**(Fabricated Knowledge 品牌号, 3.4万粉, 活跃)。
+
+**2026-09-03 二次勘误(grok 联网核实 + 复验)**:
+- `@biancoresearch` **撤回昨日勘误**: 该 handle 就是 **Jim Bianco 本人**(uid 188369814, 77万粉)。昨日误判根因=验号脚本取首条结果 author, 撞上转推陷阱(首条是 Josh Young 的转推)。已按 handle 匹配逻辑复验修正。
+- `@Jukanlosreve` 404 **已定位新号**: 改名 **@jukan05**(uid 1836240683268759552, 20.8万粉, 本人声明+xo2改名记录双重证实), 已补录, markets=[韩国,全球], tier=core。
 
 **调研文档勘误**: `@biancoresearch` 实为 **Josh Young(Bison Interests, 油气股投资人, 13.7万粉)**, 非文档所标 Jim Bianco(利率/债市, 76.8万粉)——粉丝数与 bio 双重不符, 已按实际身份录入 markets=[美股,大宗]。
 

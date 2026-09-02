@@ -1237,19 +1237,19 @@ accounts:
   replies: false
   note: 'RIA首席策略(10万粉): 宏观+组合管理'
 - handle: biancoresearch
-  uid: '28626088'
-  name: Josh Young (Bison Interests)
+  uid: '188369814'
+  name: Jim Bianco
   homepage: https://x.com/biancoresearch
   markets:
   - 美股
-  - 大宗
+  - 全球
   role: analyst
   lang: en
   tier: ext
-  priority: medium
+  priority: high
   risk: low
   replies: false
-  note: '油气股专业投资人(Bison Interests, 13.7万粉): 能源个股+财报解读; 注意调研文档误标为Jim Bianco(利率/债市)——该handle实为Josh Young, Jim Bianco真实handle待用户确认后再录'
+  note: 'Bianco Research 创始人(77万粉): 利率/债市宏观日更, 图表专业; 勘误2026-09-03: 昨日验号脚本将首条转推(Josh Young)误认作者, 已修正'
 - handle: buffett_taro
   uid: '720578402135068673'
   name: バフェット太郎
@@ -1659,6 +1659,34 @@ accounts:
   risk: low
   replies: false
   note: '洪灝(35万粉): 华语圈唯一X破30万宏观, 以英文为主'
+- handle: jukan05
+  uid: '1836240683268759552'
+  name: Jukan
+  homepage: https://x.com/jukan05
+  markets:
+  - 韩国
+  - 全球
+  role: analyst
+  lang: en
+  tier: core
+  priority: high
+  risk: low
+  replies: false
+  note: '原@Jukanlosreve改名(2026-09-03 grok核实改名记录+本人声明): 韩国存储/HBM供应链韩文消息英文化(20.8万粉), 三星/海力士一手渠道; 语言套利范式标杆, 半导体链核心源'
+- handle: fabknowledge
+  uid: '1440064744107298826'
+  name: Fabricated Knowledge
+  homepage: https://x.com/fabknowledge
+  markets:
+  - 美股
+  - 全球
+  role: media
+  lang: en
+  tier: ext
+  priority: medium
+  risk: low
+  replies: false
+  note: 'Doug O''Laughlin 半导体通讯品牌号(3.4万粉, SemiAnalysis 团伙): 化工/材料/半导体深度; 个人号 @FoolAllTheTime 私密不活跃(FxTwitter 500), 公开发言集中此号'
 defaults:
   per_account_limit: 50
   account_delay_seconds: 1
