@@ -122,6 +122,11 @@ def run(dry_run: bool = False, export: bool = True) -> dict:
         rep["llm_tag"] = llm_tag.run(rep["started_at"])
     except Exception as ex:
         rep["failures"].append(f"llm_tag({type(ex).__name__}: {str(ex)[:60]})")
+    try:
+        from sources import translate
+        rep["translate"] = translate.run(rep["started_at"])
+    except Exception as ex:
+        rep["failures"].append(f"translate({type(ex).__name__}: {str(ex)[:60]})")
     ledger["round_elapsed_s"] = rep["elapsed_s"]
     ledger["round_finished_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     ledger["totals"] = {k: rep[k] for k in ("planned", "ok", "empty", "failed", "skipped", "stored")}

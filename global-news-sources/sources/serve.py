@@ -152,7 +152,7 @@ def create_app():
               sources: str = "", tickers: str = "", sentiments: str = "",
               event_types: str = "", q: str = "",
               since: str = "", limit: int = 200, cursor: str = "",
-              dedup: int = 1):
+              dedup: int = 1, display: int = 1):
         csv = lambda v: [s.strip() for s in v.split(",") if s.strip()] or None
         out, nxt = _store.query(markets=csv(markets), kinds=csv(kinds),
                                 info_types=csv(info_types), channels=csv(channels),
@@ -161,6 +161,12 @@ def create_app():
                                 event_types=csv(event_types),
                                 q=q, since=since, limit=limit, cursor=cursor,
                                 dedup=bool(dedup))
+        if display:                               # 中文用户默认: text/title 换成译文
+            for d in out:
+                if d.get("text_display") and d["text_display"] != d.get("text"):
+                    d["text_src"], d["text"] = d["text"], d["text_display"]
+                if d.get("title_display") and d["title_display"] != d.get("title"):
+                    d["title_src"], d["title"] = d["title"], d["title_display"]
         why = _check_quota(request.state.kdef, cost_items=len(out))
         if why:
             return JSONResponse({"error": why}, status_code=429,

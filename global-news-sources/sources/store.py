@@ -27,13 +27,14 @@ KIND_TO_INFO_TYPE = {"flash": "news", "peer_article": "analysis",
                      "announcement": "filing", "market": "data", "calendar": "calendar"}
 RETENTION_HOURS = {"flash": 48, "peer_article": 24 * 7, "announcement": 24 * 7,
                    "market": 24 * 7, "calendar": 24 * 7}
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 _COLS = ["id", "source_id", "source", "time", "text", "title", "url", "media",
          "kind", "form", "channel", "risk", "markets", "lang", "info_type",
          "sectors", "sentiment", "fetched_at",
          "canonical_url", "title_norm", "cluster_id", "dup_count", "dup_scope",
          "published_at_known", "matched_terms", "tickers", "event_type",
-         "author_role", "author_handle"]
+         "author_role", "author_handle",
+         "text_zh", "title_zh", "lang_detected", "zh_status", "zh_attempts"]
 
 
 def _serve_dir() -> Path:
@@ -75,10 +76,16 @@ def _migrate(conn: sqlite3.Connection) -> None:
                 "published_at_known": "INTEGER DEFAULT 1",
                 "matched_terms": "TEXT DEFAULT '[]'", "tickers": "TEXT DEFAULT '[]'",
                 "event_type": "TEXT DEFAULT ''",
-                "author_role": "TEXT DEFAULT ''", "author_handle": "TEXT DEFAULT ''"}
+                "author_role": "TEXT DEFAULT ''", "author_handle": "TEXT DEFAULT ''",
+                "text_zh": "TEXT DEFAULT ''", "title_zh": "TEXT DEFAULT ''",
+                "lang_detected": "TEXT DEFAULT ''", "zh_status": "TEXT DEFAULT ''",
+                "zh_attempts": "INTEGER DEFAULT 0"}
     for c, t in new_cols.items():
         if c not in have:
             conn.execute(f"ALTER TABLE items ADD COLUMN {c} {t}")
+    conn.execute("""CREATE TABLE IF NOT EXISTS zh_cache(
+        text_hash TEXT PRIMARY KEY, text_zh TEXT, title_zh TEXT,
+        model TEXT, created_at TEXT)""")
     # 2026-09-02 六值裁决: 存量 rating/insight/stance 一次性并入 analysis
     conn.execute("UPDATE items SET info_type='analysis' "
                  "WHERE info_type IN ('insight','rating','stance')")
@@ -259,7 +266,7 @@ def put(source_id: str, meta: dict, items: list) -> int:
             it.get("title", "") or "", it.get("url", "") or "", it.get("media", "") or "",
             kind, meta.get("form", ""), meta.get("channel", ""), meta.get("risk", ""),
             json.dumps(it.get("markets") or meta.get("markets") or [], ensure_ascii=False),
-            meta.get("lang", ""),
+            it.get("lang") or meta.get("lang", ""),
             _decide_info_type(it, kind, text),
             json.dumps(sectors, ensure_ascii=False),
             it.get("sentiment") or tag["sentiment"], now,
@@ -267,7 +274,8 @@ def put(source_id: str, meta: dict, items: list) -> int:
             json.dumps(tag["matched_terms"], ensure_ascii=False),
             json.dumps(it.get("tickers") or tag["tickers"], ensure_ascii=False),
             it.get("event_type") or tag["event_type"],
-            it.get("author_role") or "", it.get("author_handle") or ""))
+            it.get("author_role") or "", it.get("author_handle") or "",
+            "", "", "", "", 0))
     sql = ("INSERT OR IGNORE INTO items(" + ",".join(_COLS) + ") VALUES(" +
            ",".join("?" * len(_COLS)) + ")")
     conn = _connect()
@@ -442,7 +450,8 @@ def query(markets: list | None = None, kinds: list | None = None,
     for tk in (tickers or []):
         sql += " AND tickers LIKE ?"; args.append(f'%"{tk}"%')
     for w in [w for w in re.split(r"\s+", (q or "").strip()) if w]:
-        sql += " AND text LIKE ?"; args.append(f"%{w}%")
+        sql += " AND (text LIKE ? OR text_zh LIKE ? OR title_zh LIKE ?)"
+        args += [f"%{w}%", f"%{w}%", f"%{w}%"]
     if cursor:
         ct, _, cid = cursor.partition("|")
         if ct and cid:                                # 完整 keyset: 同分钟不跳项
@@ -471,6 +480,10 @@ def _row_to_dict(r) -> dict:
             d[k] = json.loads(d[k] or "[]")
         except Exception:
             d[k] = []
+    # 展示字段(中文用户): 有译文用译文, 无译文回落原文
+    d["text_display"] = d["text_zh"] if d.get("zh_status") in ("ok", "partial") \
+        and d.get("text_zh") else d["text"]
+    d["title_display"] = d["title_zh"] if d.get("title_zh") else d.get("title", "")
     return d
 
 

@@ -441,7 +441,8 @@ def fetch_twitter_kol(conf: dict | None = None, mode: str = "views") -> list:
                             "source": f"X·{a.get('name') or au.get('name') or h}",
                             "url": s.get("url") or f"https://x.com/{h}/status/{sid}",
                             "author_role": a.get("role") or "",
-                            "author_handle": au.get("screen_name") or h})
+                            "author_handle": au.get("screen_name") or h,
+                            "lang": a.get("lang") or ""})
                 n += 1
                 if n >= count:
                     break

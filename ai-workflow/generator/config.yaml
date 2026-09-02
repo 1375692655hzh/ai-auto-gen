@@ -1,50 +1,36 @@
-# 文章生成模块配置
-
-# 输出位置
 output:
-  # 生成的正式文章直接进发布系统的待发目录
   articles_dir: ../../auto-publisher/autopub/articles
-  # 长图产物(图片, 发布侧可见; 不进 articles 队列)
   images_dir: ../../auto-publisher/autopub/images
-  # 口播稿(不发布)与过程产物
   scripts_dir: output/口播
   research_dir: output/research
-
-# 信息源(都关掉就没素材了)
 sources:
-  sina_7x24:            # 新浪财经 7×24 直播快讯
+  sina_7x24:
     enabled: true
     page_size: 100
-  eastmoney_fast:       # 东方财富财经快讯
+  eastmoney_fast:
     enabled: true
     page_size: 50
-  # ↓ 同行早报文章:吸收结构与选题,再叠加最新快讯,价值高于纯快讯堆砌
-  eastmoney_zaozhidao:  # 东财搜索同行早报(新华财经/证券时报《早知道》系列)
+  eastmoney_zaozhidao:
     enabled: true
-    keywords: ["早知道"]
-  wscn_breakfast:       # 华尔街见闻早餐系列
+    keywords:
+    - 早知道
+  wscn_breakfast:
     enabled: true
     count: 2
-
-# 早报
+  translate:
+    enabled: true
+    model: deepseek-v4-flash
+    batch: 10
+    max_chars: 1500
+    round_cap: 120
 morning:
-  # 每次送给模型的最大条数(全部来源合并后取最新 N 条)
   max_items: 60
   article_hint: 800-1200字,分板块,每条要闻带时间
-  script_seconds: 90    # 口播稿时长(秒),约每分钟260字
-
-# AI财经日报(逐条详情模式)
+  script_seconds: 90
 daily:
-  items: 15           # 每日条数
-
-# 分析文章
+  items: 15
 analysis:
-  max_items: 80         # 锁定信息时最多送多少条快讯做相关性筛选
-  min_related_items: 3  # 相关条目少于此数则提示素材不足(仍可继续)
+  max_items: 80
+  min_related_items: 3
   article_hint: 1500-2500字,深度分析,有观点有论据
   script_seconds: 120
-
-# 模型 API 不在这里配 —— 复用 autopub 的配置:
-#   网页控制台(http://127.0.0.1:5001)「模型 API 设置」,或
-#   环境变量 AUTOPUB_API_KEY + autopub/config.yaml 的 model: 段,或
-#   直接写 autopub/secret.local.json
