@@ -36,6 +36,13 @@ PUB = ROOT / "auto-publisher"             # 板块三: 发布
 AUTOPUB = PUB / "autopub"
 EXIT_OK, EXIT_HUMAN, EXIT_FAIL, EXIT_CONFIG = 0, 2, 3, 4
 
+# Windows 任务计划/重定向场景: stdout 回退 GBK 会导致 ⚠ 等符号崩进程(部署实录 2026-09-02)
+for _s in (sys.stdout, sys.stderr):
+    try:
+        _s.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
+
 
 def _passthrough(script: Path, args: list, cwd: Path = ROOT) -> int:
     """转发到子脚本, 透传退出码。"""
