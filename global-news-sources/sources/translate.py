@@ -1,7 +1,10 @@
 """统一中译模块(MoA 四方案收敛, 2026-09-02)。
 
 refresh 轮末对非中文条目批量翻译成简体中文(工作台/早报全是中国用户)。
-- 复用项目统一 LLM 配置(deepseek-v4-flash), 批量 10/截断 1500/temperature 0
+- 模型链: config.yaml sources.translate.models 依次尝试, 前一个失败自动切下一个
+  (成功后粘性沿用); 每项可自填 base_url/api_key/model, 留空继承全局 secret 配置
+  (实测矩阵见 docs/翻译模型实测与推荐.md: 主力 deepseek-v4-flash, 备胎 muse-spark/glm-5.3-flash)
+- 批量 10/截断 1500/temperature 0
 - 判定: lang 字段为主, lang 空(X池)走 CJK 占比检测; 繁体 zh 不翻(可直接读)
 - 幂等三层: zh_status 状态机(''/skip/ok/partial/fail) + zh_attempts<3 熔断
   + zh_cache 哈希缓存(跨源同文/重跑零消耗); 簇成员 skip_dup(默认只展示代表条)
@@ -37,12 +40,39 @@ def _conf() -> dict:
         c = _cfg_section().get("translate") or {}
         return {"enabled": bool(c.get("enabled", True)),
                 "model": c.get("model", DEFAULT_MODEL),
+                "models": c.get("models") or [],       # 模型链(可空=单模型)
                 "batch": int(c.get("batch", BATCH)),
                 "max_chars": int(c.get("max_chars", MAX_CHARS)),
                 "round_cap": int(c.get("round_cap", ROUND_CAP))}
     except Exception:
-        return {"enabled": True, "model": DEFAULT_MODEL, "batch": BATCH,
-                "max_chars": MAX_CHARS, "round_cap": ROUND_CAP}
+        return {"enabled": True, "model": DEFAULT_MODEL, "models": [],
+                "batch": BATCH, "max_chars": MAX_CHARS, "round_cap": ROUND_CAP}
+
+
+def _model_chain(conf: dict) -> list:
+    """解析模型链 → [(base, key, model, tag), ...]。空链 = 单全局模型兜底。
+
+    链项字段(全部可留空): base_url/api_key/model。base_url/key 留空继承
+    secret.local.json 的全局配置; model 留空用 DEFAULT_MODEL。
+    tag 是给报告看的链位标识, 不进请求。
+    """
+    from sources.llm_tag import _llm_cfg
+    base, key, _ = _llm_cfg()
+    chain = []
+    for n, m in enumerate(conf.get("models") or []):
+        if not isinstance(m, dict):
+            continue
+        mb = str(m.get("base_url") or "").strip() or base
+        mk = str(m.get("api_key") or "").strip() or key
+        mm = str(m.get("model") or "").strip() or DEFAULT_MODEL
+        if mk:
+            chain.append((mb, mk, mm, f"#{n+1}:{mm}"))
+    if not chain:
+        if key:
+            chain.append((base, key, conf.get("model") or DEFAULT_MODEL,
+                          f"#0:{conf.get('model') or DEFAULT_MODEL}"))
+        return chain
+    return chain
 
 
 def _detect_lang(text: str) -> str:
@@ -105,14 +135,13 @@ def _chat(base: str, key: str, model: str, prompt: str) -> str:
 
 def run(since_fetched_at: str) -> dict:
     """翻译本轮新条目(不足 round_cap 时顺带回填存量 fail/未处理)。返回报告。"""
-    from sources.llm_tag import _llm_cfg
     conf = _conf()
     rep = {"enabled": conf["enabled"], "translated": 0, "skipped": 0,
-           "cached": 0, "batches": 0, "errors": []}
+           "cached": 0, "batches": 0, "model_used": "", "errors": []}
     if not conf["enabled"]:
         return rep
-    base, key, _ = _llm_cfg()
-    if not key:
+    chain = _model_chain(conf)
+    if not chain:
         rep["errors"].append("无 LLM key(翻译跳过)")
         return rep
 
@@ -161,6 +190,7 @@ def run(since_fetched_at: str) -> dict:
             conn.close()
 
     bs = conf["batch"]
+    chain_pos = 0                                   # 粘性: 成功后沿用同一链位
     for off in range(0, len(remain), bs):
         chunk = remain[off:off + bs]
         parts = []
@@ -168,12 +198,37 @@ def run(since_fetched_at: str) -> dict:
             head = f"标题: {t[2]}\n" if t[2] else ""
             parts.append(f"[{n}] {head}{(t[1] or '')[:conf['max_chars']]}")
         prompt = "\n\n".join(parts)
+        out, used = None, None
+        chain_errs = []
+        for step in range(len(chain)):              # 从粘性位起逐链位尝试
+            pos = (chain_pos + step) % len(chain)
+            b, k, m, tag = chain[pos]
+            try:
+                out = _chat(b, k, m, prompt)
+                used = tag
+                chain_pos = pos
+                break
+            except Exception as ex:
+                chain_errs.append(f"{tag}: {type(ex).__name__}: {str(ex)[:60]}")
+        if out is None:
+            rep["errors"].append(f"batch{off} 全链失败(共{len(chain)}模型): "
+                                 + " | ".join(chain_errs))
+            conn = _store._connect()
+            try:
+                for rid, *_ in chunk:
+                    conn.execute("UPDATE items SET zh_attempts=zh_attempts+1, "
+                                 "zh_status=CASE WHEN zh_attempts+1>=? THEN 'fail' ELSE '' END "
+                                 "WHERE id=?", (MAX_ATTEMPTS, rid))
+                conn.commit()
+            finally:
+                conn.close()
+            continue
+        rep["model_used"] = used
         try:
-            out = _chat(base, key, conf["model"], prompt)
-            m = re.search(r"\[.*\]", out, re.S)
-            arr = json.loads(m.group(0)) if m else []
+            m2 = re.search(r"\[.*\]", out, re.S)
+            arr = json.loads(m2.group(0)) if m2 else []
         except Exception as ex:
-            rep["errors"].append(f"batch{off}: {type(ex).__name__}: {str(ex)[:80]}")
+            rep["errors"].append(f"batch{off}: JSON解析失败: {type(ex).__name__}: {str(ex)[:80]}")
             conn = _store._connect()
             try:
                 for rid, *_ in chunk:
@@ -203,7 +258,7 @@ def run(since_fetched_at: str) -> dict:
                     status = "partial" if partial else "ok"
                     updates.append((status, zh, tzh, det, rid))
                     conn.execute("INSERT OR IGNORE INTO zh_cache VALUES(?,?,?,?,?)",
-                                 (h, zh, tzh, conf["model"],
+                                 (h, zh, tzh, conf["model"] if used == "" else used,
                                   time.strftime("%Y-%m-%d %H:%M:%S")))
                     got_i.add(i)
                     rep["translated"] += 1

@@ -5,67 +5,6 @@ defaults:
   account_delay_seconds: 1
   window: yesterday_start_to_now
   min_priority: low
-filters:
-  include_keywords:
-  - piyasa
-  - borsa
-  - hisse
-  - faiz
-  - enflasyon
-  - dolar
-  - bilanço
-  - teknik analiz
-  - destek
-  - direnç
-  - hedef fiyat
-  - KAP
-  - temettü
-  - market
-  - stocks
-  - inflation
-  - Fed
-  - rates
-  - 投资
-  - 股市
-  - 利率
-  - 台股
-  - 籌碼
-  - 匯率
-  - 半導體
-  - 台積電
-  - earnings
-  - revenue
-  - guidance
-  - options
-  - ETF
-  - bitcoin
-  - BTC
-  - crypto
-  - margin
-  - capex
-  - valuation
-  - IPO
-  - NVDA
-  - tariff
-  - CPI
-  - yield
-  - Treasury
-  - Nasdaq
-  - S&P
-  - 原油
-  - 黄金
-  - 美元
-  - 美股
-  - 港股
-  exclude_keywords:
-  - giveaway
-  - merch
-  - birthday
-  - vacation
-  - meme
-  - 抽奖
-  - 生日
-  - 表情包
 accounts:
 - handle: altinhisseler
   uid: '1204859131590516738'
@@ -704,3 +643,1105 @@ accounts:
   priority: low
   risk: medium
   note: 'P3: 亚洲市场观察, 美股叙事映射到香港/亚洲资产; 用前复核活跃度'
+- handle: EconomyApp
+  uid: '1246136668014301184'
+  name: App Economy Insights
+  homepage: https://x.com/EconomyApp
+  markets:
+  - 美股
+  role: analyst
+  lang: en
+  tier: core
+  priority: high
+  risk: low
+  replies: false
+  note: '财报可视化模板头部(24万粉): 营收拆分/分部利润/同比曲线, 原料全公开财报; 最该抄的模板型账号'
+- handle: borrowed_ideas
+  uid: '1154601225880555520'
+  name: Mostly Borrowed Ideas
+  homepage: https://x.com/borrowed_ideas
+  markets:
+  - 美股
+  role: analyst
+  lang: en
+  tier: core
+  priority: high
+  risk: low
+  replies: false
+  note: '科技公司深度拆解(15万粉): 商业模式+竞争格局, Substack变现'
+- handle: ecommerceshares
+  uid: '534058408'
+  name: Wasteland Capital
+  homepage: https://x.com/ecommerceshares
+  markets:
+  - 美股
+  role: kol
+  lang: en
+  tier: ext
+  priority: medium
+  risk: medium
+  replies: false
+  note: 电商/消费科技个股(13.5万粉), 长贴分析; 注意近2月未发帖; 验号时已68天未发帖(低活跃观察)
+- handle: TheTranscript_
+  uid: '923687530045759488'
+  name: The Transcript
+  homepage: https://x.com/TheTranscript_
+  markets:
+  - 美股
+  - 全球
+  role: media
+  lang: en
+  tier: core
+  priority: high
+  risk: low
+  replies: false
+  note: 财报电话会关键表述摘录归类(10万粉); 冷启动最易执行的形态
+- handle: RihardJarc
+  uid: '4765100357'
+  name: Rihard Jarc
+  homepage: https://x.com/RihardJarc
+  markets:
+  - 美股
+  role: analyst
+  lang: en
+  tier: core
+  priority: high
+  risk: low
+  replies: false
+  note: 科技公司深度+渠道验证(8万粉), 输出接近卖方研报; UncoverAlpha
+- handle: TSOH_Investing
+  uid: '829031723526668288'
+  name: Alex Morris (TSOH Investment Research)
+  homepage: https://x.com/TSOH_Investing
+  markets:
+  - 美股
+  role: analyst
+  lang: en
+  tier: core
+  priority: high
+  risk: low
+  replies: false
+  note: 单人付费研究范式(6.5万粉Substack全职); Alex Morris
+- handle: ByrneHobart
+  uid: '2723411'
+  name: Byrne Hobart
+  homepage: https://x.com/ByrneHobart
+  markets:
+  - 美股
+  - 全球
+  role: analyst
+  lang: en
+  tier: core
+  priority: high
+  risk: low
+  replies: false
+  note: 科技×金融交叉(The Diff, 6万粉), 机构订阅; 读者质量高
+- handle: DataDInvesting
+  uid: '1527430369183531008'
+  name: Chris Hoeger
+  homepage: https://x.com/DataDInvesting
+  markets:
+  - 美股
+  role: analyst
+  lang: en
+  tier: ext
+  priority: medium
+  risk: low
+  replies: false
+  note: '数据驱动个股(5.5万粉): 自建数据表横向比较'
+- handle: amitisinvesting
+  uid: '1468103131737247748'
+  name: amit
+  homepage: https://x.com/amitisinvesting
+  markets:
+  - 美股
+  role: kol
+  lang: en
+  tier: core
+  priority: high
+  risk: medium
+  replies: false
+  note: '财报速览卡片(65万粉): 财报季高频统一格式, 靠密度取胜'
+- handle: benthompson
+  uid: '1233663476'
+  name: Stratechery
+  homepage: https://x.com/benthompson
+  markets:
+  - 美股
+  - 全球
+  role: analyst
+  lang: en
+  tier: core
+  priority: high
+  risk: low
+  replies: false
+  note: Stratechery科技战略分析(149万粉); 更新约每周, 观点密度高
+- handle: Beth_Kindig
+  uid: '499993648'
+  name: Beth Kindig
+  homepage: https://x.com/Beth_Kindig
+  markets:
+  - 美股
+  role: analyst
+  lang: en
+  tier: ext
+  priority: medium
+  risk: low
+  replies: false
+  note: '科技股基本面(18万粉): 半导体+云计算, 从业背景转投研'
+- handle: GavinSBaker
+  uid: '340387261'
+  name: Gavin Baker
+  homepage: https://x.com/GavinSBaker
+  markets:
+  - 美股
+  - 全球
+  role: analyst
+  lang: en
+  tier: ext
+  priority: medium
+  risk: low
+  replies: false
+  note: 科技基金经理(34万粉), 真实管钱不可复制但是风向标; 对照组
+- handle: zephyr_z9
+  uid: '1695126229446479872'
+  name: Zephyr
+  homepage: https://x.com/zephyr_z9
+  markets:
+  - 美股
+  - 全球
+  role: kol
+  lang: zh
+  tier: core
+  priority: high
+  risk: medium
+  replies: false
+  note: '中文AI/半导体产业链(17万粉): 中文在该赛道跑通的证明'
+- handle: dylan522p
+  uid: '985281530070265862'
+  name: Dylan Patel
+  homepage: https://x.com/dylan522p
+  markets:
+  - 美股
+  - 全球
+  role: analyst
+  lang: en
+  tier: core
+  priority: high
+  risk: low
+  replies: false
+  note: 'SemiAnalysis创始人(16万粉): 芯片架构/数据中心/成本模型, 技术天花板'
+- handle: dnystedt
+  uid: '814134230959521792'
+  name: 駿HaYaO
+  homepage: https://x.com/dnystedt
+  markets:
+  - 台湾
+  - 全球
+  role: analyst
+  lang: en
+  tier: core
+  priority: high
+  risk: low
+  replies: false
+  note: '驻台科技供应链记者(3万粉): 台厂月营收/法说会英文化, 台湾坐标范式'
+- handle: techfund1
+  uid: '1356621924919615489'
+  name: Tech Fund
+  homepage: https://x.com/techfund1
+  markets:
+  - 美股
+  role: kol
+  lang: en
+  tier: ext
+  priority: medium
+  risk: medium
+  replies: false
+  note: '科技股研究(1.7万粉): 小号高密度, 典型腰部形态'
+- handle: IanCutress
+  uid: '317150782'
+  name: 𝐷𝑟. 𝐼𝑎𝑛 𝐶𝑢𝑡𝑟𝑒𝑠𝑠
+  homepage: https://x.com/IanCutress
+  markets:
+  - 美股
+  - 全球
+  role: analyst
+  lang: en
+  tier: ext
+  priority: medium
+  risk: low
+  replies: false
+  note: '半导体技术记者(5.8万粉): TechTechPotato, 博士背景技术解读'
+- handle: PatrickMoorhead
+  uid: '14927543'
+  name: Patrick Moorhead
+  homepage: https://x.com/PatrickMoorhead
+  markets:
+  - 美股
+  - 全球
+  role: analyst
+  lang: en
+  tier: ext
+  priority: medium
+  risk: low
+  replies: false
+  note: '分析机构创始人(6.8万粉): 厂商关系拿早期信息'
+- handle: trendforce
+  uid: '201153042'
+  name: TrendForce
+  homepage: https://x.com/trendforce
+  markets:
+  - 台湾
+  - 全球
+  role: media
+  lang: en
+  tier: core
+  priority: high
+  risk: low
+  replies: false
+  note: '集邦咨询英文号(2.2万粉): 台湾研究机构, 被英文财经圈大量引用, 原始信源'
+- handle: DIGITIMES
+  uid: '29181028'
+  name: DIGITIMES
+  homepage: https://x.com/DIGITIMES
+  markets:
+  - 台湾
+  - 全球
+  role: media
+  lang: en
+  tier: ext
+  priority: low
+  risk: low
+  replies: false
+  note: '台湾科技媒体(1万粉): 供应链消息进英文圈通道; 注意近1年未发帖, 观察项; 验号时已3509天未发帖(低活跃观察)'
+- handle: zerohedge
+  uid: '18856867'
+  name: zerohedge
+  homepage: https://x.com/zerohedge
+  markets:
+  - 美股
+  - 全球
+  role: media
+  lang: en
+  tier: ext
+  priority: low
+  risk: low
+  replies: false
+  note: '另类叙事聚合(337万粉): 团队运作; 情绪风向标, 需强过滤'
+- handle: LizAnnSonders
+  uid: '363561760'
+  name: Wilfred Frost
+  homepage: https://x.com/LizAnnSonders
+  markets:
+  - 美股
+  - 全球
+  role: analyst
+  lang: en
+  tier: ext
+  priority: medium
+  risk: low
+  replies: false
+  note: 'Schwab首席投资策略师(4.8万粉): 机构背书路径; 对照组'
+- handle: NickTimiraos
+  uid: '59603406'
+  name: Nick Timiraos
+  homepage: https://x.com/NickTimiraos
+  markets:
+  - 美股
+  - 全球
+  role: insider
+  lang: en
+  tier: core
+  priority: high
+  risk: low
+  replies: false
+  note: 'WSJ美联储记者(49万粉): Fed消息实际首发口, 不可复制但必须跟'
+- handle: CathieDWood
+  uid: '2361631088'
+  name: Cathie Wood
+  homepage: https://x.com/CathieDWood
+  markets:
+  - 美股
+  role: insider
+  lang: en
+  tier: ext
+  priority: low
+  risk: low
+  replies: false
+  note: 'ARK创始人(291万粉): 明星基金经理, 每日交易明细有信号价值'
+- handle: jimcramer
+  uid: '14216123'
+  name: Jim Cramer
+  homepage: https://x.com/jimcramer
+  markets:
+  - 美股
+  role: kol
+  lang: en
+  tier: ext
+  priority: low
+  risk: medium
+  replies: false
+  note: 'CNBC Mad Money(248万粉): 电视人格; 反指/情绪参考'
+- handle: RampCapitalLLC
+  uid: '2214652482'
+  name: Ramp Capital
+  homepage: https://x.com/RampCapitalLLC
+  markets:
+  - 美股
+  role: kol
+  lang: en
+  tier: ext
+  priority: low
+  risk: medium
+  replies: false
+  note: '匿名金融段子(164万粉): 匿名号天花板证明; 情绪参考'
+- handle: LynAldenContact
+  uid: '1390842784261853186'
+  name: 𝐓𝐗𝐌𝐂
+  homepage: https://x.com/LynAldenContact
+  markets:
+  - 美股
+  - 全球
+  role: analyst
+  lang: en
+  tier: core
+  priority: high
+  risk: low
+  replies: false
+  note: '独立宏观分析师(9.4万粉): 工程师出身无机构背书, 长文质量高'
+- handle: SawyerMerritt
+  uid: '243013409'
+  name: Sawyer Merritt
+  homepage: https://x.com/SawyerMerritt
+  markets:
+  - 美股
+  role: kol
+  lang: en
+  tier: ext
+  priority: medium
+  risk: medium
+  replies: false
+  note: '只做特斯拉(112万粉): 单公司垂类极致'
+- handle: markminervini
+  uid: '105353526'
+  name: Mark Minervini
+  homepage: https://x.com/markminervini
+  markets:
+  - 美股
+  role: trader
+  lang: en
+  tier: ext
+  priority: medium
+  risk: medium
+  replies: false
+  note: '交易冠军方法论IP(76万粉): 技术面+交易心理'
+- handle: LukeGromen
+  uid: '2936015319'
+  name: Luke Gromen
+  homepage: https://x.com/LukeGromen
+  markets:
+  - 美股
+  - 全球
+  role: analyst
+  lang: en
+  tier: ext
+  priority: medium
+  risk: low
+  replies: false
+  note: '美元体系单一叙事(62万粉): 宏观另类视角'
+- handle: garyblack00
+  uid: '1161703589942878208'
+  name: Gary Black
+  homepage: https://x.com/garyblack00
+  markets:
+  - 美股
+  role: analyst
+  lang: en
+  tier: ext
+  priority: medium
+  risk: low
+  replies: false
+  note: '公开EPS模型(58万粉): TSLA预测透明化接受质疑'
+- handle: JonahLupton
+  uid: '1674054161661345794'
+  name: Nebius
+  homepage: https://x.com/JonahLupton
+  markets:
+  - 美股
+  role: kol
+  lang: en
+  tier: ext
+  priority: low
+  risk: medium
+  replies: false
+  note: '公开真实持仓(3.7万粉): 透明化路线'
+- handle: QCompounding
+  uid: '1535311072181231617'
+  name: Compounding Quality
+  homepage: https://x.com/QCompounding
+  markets:
+  - 美股
+  role: kol
+  lang: en
+  tier: ext
+  priority: medium
+  risk: medium
+  replies: false
+  note: '匿名教育型(49万粉): 免费PDF换订阅'
+- handle: GerberKawasaki
+  uid: '349249475'
+  name: Ross Gerber
+  homepage: https://x.com/GerberKawasaki
+  markets:
+  - 美股
+  role: trader
+  lang: en
+  tier: ext
+  priority: low
+  risk: medium
+  replies: false
+  note: '观点型基金经理(43万粉): Ross Gerber'
+- handle: FinanceLancelot
+  uid: '1265428695939981318'
+  name: Financelot
+  homepage: https://x.com/FinanceLancelot
+  markets:
+  - 美股
+  - 全球
+  role: media
+  lang: en
+  tier: ext
+  priority: medium
+  risk: low
+  replies: false
+  note: '匿名数据截图流(36万粉): 宏观数据快照'
+- handle: TaviCosta
+  uid: '207690854'
+  name: Peter Spina ⚒ GoldSeek | SilverSeek
+  homepage: https://x.com/TaviCosta
+  markets:
+  - 美股
+  - 全球
+  role: analyst
+  lang: en
+  tier: ext
+  priority: medium
+  risk: low
+  replies: false
+  note: 'Crescat Capital(11万粉): 每日一张自制宏观图表'
+- handle: michaelbatnick
+  uid: '149571760'
+  name: Eric Balchunas
+  homepage: https://x.com/michaelbatnick
+  markets:
+  - 美股
+  role: kol
+  lang: en
+  tier: ext
+  priority: low
+  risk: medium
+  replies: false
+  note: 'Ritholtz研究总监(62万粉): 播客/写作; 更新稀疏'
+- handle: dollarsanddata
+  uid: '814964403284115457'
+  name: Nick Maggiulli
+  homepage: https://x.com/dollarsanddata
+  markets:
+  - 美股
+  role: analyst
+  lang: en
+  tier: ext
+  priority: medium
+  risk: low
+  replies: false
+  note: '数据驱动个人理财(19万粉): Nick Maggiulli'
+- handle: jessefelder
+  uid: '1473431'
+  name: Jesse Felder
+  homepage: https://x.com/jessefelder
+  markets:
+  - 美股
+  - 全球
+  role: analyst
+  lang: en
+  tier: ext
+  priority: low
+  risk: low
+  replies: false
+  note: 长期唱空视角(17万粉); 注意近8月未发帖; 验号时已261天未发帖(低活跃观察)
+- handle: ericjackson
+  uid: '818071'
+  name: Eric Jackson
+  homepage: https://x.com/ericjackson
+  markets:
+  - 美股
+  role: trader
+  lang: en
+  tier: ext
+  priority: medium
+  risk: medium
+  replies: false
+  note: '科技股公开喊单(17万粉): STKK/为持仓造势, 立场强'
+- handle: DanielTNiles
+  uid: '1948086848'
+  name: Dan Niles
+  homepage: https://x.com/DanielTNiles
+  markets:
+  - 美股
+  role: analyst
+  lang: en
+  tier: ext
+  priority: medium
+  risk: low
+  replies: false
+  note: '前对冲基金经理(13万粉): Satori Fund, 观点周频'
+- handle: modestproposal1
+  uid: '355866075'
+  name: modest proposal
+  homepage: https://x.com/modestproposal1
+  markets:
+  - 美股
+  - 全球
+  role: kol
+  lang: en
+  tier: ext
+  priority: medium
+  risk: medium
+  replies: false
+  note: '匿名买方(12.5万粉): 有话才发, 低频高质量'
+- handle: dividendology
+  uid: '1509705643418128399'
+  name: Dividendology
+  homepage: https://x.com/dividendology
+  markets:
+  - 美股
+  role: analyst
+  lang: en
+  tier: ext
+  priority: medium
+  risk: low
+  replies: false
+  note: '股息策略垂类(12万粉): 数据表格化'
+- handle: LanceRoberts
+  uid: '49958733'
+  name: Lance Roberts
+  homepage: https://x.com/LanceRoberts
+  markets:
+  - 美股
+  - 全球
+  role: analyst
+  lang: en
+  tier: ext
+  priority: medium
+  risk: low
+  replies: false
+  note: 'RIA首席策略(10万粉): 宏观+组合管理'
+- handle: biancoresearch
+  uid: '28626088'
+  name: Josh Young (Bison Interests)
+  homepage: https://x.com/biancoresearch
+  markets:
+  - 美股
+  - 大宗
+  role: analyst
+  lang: en
+  tier: ext
+  priority: medium
+  risk: low
+  replies: false
+  note: '油气股专业投资人(Bison Interests, 13.7万粉): 能源个股+财报解读; 注意调研文档误标为Jim Bianco(利率/债市)——该handle实为Josh Young, Jim Bianco真实handle待用户确认后再录'
+- handle: buffett_taro
+  uid: '720578402135068673'
+  name: バフェット太郎
+  homepage: https://x.com/buffett_taro
+  markets:
+  - 日本
+  - 美股
+  role: kol
+  lang: ja
+  tier: core
+  priority: high
+  risk: medium
+  replies: false
+  note: '日语美股线头部(36万粉): 高股息策略主张; 匿名IP'
+- handle: komcdspxl
+  uid: '1026412939211730944'
+  name: 全力米国株
+  homepage: https://x.com/komcdspxl
+  markets:
+  - 日本
+  - 美股
+  role: kol
+  lang: ja
+  tier: ext
+  priority: medium
+  risk: medium
+  replies: false
+  note: '美股新闻+股价解说(14万粉): 高频搬运型'
+- handle: strainerjp
+  uid: '804273411325202432'
+  name: ストレイナー｜米国決算の美味しいところ
+  homepage: https://x.com/strainerjp
+  markets:
+  - 日本
+  - 美股
+  role: media
+  lang: ja
+  tier: core
+  priority: high
+  risk: low
+  replies: false
+  note: '美股财报可视化摘要(7.8万粉): 日语版EconomyApp形态, 团队媒体'
+- handle: taritariblog
+  uid: '1060835148340449280'
+  name: たりたり
+  homepage: https://x.com/taritariblog
+  markets:
+  - 日本
+  - 美股
+  role: analyst
+  lang: ja
+  tier: core
+  priority: high
+  risk: low
+  replies: false
+  note: '前基金经理个股分析(7.7万粉): 日语个股深度最高水位'
+- handle: us_stock_invest
+  uid: '896850496278876160'
+  name: ユーエスさん🇺🇸米国株投資🍺🥃🍷🍶⚽
+  homepage: https://x.com/us_stock_invest
+  markets:
+  - 日本
+  - 美股
+  role: kol
+  lang: ja
+  tier: ext
+  priority: low
+  risk: medium
+  replies: false
+  note: '综合型个人号(6.2万粉): 无明确垂类'
+- handle: ActiveArk
+  uid: '1303533456253620225'
+  name: ARK trade information
+  homepage: https://x.com/ActiveArk
+  markets:
+  - 日本
+  - 美股
+  role: data_bot
+  lang: ja
+  tier: ext
+  priority: low
+  risk: medium
+  replies: false
+  note: 'ARK交易明细日语化(1.6万粉): 纯语言套利; 注意近4年未发帖, 观察项; 验号时已1470天未发帖(低活跃观察)'
+- handle: NRAGR
+  uid: '118404243'
+  name: Makabee【ジム・クレイマー応援ch】
+  homepage: https://x.com/NRAGR
+  markets:
+  - 日本
+  - 美股
+  role: media
+  lang: ja
+  tier: ext
+  priority: medium
+  risk: low
+  replies: false
+  note: 'Cramer节目日语总结(1.2万粉): 语言套利; Mad Money和译'
+- handle: hiromethods
+  uid: '3377328194'
+  name: 複利のチカラで億り人
+  homepage: https://x.com/hiromethods
+  markets:
+  - 日本
+  role: kol
+  lang: ja
+  tier: ext
+  priority: low
+  risk: medium
+  replies: false
+  note: '连续增息股特化(1万粉): 单一策略垂类; 近期低频'
+- handle: mifsee
+  uid: '806804923203534848'
+  name: MiFsee 🌐 米国株×深堀り分析
+  homepage: https://x.com/mifsee
+  markets:
+  - 日本
+  - 美股
+  role: kol
+  lang: ja
+  tier: ext
+  priority: medium
+  risk: medium
+  replies: false
+  note: '美股深度挖掘(1933粉): 定位正确竞争极少, 小而美观察'
+- handle: NIKKEIxTECH
+  uid: '943043204131123200'
+  name: 日経クロステック（xTECH）
+  homepage: https://x.com/NIKKEIxTECH
+  markets:
+  - 日本
+  - 全球
+  role: media
+  lang: ja
+  tier: core
+  priority: high
+  risk: low
+  replies: false
+  note: '日经クロステック(4.9万粉): 日语产业链信息主要信源, 机构号'
+- handle: traders_web
+  uid: '271215338'
+  name: トレーダーズ・ウェブ
+  homepage: https://x.com/traders_web
+  markets:
+  - 日本
+  role: media
+  lang: ja
+  tier: ext
+  priority: medium
+  risk: low
+  replies: false
+  note: 'トレーダーズ・ウェブ(4.5万粉): 盘中快讯为主'
+- handle: irbank
+  uid: '2605418089'
+  name: IRBANK- 企業分析・銘柄発掘
+  homepage: https://x.com/irbank
+  markets:
+  - 日本
+  role: data_bot
+  lang: ja
+  tier: ext
+  priority: medium
+  risk: medium
+  replies: false
+  note: 'IRBANK(9673粉): 日股财务数据平台, 企业分析工具号'
+- handle: Omdia_Japan
+  uid: '1314102586987835392'
+  name: Omdia Japan
+  homepage: https://x.com/Omdia_Japan
+  markets:
+  - 日本
+  - 全球
+  role: media
+  lang: ja
+  tier: ext
+  priority: low
+  risk: low
+  replies: false
+  note: 'Omdia日本(569粉): 南川明所属机构号; 更新月频; 验号时已33天未发帖(低活跃观察)'
+- handle: SemiconPortal
+  uid: '2373035642'
+  name: EmergingTech frm JPN
+  homepage: https://x.com/SemiconPortal
+  markets:
+  - 日本
+  - 全球
+  role: media
+  lang: ja
+  tier: ext
+  priority: low
+  risk: low
+  replies: false
+  note: '半导体门户(7粉): 名存实亡, 仅存档观察; 验号时已4474天未发帖(低活跃观察)'
+- handle: nikkei
+  uid: '169480493'
+  name: 日本経済新聞 電子版（日経電子版）
+  homepage: https://x.com/nikkei
+  markets:
+  - 日本
+  - 全球
+  role: media
+  lang: ja
+  tier: ext
+  priority: medium
+  risk: low
+  replies: false
+  note: '日本経済新聞官号(392万粉): 权威媒体, 与机构源重叠注意'
+- handle: tesuta001
+  uid: '111603894'
+  name: テスタ
+  homepage: https://x.com/tesuta001
+  markets:
+  - 日本
+  role: trader
+  lang: ja
+  tier: ext
+  priority: low
+  risk: medium
+  replies: false
+  note: '日股传奇交易员(119万粉): 靠人格不靠内容; 情绪参考'
+- handle: goto_finance
+  uid: '1629037738975723521'
+  name: ReHacQ 【公式】
+  homepage: https://x.com/goto_finance
+  markets:
+  - 日本
+  role: kol
+  lang: ja
+  tier: ext
+  priority: medium
+  risk: medium
+  replies: false
+  note: '前日经记者独立(8.9万粉): 把复杂的东西讲明白的表达方式'
+- handle: cissan_9984
+  uid: '2432059932'
+  name: cis@株 先物 FX 新信長の野望
+  homepage: https://x.com/cissan_9984
+  markets:
+  - 日本
+  role: trader
+  lang: ja
+  tier: ext
+  priority: low
+  risk: medium
+  replies: false
+  note: 'cis传奇交易员(79万粉): 短线情绪参考'
+- handle: yurumazu
+  uid: '948208460822339584'
+  name: Emin Yurumazu (エミンユルマズ)
+  homepage: https://x.com/yurumazu
+  markets:
+  - 日本
+  - 全球
+  role: analyst
+  lang: ja
+  tier: ext
+  priority: medium
+  risk: low
+  replies: false
+  note: '宏观/外国人视角(53万粉): エミン・ユルマズ'
+- handle: hirosetakao
+  uid: '92957264'
+  name: …
+  homepage: https://x.com/hirosetakao
+  markets:
+  - 日本
+  - 美股
+  role: analyst
+  lang: ja
+  tier: ext
+  priority: medium
+  risk: low
+  replies: false
+  note: '日语美股分析第一人(29万粉): 広瀬隆雄, 风格老派'
+- handle: tapazou29
+  uid: '782008204096000000'
+  name: たぱぞう🐘/米国株/不動産
+  homepage: https://x.com/tapazou29
+  markets:
+  - 日本
+  role: kol
+  lang: ja
+  tier: ext
+  priority: low
+  risk: medium
+  replies: false
+  note: '指数/资产配置面向新手(25万粉): たぱぞう'
+- handle: momiage0088
+  uid: '949765735'
+  name: おむすび侍
+  homepage: https://x.com/momiage0088
+  markets:
+  - 日本
+  - 美股
+  role: kol
+  lang: ja
+  tier: ext
+  priority: low
+  risk: medium
+  replies: false
+  note: '在美日本人·美股(3593粉): 小号观察; 注意名字含毛 but 粉丝少'
+- handle: marikomabuchi
+  uid: '1529701405912539136'
+  name: 【公式】TOKYO FM『馬渕・渡辺の#ビジトピ』
+  homepage: https://x.com/marikomabuchi
+  markets:
+  - 日本
+  role: analyst
+  lang: ja
+  tier: ext
+  priority: low
+  risk: low
+  replies: false
+  note: '分析师/媒体常客(2.4万粉): 馬渕磨理子; 更新月频; 验号时已53天未发帖(低活跃观察)'
+- handle: churio777
+  uid: '847223574586769408'
+  name: ちゅり男｜医師×インデックス投資
+  homepage: https://x.com/churio777
+  markets:
+  - 日本
+  role: kol
+  lang: ja
+  tier: ext
+  priority: low
+  risk: medium
+  replies: false
+  note: '医生×指数投资(4.3万粉): ちゅり男'
+- handle: america_kabu
+  uid: '4235584812'
+  name: アメリカ部/米国株投資アンテナ
+  homepage: https://x.com/america_kabu
+  markets:
+  - 日本
+  - 美股
+  role: media
+  lang: ja
+  tier: ext
+  priority: low
+  risk: low
+  replies: false
+  note: '美股资讯聚合(2.9万粉): アメリカ部; 近1年未发帖, 观察项; 验号时已328天未发帖(低活跃观察)'
+- handle: MacroMicroMe
+  uid: '1295255955404292096'
+  name: MacroMicro
+  homepage: https://x.com/MacroMicroMe
+  markets:
+  - 台湾
+  - 全球
+  role: media
+  lang: en
+  tier: ext
+  priority: medium
+  risk: low
+  replies: false
+  note: '财经M平方(2.3万粉): 台湾最大总经平台, X号已转英文运营'
+- handle: statementdog
+  uid: '1801640503575986176'
+  name: StatementDog | AI & Tech Supply Chains
+  homepage: https://x.com/statementdog
+  markets:
+  - 台湾
+  - 全球
+  role: media
+  lang: en
+  tier: ext
+  priority: low
+  risk: low
+  replies: false
+  note: '財報狗(3289粉): X定位已改AI&Tech Supply Chains, 转英文'
+- handle: cnYES
+  uid: '20749201'
+  name: 鉅亨全球財經快報
+  homepage: https://x.com/cnYES
+  markets:
+  - 台湾
+  role: media
+  lang: zh
+  tier: ext
+  priority: low
+  risk: low
+  replies: false
+  note: '鉅亨網(1305粉): 台湾财经门户, X号基本挂机; 近17月未发帖; 验号时已6076天未发帖(低活跃观察)'
+- handle: StockFeel
+  uid: '2593661953'
+  name: StockFeel
+  homepage: https://x.com/StockFeel
+  markets:
+  - 台湾
+  role: media
+  lang: zh
+  tier: ext
+  priority: low
+  risk: low
+  replies: false
+  note: '股感(9粉): 名存实亡, 仅存档观察; 验号时已4448天未发帖(低活跃观察)'
+- handle: HAOHONG_CFA
+  uid: '41902408'
+  name: Hao HONG 洪灝, CFA
+  homepage: https://x.com/HAOHONG_CFA
+  markets:
+  - 全球
+  - 台湾
+  role: analyst
+  lang: en
+  tier: ext
+  priority: medium
+  risk: low
+  replies: false
+  note: '洪灝(35万粉): 华语圈唯一X破30万宏观, 以英文为主'
+defaults:
+  per_account_limit: 50
+  account_delay_seconds: 1
+  window: yesterday_start_to_now
+  min_priority: low
+filters:
+  include_keywords:
+  - piyasa
+  - borsa
+  - hisse
+  - faiz
+  - enflasyon
+  - dolar
+  - bilanço
+  - teknik analiz
+  - destek
+  - direnç
+  - hedef fiyat
+  - KAP
+  - temettü
+  - market
+  - stocks
+  - inflation
+  - Fed
+  - rates
+  - 投资
+  - 股市
+  - 利率
+  - 台股
+  - 籌碼
+  - 匯率
+  - 半導體
+  - 台積電
+  - earnings
+  - revenue
+  - guidance
+  - options
+  - ETF
+  - bitcoin
+  - BTC
+  - crypto
+  - margin
+  - capex
+  - valuation
+  - IPO
+  - NVDA
+  - tariff
+  - CPI
+  - yield
+  - Treasury
+  - Nasdaq
+  - S&P
+  - 原油
+  - 黄金
+  - 美元
+  - 美股
+  - 港股
+  - 米国株
+  - 日本株
+  - 投資
+  - 株価
+  - 決算
+  - 金利
+  - 日経平均
+  - 半導体
+  - ドル
+  - 円安
+  - 円高
+  - 市場
+  - 経済
+  - 尾入
+  - 股
+  - 外資
+  - 法說
+  - 財報
+  - 大盤
+  - 台幣
+  exclude_keywords:
+  - giveaway
+  - merch
+  - birthday
+  - vacation
+  - meme
+  - 抽奖
+  - 生日
+  - 表情包
