@@ -18,7 +18,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
-from . import config, proxy, reco, stats, views
+from . import config, proxy, reco, stats, views, xaccounts, x_profile_enricher
 
 WEB = Path(__file__).resolve().parent.parent / "web"
 
@@ -105,6 +105,17 @@ def create_app() -> FastAPI:
             return JSONResponse({"error": "not found"}, status_code=404)
         return FileResponse(str(p))
 
+    # ── X 账号池(只读): 池源条目按账号展示的档案供给 ─────────────────────────
+    @app.get("/wb-api/x-accounts")
+    def x_accounts():
+        return xaccounts.payload()
+
+    @app.get("/wb-api/x-profiles")
+    def x_profiles():
+        c = x_profile_enricher.load_cache()
+        return {"profiles": c["profiles"], "enriched_at": c.get("enriched_at"),
+                "count": len(c["profiles"])}
+
     # ── 追踪账号(本板块自有数据, 真实增删; 指标采集留桩) ─────────────────────
     @app.get("/wb-api/track/accounts")
     def track_list():
@@ -129,9 +140,12 @@ def create_app() -> FastAPI:
     # ── 图文页: 推荐信息打分(服务端, 规则透明) ───────────────────────────────
     @app.get("/wb-api/recommend")
     def recommend(since: str = "", markets: str = "", kinds: str = "",
-                  channels: str = "", limit: int = 50):
+                  channels: str = "", positionings: str = "",
+                  item_types: str = "", limit: int = 50):
         try:
-            return reco.recommend(since, markets, kinds, channels, limit)
+            return reco.recommend(since=since, markets=markets, kinds=kinds,
+                                  channels=channels, positionings=positionings,
+                                  item_types=item_types, limit=limit)
         except proxy.UpstreamError as e:
             return JSONResponse({"error": str(e)}, status_code=e.code or 502)
 
@@ -152,7 +166,7 @@ def create_app() -> FastAPI:
             for r in rows:
                 if r.get("id") == did:
                     r.update({k: body[k] for k in
-                              ("title", "content", "items", "modules", "template")
+                              ("title", "content", "items", "modules", "template", "publish")
                               if k in body})
                     r["updated_at"] = now
                     break
@@ -165,6 +179,7 @@ def create_app() -> FastAPI:
                          "items": body.get("items") or [],
                          "modules": body.get("modules") or [],
                          "template": body.get("template", ""),
+                         "publish": body.get("publish") or {},
                          "created_at": now, "updated_at": now})
         return {"drafts": config.save_drafts(rows), "id": did}
 
@@ -206,6 +221,14 @@ def create_app() -> FastAPI:
                             status_code=501)
 
     # ── 静态 SPA(放最后, 兜底所有非 /wb-api 路径到 index.html) ───────────────
+    # SPA 静态资源禁启发式缓存: 迭代期旧 JS/CSS 被 webview 缓存会导致新旧混载
+    @app.middleware("http")
+    async def no_cache_static(request: Request, call_next):
+        resp = await call_next(request)
+        if not request.url.path.startswith("/wb-api"):
+            resp.headers["Cache-Control"] = "no-cache"
+        return resp
+
     app.mount("/", StaticFiles(directory=str(WEB), html=True), name="web")
     return app
 

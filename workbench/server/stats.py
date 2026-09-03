@@ -10,7 +10,7 @@ import time
 import urllib.parse
 from collections import Counter
 
-from . import proxy
+from . import proxy, xaccounts
 
 _cache = {"at": 0.0, "data": None}
 _CACHE_TTL = 60.0
@@ -64,6 +64,11 @@ def aggregate() -> dict:
     for i in items:
         per_source_name.setdefault(i.get("source_id"), i.get("source") or i.get("source_id"))
 
+    # X 池按账号产量(右栏独立卡; 名称 join 池档案, 缺档案回退 @handle)
+    x_count = Counter(str(i.get("author_handle") or "").lower()
+                      for i in items if i.get("author_handle"))
+    x_pool = xaccounts.load_accounts()
+
     refresh = (status.get("refresh") or {})
     rs = refresh.get("sources") or {}
     round_bad = [k for k, v in rs.items() if v.get("status") != "ok"]
@@ -80,6 +85,7 @@ def aggregate() -> dict:
             "enabled": bool(s.get("enabled", True)), "ttl_min": s.get("ttl_min"),
             "ms": r.get("ms"), "round_items": r.get("items"), "round_new": r.get("new"),
             "count": per_source.get(s["id"], 0),
+            "pool_accounts": xaccounts.pool_account_count(s["id"]),
         })
 
     store = health.get("store") or {}
@@ -96,9 +102,13 @@ def aggregate() -> dict:
         "channels": count(lambda i: i.get("channel")),
         "item_types": count(lambda i: i.get("item_type")),
         "positionings": count(lambda i: i.get("positioning")),
+        "sectors_l1": count(lambda i: [str(s).split(">")[0] for s in (i.get("sectors") or [])]),
         "events": count(lambda i: i.get("event_type")),
         "top_sources": [[per_source_name.get(sid, sid), n, sid]
                         for sid, n in per_source.most_common(14)],
+        "x_accounts": [[(x_pool.get(h) or {}).get("name") or "@" + h, n, h]
+                       for h, n in x_count.most_common(10)],
+        "x_pool_size": len(x_pool),
         "tickers": count(lambda i: i.get("tickers"))[:14],
         "sources": sources_detail,
     }

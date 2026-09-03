@@ -291,6 +291,10 @@ def sources_cmd(args) -> int:
 
 
 def workbench_cmd(args) -> int:
+    if args.sub == "enrich-x-profiles":
+        sys.path.insert(0, str(WB))
+        from server import x_profile_enricher
+        return x_profile_enricher.run_cli(args)
     if args.sub == "serve":
         sys.path.insert(0, str(WB))
         from server import app as wb_app
@@ -529,6 +533,13 @@ def main() -> int:
     pw_s.add_argument("--open", action="store_true", help="启动后自动开浏览器")
     pw_t = wsub.add_parser("status", help="工作台/数据源双探活+设置有效性")
     pw_t.add_argument("--json", action="store_true")
+    pw_e = wsub.add_parser("enrich-x-profiles",
+                           help="X账号公开档案增强(grok x-search → data/workbench/x_profiles.json)")
+    pw_e.add_argument("--limit", type=int, default=0, help="只补前 N 个缺档账号(0=全部缺档)")
+    pw_e.add_argument("--force", action="store_true", help="忽略已有缓存全部重抓")
+    pw_e.add_argument("--handles", default="", help="只抓指定账号(逗号分隔, 可带@)")
+    pw_e.add_argument("--provider", default="grok-cli", help="档案来源(暂仅 grok-cli)")
+    pw_e.add_argument("--json", action="store_true")
 
     p_k = sub.add_parser("skills", help="把 skills/ 安装到本机 agent 技能目录")
     ksub = p_k.add_subparsers(dest="sub", required=True)

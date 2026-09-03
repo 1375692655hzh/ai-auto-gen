@@ -59,12 +59,9 @@
         } catch (e) { this.health = { source: { ok: false } }; }
       },
     },
-    mounted() {
-      window.addEventListener("hashchange", this.onHash);
-      this.onHash();
-      this.refreshHealth();
-      setInterval(this.refreshHealth, 30000);   // 30s 轮询健康灯
-      /* 页面组件注册/同步子菜单的通道(挂在挂载后的实例上, 保持响应式) */
+    created() {
+      /* 必须在 created 注册: 子组件 mounted 早于父组件 mounted,
+         页面 mounted 里调 WB.shell.setSubs 时通道得已存在 */
       WB.shell = {
         setSubs: (list, activeId) => {
           this.subs = list || [];
@@ -74,6 +71,12 @@
         },
         setSub: (id) => { this.sub = id; },
       };
+    },
+    mounted() {
+      window.addEventListener("hashchange", this.onHash);
+      this.onHash();
+      this.refreshHealth();
+      setInterval(this.refreshHealth, 30000);   // 30s 轮询健康灯
     },
   });
   app.mount("#app");

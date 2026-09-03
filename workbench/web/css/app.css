@@ -184,6 +184,9 @@ select[multiple] option { padding: 3px var(--s2); border-radius: var(--s1); }
   margin-bottom: var(--s1); font-size: 11.5px; color: var(--text-mute);
   font-variant-numeric: tabular-nums; }
 .news-text { font-size: 13.5px; line-height: 1.65; white-space: pre-wrap; word-break: break-word; }
+/* 长文折叠(资讯/推荐卡共用): line-clamp 在 pre-wrap 下失效, 折叠态必须覆盖回 normal */
+.news-text.clamp { display: -webkit-box; -webkit-line-clamp: 6; -webkit-box-orient: vertical;
+  overflow: hidden; white-space: normal; }
 .news-src-text { margin-top: var(--s2); padding: var(--s2) var(--s3); background: var(--bg);
   border-left: 2px solid var(--border-light); border-radius: var(--r-ctl);
   font-size: 12.5px; color: var(--text-dim); white-space: pre-wrap; }
@@ -191,6 +194,20 @@ select[multiple] option { padding: 3px var(--s2); border-radius: var(--s1); }
 .news-actions span.act { color: var(--accent); cursor: pointer; }
 .news-actions span.act:hover { color: var(--text); }
 .tickers { display: flex; gap: 5px; flex-wrap: wrap; margin-top: 6px; }
+/* 双框信息流卡片(2026-09-03 双标签制: 左=来源信息, 右=内容信息, 标签分区独立) */
+.nc-grid    { display: grid; grid-template-columns: 188px minmax(0, 1fr); gap: var(--s3); }
+.nc-src     { border: 1px solid var(--border); border-radius: var(--r-panel);
+              background: var(--bg); padding: 8px 10px; align-self: start;
+              display: flex; flex-direction: column; gap: 6px; }
+.nc-src .name { font-size: 12.5px; font-weight: 600; }
+.nc-src .brief { font-size: 11.5px; color: var(--text-mute); line-height: 1.5;
+                 display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical;
+                 overflow: hidden; }
+.nc-src .who { font-family: var(--mono); font-size: 11px; color: var(--text-dim); }
+.nc-body    { min-width: 0; }
+.nc-badges  { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; margin-bottom: 5px; }
+.nc-time    { font-family: var(--mono); font-size: 11px; color: var(--text-mute); margin-right: 2px; }
+@media (max-width: 1100px) { .nc-grid { grid-template-columns: 1fr; } }   /* 窄屏左右框纵堆 */
 .empty, .err-box { text-align: center; padding: 48px var(--s4); color: var(--text-mute); }
 .err-box { color: var(--yellow); }
 .err-box code { font-family: var(--mono); background: var(--bg); padding: 2px 8px;
