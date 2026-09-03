@@ -1273,10 +1273,19 @@ def fetch_polymarket_sentiment(page_size: int = 10) -> list:
             continue
         prob = f"{float(prices[0]) * 100:.0f}%" if prices else "?"
         vol = float(m.get("volume24hr") or 0)
+        # time=信息时效(updatedAt 概率最新变动时刻, UTC→北京);
+        # endDate 是预测结算日(可能数年后), 只作上下文进正文, 绝不能当发布时间(2026-09-03 用户发现)
+        upd = m.get("updatedAt") or ""
+        if upd:
+            from datetime import datetime, timedelta, timezone
+            t = datetime.fromisoformat(upd.replace("Z", "+00:00"))
+            time_str = t.astimezone(timezone(timedelta(hours=8))).strftime("%Y-%m-%d %H:%M")
+        else:
+            time_str = ""
         end = (m.get("endDate") or "")[:10]
         pair = "/".join(outcomes[:2]) if outcomes else "Yes/No"
-        out.append({"time": end, "source": "Polymarket",
-                    "text": f"{q} —— {pair}: {prob} (24h量${vol / 1000:.0f}k)",
+        out.append({"time": time_str, "source": "Polymarket",
+                    "text": f"{q} —— {pair}: {prob} (24h量${vol / 1000:.0f}k, 结算日{end or '未定'})",
                     "url": f"https://polymarket.com/event/{m.get('slug') or ''}"})
         if len(out) >= int(page_size):
             break
