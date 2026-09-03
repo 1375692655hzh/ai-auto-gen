@@ -83,8 +83,13 @@ def _cfg_section() -> dict:
 
 
 def list_sources(markets: list | None = None, channels: list | None = None,
-                 forms: list | None = None, kinds: list | None = None) -> list:
-    """全部已注册来源 + 启用状态 + 健康状态。可按市场/渠道/形态/kind 过滤。"""
+                 forms: list | None = None, kinds: list | None = None,
+                 positionings: list | None = None) -> list:
+    """全部已注册来源 + 启用状态 + 健康状态。可按市场/定位/渠道(旧)/形态/kind 过滤。
+    2026-09-03 双标签制: markets 输入接受旧别名(美股→美国等); 新增 positionings。"""
+    from sources.taxonomy import norm_markets
+    if markets:
+        markets = norm_markets(list(markets))
     sec = _cfg_section()
     out = []
     for sid, e in REGISTRY.items():
@@ -98,6 +103,8 @@ def list_sources(markets: list | None = None, channels: list | None = None,
         out = [m for m in out if ms & set(m.get("markets") or [])]
     if channels:
         out = [m for m in out if m.get("channel") in channels]
+    if positionings:
+        out = [m for m in out if m.get("positioning") in positionings]
     if forms:
         out = [m for m in out if m.get("form") in forms]
     if kinds:

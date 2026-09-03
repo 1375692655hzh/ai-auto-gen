@@ -131,9 +131,10 @@ def create_app():
 
     @app.get("/v1/sources")
     def sources(request: Request, markets: str = "", channels: str = "",
-                forms: str = "", kinds: str = ""):
+                positionings: str = "", forms: str = "", kinds: str = ""):
         csv = lambda v: [s.strip() for s in v.split(",") if s.strip()] or None
         out = list_sources(markets=csv(markets), channels=csv(channels),
+                           positionings=csv(positionings),
                            forms=csv(forms), kinds=csv(kinds))
         request.state.n_items = len(out)
         return {"total": len(out), "sources": out}
@@ -149,6 +150,7 @@ def create_app():
     @app.get("/v1/items")
     def items(request: Request, markets: str = "", kinds: str = "",
               info_types: str = "", channels: str = "", forms: str = "",
+              item_types: str = "", positionings: str = "",
               sources: str = "", tickers: str = "", sentiments: str = "",
               event_types: str = "", q: str = "",
               since: str = "", limit: int = 200, cursor: str = "",
@@ -156,6 +158,8 @@ def create_app():
         csv = lambda v: [s.strip() for s in v.split(",") if s.strip()] or None
         out, nxt = _store.query(markets=csv(markets), kinds=csv(kinds),
                                 info_types=csv(info_types), channels=csv(channels),
+                                item_types=csv(item_types),
+                                positionings=csv(positionings),
                                 forms=csv(forms), source_ids=csv(sources),
                                 tickers=csv(tickers), sentiments=csv(sentiments),
                                 event_types=csv(event_types),

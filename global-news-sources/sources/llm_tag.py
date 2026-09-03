@@ -5,6 +5,9 @@ refresh 轮末对本轮新入库条目批量精修 sectors/sentiment/event_type�
 - 模型走项目统一 LLM 配置(secret.local.json 的 base_url/api_key, 默认 deepseek-v4-flash 便宜档)
 - LLM 失败/超时 → 保留规则打标结果(兜底), 不阻塞 refresh
 - 关闭方式: config.yaml sources.llm_tag.enabled: false
+- 2026-09-03 双标签制: L1/L2 全枚举注入提示词(收 L2 漂移) + L3 开放热点 +
+  写库前 taxonomy.check_sector 校验(非法 L1/L2 直接丢弃, 不再信任模型自造词);
+  info_type 纠偏后同步重算 item_type。
 """
 
 import json
@@ -12,14 +15,32 @@ import re
 import time
 
 from sources import store as _store
+from sources import taxonomy as _tax
 
 DEFAULT_MODEL = "deepseek-v4-flash"
 BATCH = 20
 MAX_CHARS = 1500
 
-_SYS = """你是财经信息打标器。对每条输入输出: sectors(赛道数组, 形如"板块>赛道", 板块从[宏观与政策/半导体/AI与算力/互联网与传媒/消费电子/通信与卫星/汽车与智能驾驶/新能源与电力/油气与能源/金属与矿业/化工与新材料/医药生物/金融与加密/地产与基建/消费/军工与航空航天/工业与机器人/交通运输/农业与食品]选, 无赛道属性给[])、sentiment(bullish/bearish/neutral)、event_type(从[earnings/guidance/rating/mna/dividend/offering/fda/legal/policy/macro/contract/personnel/product]选, 都不是给"")、type(内容类型纠偏: 客观事实报道给news, 含主观研判/评级/目标价/推演/观点给analysis, 拿不准给""不改动)。
-所有条目一视同仁——分析/观点/研报/KOL帖同样必须输出 sectors 与 sentiment。
-只输出 JSON 数组, 每个元素 {"i":序号, "sectors":[...], "sentiment":"...", "event_type":"...", "type":"..."}, 不要任何多余文字。"""
+
+def _sys() -> str:
+    """系统提示词: L1/L2 全枚举从 taxonomy 单一真相动态注入。"""
+    enum = " / ".join(
+        f"{l1}[{'|'.join(l2s)}]" for l1, l2s in _tax.L1_L2.items())
+    return (
+        "你是财经信息打标器。对每条输入输出:\n"
+        "1) sectors 赛道数组: 每个元素 {\"l1\":..., \"l2\":..., \"l3\":...}。\n"
+        f"   L1 与其下允许的 L2 全枚举(方括号内为该 L1 的合法 L2):\n{enum}\n"
+        "   铁律: l1/l2 必须逐字取自枚举, 禁止自造; 无合适 L2 时用该 L1 的\"其他\", "
+        "整条无赛道属性给 []。l3 可选: 当下主题热点短标签(≤12字, 如 稳定币/低空经济/HBM), "
+        "无热点则不输出 l3 字段, 禁止把公司名/人名当 l3(公司走 tickers)。\n"
+        "2) sentiment(bullish/bearish/neutral)。\n"
+        "3) event_type(从[earnings/guidance/rating/mna/dividend/offering/fda/legal/"
+        "policy/macro/contract/personnel/product]选, 都不是给\"\")。\n"
+        "4) type(内容类型纠偏: 客观事实报道给news, 含主观研判/评级/目标价/推演/观点给"
+        "analysis, 拿不准给\"\"不改动)。\n"
+        "所有条目一视同仁——分析/观点/研报/KOL帖同样必须输出 sectors 与 sentiment。\n"
+        "只输出 JSON 数组, 每个元素 {\"i\":序号, \"sectors\":[{\"l1\":..,\"l2\":..}], "
+        "\"sentiment\":\"...\", \"event_type\":\"...\", \"type\":\"...\"}, 不要任何多余文字。")
 
 
 def _conf() -> dict:
@@ -59,7 +80,7 @@ def _chat(base: str, key: str, model: str, prompt: str) -> str:
                       headers={"Authorization": f"Bearer {key}",
                                "Content-Type": "application/json"},
                       json={"model": model,
-                            "messages": [{"role": "system", "content": _SYS},
+                            "messages": [{"role": "system", "content": _sys()},
                                          {"role": "user", "content": prompt}],
                             "temperature": 0},
                       timeout=90)
@@ -106,21 +127,41 @@ def run(since_fetched_at: str) -> dict:
                     if not (0 <= i < len(chunk)):
                         continue
                     rid = chunk[i][0]
-                    sectors = d.get("sectors")
+                    # sectors: [{l1,l2,l3?}] → 校验后拼 "L1>L2[>L3]" 路径串
+                    # (写库前校验是收 L2 漂移的根, 2026-09-03)
+                    paths = []
+                    for s in d.get("sectors") or []:
+                        if not isinstance(s, dict):
+                            continue
+                        l1 = str(s.get("l1") or "").strip()
+                        l2 = str(s.get("l2") or "").strip()
+                        l3 = str(s.get("l3") or "").strip()
+                        if _tax.check_sector(l1, l2, l3):
+                            p = l1 + (f">{l2}" if l2 else "") + \
+                                (f">{l3}" if l3 else "")
+                            if p not in paths:
+                                paths.append(p)
                     sent = d.get("sentiment") if d.get("sentiment") in (
                         "bullish", "bearish", "neutral") else ""
                     etype = d.get("event_type") or ""
                     ttype = d.get("type") if d.get("type") in ("news", "analysis") else ""
                     sets, args = [], []
-                    if sectors:
+                    if paths:
                         sets.append("sectors=?")
-                        args.append(json.dumps(sectors, ensure_ascii=False))
+                        args.append(json.dumps(paths, ensure_ascii=False))
                     if sent:
                         sets.append("sentiment=?"); args.append(sent)
                     if etype:
                         sets.append("event_type=?"); args.append(etype)
                     if ttype:                          # 仅允许 news↔analysis 纠偏
                         sets.append("info_type=?"); args.append(ttype)
+                        # info_type 纠偏后 item_type 重算(类型是 kind×info_type 投影)
+                        row = conn.execute(
+                            "SELECT kind, source_id FROM items WHERE id=?",
+                            (rid,)).fetchone()
+                        if row:
+                            sets.append("item_type=?")
+                            args.append(_tax.derive_item_type(row[0], ttype, row[1]))
                     if sets:
                         conn.execute(
                             f"UPDATE items SET {','.join(sets)} WHERE id=?",

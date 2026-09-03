@@ -2,13 +2,17 @@
 
 v1(2026-09-01): 基础存储。v2(同日拍板): URL规范化去重 + 相似标题簇(clusters表)
 + 规则打标(tagger) + 时间可信位 + q检索 + dedup折叠 + cursor跳项修复。
+v5(2026-09-03 双标签制): +item_type(聚合/快讯/资讯/分析, kind×info_type 纯函数投影)
++positioning(官方/机构/大V/快讯源/新闻源, 源定位/X按author_role派生)
++markets_legacy(市场改名前留档); markets 统一新8值域(继承源/账号 + ticker并集扩展)。
 
 - 唯一写者: sources/refresh.py(调度进程)。读者: serve(HTTP)/CLI/板块二。
 - 精确去重键: md5(source_id + (canonical_url 或 规范化正文前60字))。
 - 模糊去重: 轮末 link_dups() 批量归并(bigram倒排+数字/极性硬否决), 不丢弃只挂簇。
 - 保留窗: flash 48h / 其他 7d。prune 同步清理簇。
-- 信息标签: info_type 按 kind 缺省; tickers/event_type/sentiment/sectors 由
-  tagger.enrich 规则打标(insight 不打赛道); llm_tag 精修(M4)。
+- 信息标签: info_type 按 kind 缺省(六值内部细类); item_type 四值由 taxonomy 投影;
+  tickers/event_type/sentiment/sectors 由 tagger.enrich 规则打标; llm_tag 精修(M4)。
+  枚举单一真相: sources/taxonomy.py。
 """
 
 import gzip
@@ -22,19 +26,21 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 from sources import tagger as _tagger
+from sources import taxonomy as _tax
 
 KIND_TO_INFO_TYPE = {"flash": "news", "peer_article": "analysis",
                      "announcement": "filing", "market": "data", "calendar": "calendar"}
 RETENTION_HOURS = {"flash": 48, "peer_article": 24 * 7, "announcement": 24 * 7,
                    "market": 24 * 7, "calendar": 24 * 7}
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
 _COLS = ["id", "source_id", "source", "time", "text", "title", "url", "media",
          "kind", "form", "channel", "risk", "markets", "lang", "info_type",
          "sectors", "sentiment", "fetched_at",
          "canonical_url", "title_norm", "cluster_id", "dup_count", "dup_scope",
          "published_at_known", "matched_terms", "tickers", "event_type",
          "author_role", "author_handle",
-         "text_zh", "title_zh", "lang_detected", "zh_status", "zh_attempts"]
+         "text_zh", "title_zh", "lang_detected", "zh_status", "zh_attempts",
+         "item_type", "positioning", "markets_legacy"]
 
 
 def _serve_dir() -> Path:
@@ -79,7 +85,10 @@ def _migrate(conn: sqlite3.Connection) -> None:
                 "author_role": "TEXT DEFAULT ''", "author_handle": "TEXT DEFAULT ''",
                 "text_zh": "TEXT DEFAULT ''", "title_zh": "TEXT DEFAULT ''",
                 "lang_detected": "TEXT DEFAULT ''", "zh_status": "TEXT DEFAULT ''",
-                "zh_attempts": "INTEGER DEFAULT 0"}
+                "zh_attempts": "INTEGER DEFAULT 0",
+                # v5(2026-09-03 双标签制): 类型四值/定位五值/市场改名前留档
+                "item_type": "TEXT DEFAULT ''", "positioning": "TEXT DEFAULT ''",
+                "markets_legacy": "TEXT DEFAULT '[]'"}
     for c, t in new_cols.items():
         if c not in have:
             conn.execute(f"ALTER TABLE items ADD COLUMN {c} {t}")
@@ -260,22 +269,35 @@ def put(source_id: str, meta: dict, items: list) -> int:
         t_str, t_known = _norm_time(it.get("time", ""), now)
         tag = _tagger.enrich(text, kind=kind)
         sectors = it.get("sectors") or tag["sectors"]
+        info_type = _decide_info_type(it, kind, text)
+        author_role = it.get("author_role") or ""
+        # 市场(2026-09-03 grok裁决): 继承源/账号为底, ticker 命中只并集扩展不覆盖;
+        # 全部走新值域(美股→美国等)。
+        base_mkts = it.get("markets") or meta.get("markets") or []
+        merged_mkts = _tax.norm_markets(list(base_mkts) + [
+            m for m in tag["markets"] if m not in base_mkts])
+        # 定位: X 条目按账号 role 派生(覆盖大源定位), 其余继承源 meta。
+        positioning = (_tax.ROLE_TO_POSITIONING.get(author_role)
+                       or meta.get("positioning", ""))
+        item_type = it.get("item_type") or _tax.derive_item_type(
+            kind, info_type, source_id)
         rows.append((
             _item_id(source_id, canon, text), source_id,
             it.get("source") or meta.get("title", ""), t_str, text,
             it.get("title", "") or "", it.get("url", "") or "", it.get("media", "") or "",
             kind, meta.get("form", ""), meta.get("channel", ""), meta.get("risk", ""),
-            json.dumps(it.get("markets") or meta.get("markets") or [], ensure_ascii=False),
+            json.dumps(merged_mkts, ensure_ascii=False),
             it.get("lang") or meta.get("lang", ""),
-            _decide_info_type(it, kind, text),
+            info_type,
             json.dumps(sectors, ensure_ascii=False),
             it.get("sentiment") or tag["sentiment"], now,
             canon, t_norm, "", 1, "none", t_known,
             json.dumps(tag["matched_terms"], ensure_ascii=False),
             json.dumps(it.get("tickers") or tag["tickers"], ensure_ascii=False),
             it.get("event_type") or tag["event_type"],
-            it.get("author_role") or "", it.get("author_handle") or "",
-            "", "", "", "", 0))
+            author_role, it.get("author_handle") or "",
+            "", "", "", "", 0,
+            item_type, positioning, "[]"))
     sql = ("INSERT OR IGNORE INTO items(" + ",".join(_COLS) + ") VALUES(" +
            ",".join("?" * len(_COLS)) + ")")
     conn = _connect()
@@ -421,10 +443,14 @@ def query(markets: list | None = None, kinds: list | None = None,
           forms: list | None = None, source_ids: list | None = None,
           tickers: list | None = None, sentiments: list | None = None,
           event_types: list | None = None,
+          item_types: list | None = None, positionings: list | None = None,
           q: str = "", since: str = "", limit: int = 200, cursor: str = "",
           dedup: bool = True) -> tuple[list, str]:
     """只读查询。dedup=True(默认)只出簇代表条; q 拆词 LIKE AND。
-    cursor = "time|id" 完整 keyset(修同分钟跳项 bug)。"""
+    cursor = "time|id" 完整 keyset(修同分钟跳项 bug)。
+    2026-09-03 双标签制: item_types/positionings 新过滤; markets 输入接受旧别名
+    (美股→美国/港股→香港/外汇大宗→全球)。"""
+    markets = _tax.norm_markets(list(markets or []))
     sql, args = "SELECT * FROM items WHERE 1=1", []
     if dedup:
         sql += (" AND (cluster_id='' OR id IN "
@@ -437,6 +463,10 @@ def query(markets: list | None = None, kinds: list | None = None,
         sql += f" AND event_type IN ({','.join('?' * len(event_types))})"; args += event_types
     if channels:
         sql += f" AND channel IN ({','.join('?' * len(channels))})"; args += channels
+    if item_types:
+        sql += f" AND item_type IN ({','.join('?' * len(item_types))})"; args += item_types
+    if positionings:
+        sql += f" AND positioning IN ({','.join('?' * len(positionings))})"; args += positionings
     if forms:
         sql += f" AND form IN ({','.join('?' * len(forms))})"; args += forms
     if source_ids:

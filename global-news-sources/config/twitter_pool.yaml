@@ -1,5 +1,5 @@
 # twitter_pool.yaml —— X 账号池（X账号录入规范.md 的结构化形态）
-# markets 一律用分类体系中文全称（A股/港股/美股/日本/韩国/台湾/土耳其/全球/外汇/大宗）
+# markets 一律用新体系市场值（全球/美国/A股/香港/台湾/日本/韩国/土耳其，2026-09-03 双标签制）
 defaults:
   per_account_limit: 50
   account_delay_seconds: 1
@@ -390,7 +390,7 @@ accounts:
   name: unusual_whales
   homepage: https://x.com/unusual_whales
   markets:
-  - 美股
+  - 美国
   role: data_bot
   lang: en
   tier: core
@@ -402,7 +402,7 @@ accounts:
   name: Evan
   homepage: https://x.com/StockMKTNewz
   markets:
-  - 美股
+  - 美国
   role: media
   lang: en
   tier: core
@@ -414,7 +414,7 @@ accounts:
   name: The Kobeissi Letter
   homepage: https://x.com/KobeissiLetter
   markets:
-  - 美股
+  - 美国
   - 全球
   role: analyst
   lang: en
@@ -427,7 +427,7 @@ accounts:
   name: litquidity
   homepage: https://x.com/litcapital
   markets:
-  - 美股
+  - 美国
   role: kol
   lang: en
   priority: medium
@@ -438,7 +438,7 @@ accounts:
   name: Michael Burry Stock Tracker
   homepage: https://x.com/burrytracker
   markets:
-  - 美股
+  - 美国
   role: data_bot
   lang: en
   priority: medium
@@ -449,7 +449,7 @@ accounts:
   name: Genevieve Roch-Decter, CFA
   homepage: https://x.com/GRDecter
   markets:
-  - 美股
+  - 美国
   role: kol
   lang: en
   priority: medium
@@ -460,7 +460,7 @@ accounts:
   name: Charlie Bilello
   homepage: https://x.com/charliebilello
   markets:
-  - 美股
+  - 美国
   - 全球
   role: analyst
   lang: en
@@ -484,7 +484,7 @@ accounts:
   name: db
   homepage: https://x.com/tier10k
   markets:
-  - 美股
+  - 美国
   role: media
   lang: en
   priority: medium
@@ -495,7 +495,7 @@ accounts:
   name: 10-K Diver
   homepage: https://x.com/10kdiver
   markets:
-  - 美股
+  - 美国
   role: analyst
   lang: en
   tier: core
@@ -507,7 +507,7 @@ accounts:
   name: '*Walter Bloomberg'
   homepage: https://x.com/DeItaone
   markets:
-  - 美股
+  - 美国
   - 全球
   role: media
   lang: en
@@ -519,7 +519,7 @@ accounts:
   name: Citrini
   homepage: https://x.com/citrini
   markets:
-  - 美股
+  - 美国
   role: analyst
   lang: en
   priority: medium
@@ -530,7 +530,7 @@ accounts:
   name: KawzInvests
   homepage: https://x.com/KawzInvests
   markets:
-  - 美股
+  - 美国
   role: kol
   lang: en
   tier: core
@@ -542,7 +542,7 @@ accounts:
   name: Burak Finance
   homepage: https://x.com/burak_finance
   markets:
-  - 美股
+  - 美国
   role: analyst
   lang: en
   priority: low
@@ -589,7 +589,7 @@ accounts:
   name: Brian Feroldi
   homepage: https://x.com/BrianFeroldi
   markets:
-  - 美股
+  - 美国
   role: analyst
   lang: en
   tier: core
@@ -601,7 +601,7 @@ accounts:
   name: Morgan Housel
   homepage: https://x.com/morganhousel
   markets:
-  - 美股
+  - 美国
   role: kol
   lang: en
   tier: core
@@ -648,7 +648,7 @@ accounts:
   name: App Economy Insights
   homepage: https://x.com/EconomyApp
   markets:
-  - 美股
+  - 美国
   role: analyst
   lang: en
   tier: core
@@ -661,7 +661,7 @@ accounts:
   name: Mostly Borrowed Ideas
   homepage: https://x.com/borrowed_ideas
   markets:
-  - 美股
+  - 美国
   role: analyst
   lang: en
   tier: core
@@ -674,7 +674,7 @@ accounts:
   name: Wasteland Capital
   homepage: https://x.com/ecommerceshares
   markets:
-  - 美股
+  - 美国
   role: kol
   lang: en
   tier: ext
@@ -687,7 +687,7 @@ accounts:
   name: The Transcript
   homepage: https://x.com/TheTranscript_
   markets:
-  - 美股
+  - 美国
   - 全球
   role: media
   lang: en
@@ -701,7 +701,7 @@ accounts:
   name: Rihard Jarc
   homepage: https://x.com/RihardJarc
   markets:
-  - 美股
+  - 美国
   role: analyst
   lang: en
   tier: core
@@ -714,7 +714,7 @@ accounts:
   name: Alex Morris (TSOH Investment Research)
   homepage: https://x.com/TSOH_Investing
   markets:
-  - 美股
+  - 美国
   role: analyst
   lang: en
   tier: core
@@ -727,7 +727,7 @@ accounts:
   name: Byrne Hobart
   homepage: https://x.com/ByrneHobart
   markets:
-  - 美股
+  - 美国
   - 全球
   role: analyst
   lang: en
@@ -741,7 +741,7 @@ accounts:
   name: Chris Hoeger
   homepage: https://x.com/DataDInvesting
   markets:
-  - 美股
+  - 美国
   role: analyst
   lang: en
   tier: ext
@@ -754,7 +754,7 @@ accounts:
   name: amit
   homepage: https://x.com/amitisinvesting
   markets:
-  - 美股
+  - 美国
   role: kol
   lang: en
   tier: core
@@ -767,7 +767,7 @@ accounts:
   name: Stratechery
   homepage: https://x.com/benthompson
   markets:
-  - 美股
+  - 美国
   - 全球
   role: analyst
   lang: en
@@ -781,7 +781,7 @@ accounts:
   name: Beth Kindig
   homepage: https://x.com/Beth_Kindig
   markets:
-  - 美股
+  - 美国
   role: analyst
   lang: en
   tier: ext
@@ -794,7 +794,7 @@ accounts:
   name: Gavin Baker
   homepage: https://x.com/GavinSBaker
   markets:
-  - 美股
+  - 美国
   - 全球
   role: analyst
   lang: en
@@ -808,7 +808,7 @@ accounts:
   name: Zephyr
   homepage: https://x.com/zephyr_z9
   markets:
-  - 美股
+  - 美国
   - 全球
   role: kol
   lang: zh
@@ -822,7 +822,7 @@ accounts:
   name: Dylan Patel
   homepage: https://x.com/dylan522p
   markets:
-  - 美股
+  - 美国
   - 全球
   role: analyst
   lang: en
@@ -850,7 +850,7 @@ accounts:
   name: Tech Fund
   homepage: https://x.com/techfund1
   markets:
-  - 美股
+  - 美国
   role: kol
   lang: en
   tier: ext
@@ -863,7 +863,7 @@ accounts:
   name: 𝐷𝑟. 𝐼𝑎𝑛 𝐶𝑢𝑡𝑟𝑒𝑠𝑠
   homepage: https://x.com/IanCutress
   markets:
-  - 美股
+  - 美国
   - 全球
   role: analyst
   lang: en
@@ -877,7 +877,7 @@ accounts:
   name: Patrick Moorhead
   homepage: https://x.com/PatrickMoorhead
   markets:
-  - 美股
+  - 美国
   - 全球
   role: analyst
   lang: en
@@ -919,7 +919,7 @@ accounts:
   name: zerohedge
   homepage: https://x.com/zerohedge
   markets:
-  - 美股
+  - 美国
   - 全球
   role: media
   lang: en
@@ -933,7 +933,7 @@ accounts:
   name: Wilfred Frost
   homepage: https://x.com/LizAnnSonders
   markets:
-  - 美股
+  - 美国
   - 全球
   role: analyst
   lang: en
@@ -947,7 +947,7 @@ accounts:
   name: Nick Timiraos
   homepage: https://x.com/NickTimiraos
   markets:
-  - 美股
+  - 美国
   - 全球
   role: insider
   lang: en
@@ -961,7 +961,7 @@ accounts:
   name: Cathie Wood
   homepage: https://x.com/CathieDWood
   markets:
-  - 美股
+  - 美国
   role: insider
   lang: en
   tier: ext
@@ -974,7 +974,7 @@ accounts:
   name: Jim Cramer
   homepage: https://x.com/jimcramer
   markets:
-  - 美股
+  - 美国
   role: kol
   lang: en
   tier: ext
@@ -987,7 +987,7 @@ accounts:
   name: Ramp Capital
   homepage: https://x.com/RampCapitalLLC
   markets:
-  - 美股
+  - 美国
   role: kol
   lang: en
   tier: ext
@@ -1000,7 +1000,7 @@ accounts:
   name: 𝐓𝐗𝐌𝐂
   homepage: https://x.com/LynAldenContact
   markets:
-  - 美股
+  - 美国
   - 全球
   role: analyst
   lang: en
@@ -1014,7 +1014,7 @@ accounts:
   name: Sawyer Merritt
   homepage: https://x.com/SawyerMerritt
   markets:
-  - 美股
+  - 美国
   role: kol
   lang: en
   tier: ext
@@ -1027,7 +1027,7 @@ accounts:
   name: Mark Minervini
   homepage: https://x.com/markminervini
   markets:
-  - 美股
+  - 美国
   role: trader
   lang: en
   tier: ext
@@ -1040,7 +1040,7 @@ accounts:
   name: Luke Gromen
   homepage: https://x.com/LukeGromen
   markets:
-  - 美股
+  - 美国
   - 全球
   role: analyst
   lang: en
@@ -1054,7 +1054,7 @@ accounts:
   name: Gary Black
   homepage: https://x.com/garyblack00
   markets:
-  - 美股
+  - 美国
   role: analyst
   lang: en
   tier: ext
@@ -1067,7 +1067,7 @@ accounts:
   name: Nebius
   homepage: https://x.com/JonahLupton
   markets:
-  - 美股
+  - 美国
   role: kol
   lang: en
   tier: ext
@@ -1080,7 +1080,7 @@ accounts:
   name: Compounding Quality
   homepage: https://x.com/QCompounding
   markets:
-  - 美股
+  - 美国
   role: kol
   lang: en
   tier: ext
@@ -1093,7 +1093,7 @@ accounts:
   name: Ross Gerber
   homepage: https://x.com/GerberKawasaki
   markets:
-  - 美股
+  - 美国
   role: trader
   lang: en
   tier: ext
@@ -1106,7 +1106,7 @@ accounts:
   name: Financelot
   homepage: https://x.com/FinanceLancelot
   markets:
-  - 美股
+  - 美国
   - 全球
   role: media
   lang: en
@@ -1120,7 +1120,7 @@ accounts:
   name: Peter Spina ⚒ GoldSeek | SilverSeek
   homepage: https://x.com/TaviCosta
   markets:
-  - 美股
+  - 美国
   - 全球
   role: analyst
   lang: en
@@ -1134,7 +1134,7 @@ accounts:
   name: Eric Balchunas
   homepage: https://x.com/michaelbatnick
   markets:
-  - 美股
+  - 美国
   role: kol
   lang: en
   tier: ext
@@ -1147,7 +1147,7 @@ accounts:
   name: Nick Maggiulli
   homepage: https://x.com/dollarsanddata
   markets:
-  - 美股
+  - 美国
   role: analyst
   lang: en
   tier: ext
@@ -1160,7 +1160,7 @@ accounts:
   name: Jesse Felder
   homepage: https://x.com/jessefelder
   markets:
-  - 美股
+  - 美国
   - 全球
   role: analyst
   lang: en
@@ -1174,7 +1174,7 @@ accounts:
   name: Eric Jackson
   homepage: https://x.com/ericjackson
   markets:
-  - 美股
+  - 美国
   role: trader
   lang: en
   tier: ext
@@ -1187,7 +1187,7 @@ accounts:
   name: Dan Niles
   homepage: https://x.com/DanielTNiles
   markets:
-  - 美股
+  - 美国
   role: analyst
   lang: en
   tier: ext
@@ -1200,7 +1200,7 @@ accounts:
   name: modest proposal
   homepage: https://x.com/modestproposal1
   markets:
-  - 美股
+  - 美国
   - 全球
   role: kol
   lang: en
@@ -1214,7 +1214,7 @@ accounts:
   name: Dividendology
   homepage: https://x.com/dividendology
   markets:
-  - 美股
+  - 美国
   role: analyst
   lang: en
   tier: ext
@@ -1227,7 +1227,7 @@ accounts:
   name: Lance Roberts
   homepage: https://x.com/LanceRoberts
   markets:
-  - 美股
+  - 美国
   - 全球
   role: analyst
   lang: en
@@ -1241,7 +1241,7 @@ accounts:
   name: Jim Bianco
   homepage: https://x.com/biancoresearch
   markets:
-  - 美股
+  - 美国
   - 全球
   role: analyst
   lang: en
@@ -1256,7 +1256,7 @@ accounts:
   homepage: https://x.com/buffett_taro
   markets:
   - 日本
-  - 美股
+  - 美国
   role: kol
   lang: ja
   tier: core
@@ -1270,7 +1270,7 @@ accounts:
   homepage: https://x.com/komcdspxl
   markets:
   - 日本
-  - 美股
+  - 美国
   role: kol
   lang: ja
   tier: ext
@@ -1284,7 +1284,7 @@ accounts:
   homepage: https://x.com/strainerjp
   markets:
   - 日本
-  - 美股
+  - 美国
   role: media
   lang: ja
   tier: core
@@ -1298,7 +1298,7 @@ accounts:
   homepage: https://x.com/taritariblog
   markets:
   - 日本
-  - 美股
+  - 美国
   role: analyst
   lang: ja
   tier: core
@@ -1312,7 +1312,7 @@ accounts:
   homepage: https://x.com/us_stock_invest
   markets:
   - 日本
-  - 美股
+  - 美国
   role: kol
   lang: ja
   tier: ext
@@ -1326,7 +1326,7 @@ accounts:
   homepage: https://x.com/ActiveArk
   markets:
   - 日本
-  - 美股
+  - 美国
   role: data_bot
   lang: ja
   tier: ext
@@ -1340,7 +1340,7 @@ accounts:
   homepage: https://x.com/NRAGR
   markets:
   - 日本
-  - 美股
+  - 美国
   role: media
   lang: ja
   tier: ext
@@ -1367,7 +1367,7 @@ accounts:
   homepage: https://x.com/mifsee
   markets:
   - 日本
-  - 美股
+  - 美国
   role: kol
   lang: ja
   tier: ext
@@ -1516,7 +1516,7 @@ accounts:
   homepage: https://x.com/hirosetakao
   markets:
   - 日本
-  - 美股
+  - 美国
   role: analyst
   lang: ja
   tier: ext
@@ -1543,7 +1543,7 @@ accounts:
   homepage: https://x.com/momiage0088
   markets:
   - 日本
-  - 美股
+  - 美国
   role: kol
   lang: ja
   tier: ext
@@ -1583,7 +1583,7 @@ accounts:
   homepage: https://x.com/america_kabu
   markets:
   - 日本
-  - 美股
+  - 美国
   role: media
   lang: ja
   tier: ext
@@ -1678,7 +1678,7 @@ accounts:
   name: Fabricated Knowledge
   homepage: https://x.com/fabknowledge
   markets:
-  - 美股
+  - 美国
   - 全球
   role: media
   lang: en
@@ -1742,8 +1742,8 @@ filters:
   - 原油
   - 黄金
   - 美元
-  - 美股
-  - 港股
+  - 美国
+  - 香港
   - 米国株
   - 日本株
   - 投資

@@ -442,6 +442,9 @@ def fetch_twitter_kol(conf: dict | None = None, mode: str = "views") -> list:
                             "url": s.get("url") or f"https://x.com/{h}/status/{sid}",
                             "author_role": a.get("role") or "",
                             "author_handle": au.get("screen_name") or h,
+                            # 条目市场继承账号(不继承 twitter_kol_* 大源的池全景),
+                            # 定位由 store 按 author_role 派生(2026-09-03 双标签制)
+                            "markets": list(a.get("markets") or []),
                             "lang": a.get("lang") or ""})
                 n += 1
                 if n >= count:
