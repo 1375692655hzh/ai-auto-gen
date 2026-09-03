@@ -299,6 +299,17 @@ def api_run_stop():
     return jsonify({"ok": True})
 
 
+# ---------- 本地增强: 健康体检(同步时注意保留) ----------
+@app.route("/api/health", methods=["POST"])
+def api_health():
+    """一键体检: 队列/账本/登录态/日志错误。fast=true 跳过登录检测。"""
+    fast = bool((request.get_json(force=True, silent=True) or {}).get("fast"))
+    import health
+    rep = health.run_health(fast=fast)
+    return jsonify({"ok": True, "report": rep["report_text"],
+                    "file": rep["report_file"]})
+
+
 if __name__ == "__main__":
     print("auto-publisher 控制台: http://127.0.0.1:5001")
     app.run(host="127.0.0.1", port=5001, debug=False, threaded=True)

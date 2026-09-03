@@ -124,6 +124,15 @@
       <span id="runState" class="msg"></span>
     </div>
     <pre id="log" style="display:none"></pre>
+    <!-- 本地增强: 一键体检(同步时注意保留) -->
+    <div style="margin-top:14px; border-top:1px solid var(--line); padding-top:12px;">
+      <div style="display:flex; gap:10px; align-items:center;">
+        <button class="ghost" onclick="runHealth(false)">🔍 一键体检</button>
+        <button class="ghost" onclick="runHealth(true)">⚡ 快速体检(不查登录)</button>
+        <span id="healthState" class="msg"></span>
+      </div>
+      <pre id="healthReport" style="display:none"></pre>
+    </div>
   </div>
 </div>
 
@@ -257,6 +266,20 @@ async function runPublish() {
   pollLog();
 }
 async function stopPublish(){ await fetch('/api/run/stop',{method:'POST'}); }
+
+// 本地增强: 一键体检
+async function runHealth(fast) {
+  const el = document.getElementById('healthState'), box = document.getElementById('healthReport');
+  el.textContent = fast ? '快速体检中…' : '体检中(含登录态检测, 约1分钟)…';
+  box.style.display = 'none';
+  try {
+    const r = await (await fetch('/api/health',{method:'POST',
+      headers:{'Content-Type':'application/json'},body:JSON.stringify({fast:!!fast})})).json();
+    el.textContent = r.ok ? '完成 ✓ 报告已存 ' + r.file : '失败';
+    box.textContent = r.report || '';
+    box.style.display = 'block';
+  } catch(e) { el.textContent = '体检请求失败: ' + e; }
+}
 async function pollLog() {
   const r = await (await fetch('/api/run/log')).json();
   const log = document.getElementById('log');

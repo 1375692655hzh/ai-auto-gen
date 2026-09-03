@@ -30,7 +30,7 @@ from publishers import get_publisher, REGISTRY
 
 # 平台发布优先级(仅排序用;实际清单 = 这里列出的 ∩ config enabled,未列出的注册平台排最后)
 ORDER = ["eastmoney", "xueqiu", "weibo", "futu", "changqiao",
-         "laohu", "zhihu", "bilibili", "douyin", "tonghuashun"]
+         "laohu", "zhihu", "bilibili", "douyin", "tonghuashun", "xiaohongshu"]
 STOP_ON_FAIL = False    # --stop-on-fail 时为 True: 失败立即停不重试
 
 
@@ -100,6 +100,8 @@ async def main():
                         help="任何平台失败立即停止(验证模式; 不加则失败跳过继续)")
     parser.add_argument("--draft", action="store_true",
                         help="草稿模式(只填充+截图,不真发);不加默认真发")
+    parser.add_argument("--force", action="store_true",
+                        help="跳过失败冷却强制重试(默认同篇同平台失败后30分钟内不重试,防限流)")
     args = parser.parse_args()
     global STOP_ON_FAIL
     STOP_ON_FAIL = args.stop_on_fail
@@ -136,12 +138,49 @@ async def main():
         return
     logger.info(f"待发 {len(todo)} 篇: {[a['id'][:20] for a in todo]}")
 
+    # 发布前登录态预检: 失效平台直接剔除并记账(带原因),
+    # 不再发文中途卡 240s 等登录; failed 不算已发, 重登后重跑自动补发
+    if config.get("precheck_login", True) and not args.draft:
+        logger.info("登录态预检中(每平台约10s)...")
+        import health
+        for r in await health.check_logins_async(enabled):
+            p = r["platform"]
+            if r.get("logged_in") is False:
+                logger.error(f"[{p}] 预检: {r['why']} —— 本次跳过, 扫码重登后重跑即自动补发")
+                for art in todo:
+                    state.mark(art["id"], p, "failed", note=f"预检跳过: {r['why']}")
+                enabled = [x for x in enabled if x != p]
+            elif r.get("logged_in") is None:
+                logger.warning(f"[{p}] 预检不确定: {r['why']} (照常尝试)")
+        if not enabled:
+            logger.error("预检后没有可用平台(都需重新登录)")
+            return
+
     report = {}    # {article_id: {plat: {ok, url, note}}}
     for art in todo:
         logger.info(f"===== 开始发: {art['id']} =====")
         report[art["id"]] = {}
         for plat in enabled:
             logger.info(f"--- [{art['id'][:16]}] → {plat} ---")
+            # 防限流冷却: 同篇×同平台失败后 N 分钟内不再重试(高频重试会触发平台风控,
+            # 2026-09-03 微博限流的教训)。--force 可跳过。
+            cooldown = int(throttle.get("retry_cooldown_minutes", 30))
+            if not args.force and cooldown > 0 and not args.draft:
+                prev = state.get(art["id"], plat)
+                if prev.get("status") in ("failed", "uncertain"):
+                    try:
+                        from datetime import datetime as _dt
+                        mins = (_dt.now() - _dt.strptime(prev["time"],
+                                "%Y-%m-%d %H:%M:%S")).total_seconds() / 60
+                        if 0 <= mins < cooldown:
+                            r = {"ok": False, "skipped": True, "url": "",
+                                 "note": f"冷却中: 上次{prev['status']}于{int(mins)}分钟前,"
+                                         f"{cooldown}分钟后才可重试(--force 可强制)"}
+                            report[art["id"]][plat] = r
+                            logger.warning(f"--- {plat}: ⏸️ {r['note']} ---")
+                            continue
+                    except Exception:
+                        pass
             r = await publish_one_platform(plat, art, config, state, logger, throttle,
                                            draft=args.draft)
             report[art["id"]][plat] = r

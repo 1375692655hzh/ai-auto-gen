@@ -22,7 +22,7 @@ def _blocktext(blk):
 
 def _call_model(prompt: str, timeout: int = 90) -> str:
     """调团队配置的模型 API(llm.complete)。未配置/失败返回空。"""
-    return llm.complete(prompt, max_tokens=128, temperature=0.3, timeout=timeout)
+    return llm.complete(prompt, max_tokens=1024, temperature=0.3, timeout=timeout)
 
 
 def _rows_to_blocks(spec):

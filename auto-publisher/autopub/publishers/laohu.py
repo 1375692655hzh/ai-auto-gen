@@ -379,6 +379,24 @@ class LaohuPublisher(BrowserPublisher):
             return {"ok": True, "url": page.url, "note": "已发(发帖成功toast确认, 主页延迟未查到链接)"}
         return {"ok": False, "url": page.url, "note": "主页未查到该帖, 未发成功(可能仅存草稿)"}
 
+    async def _personal_home(self, page) -> str:
+        """个人主页 URL: config 配了 personal_url 直接用(首页抓的可能抓错人),
+        没配才退回从首页 a[href*=/personal/] 抓。"""
+        cfg_url = (self.config or {}).get("personal_url")
+        if cfg_url:
+            return cfg_url
+        try:
+            await page.goto("https://www.laohu8.com/", wait_until="domcontentloaded",
+                            timeout=30000)
+            await page.wait_for_timeout(2000)
+            me = await page.evaluate("""() => {
+                const a = document.querySelector('a[href*="/personal/"]');
+                return a ? a.getAttribute('href') : '';
+            }""")
+            return (me if me.startswith("http") else "https://www.laohu8.com" + me) if me else ""
+        except Exception:
+            return ""
+
     async def _find_my_post(self, page, title: str) -> str:
         """去个人主页, 用标题匹配查这篇帖子的真实 /post/{id} 链接。
         发布后新帖上主页有延迟 → 重试几轮(每轮重载主页), 查不到才算没发成功。
@@ -389,17 +407,8 @@ class LaohuPublisher(BrowserPublisher):
             return ""
         # 取标题前8字且去掉空格(主页显示可能截断/空格不一致)
         key = re.sub(r"\s+", "", raw)[:8]
-        # 先定位个人主页 URL
-        try:
-            await page.goto("https://www.laohu8.com/", wait_until="domcontentloaded", timeout=30000)
-            await page.wait_for_timeout(2000)
-            me = await page.evaluate("""() => {
-                const a = document.querySelector('a[href*="/personal/"]');
-                return a ? a.getAttribute('href') : '';
-            }""")
-            home = (me if me.startswith("http") else ("https://www.laohu8.com" + me)) if me else ""
-        except Exception:
-            home = ""
+        # 先定位个人主页 URL(config personal_url 优先)
+        home = await self._personal_home(page)
         if not home:
             return ""
         for attempt in range(5):                         # 重试5轮(新帖上主页有延迟)
@@ -429,16 +438,10 @@ class LaohuPublisher(BrowserPublisher):
         if len(key) < 6:
             return False
         try:
-            # 从首页找自己主页链接
-            await page.goto("https://www.laohu8.com/", wait_until="domcontentloaded", timeout=40000)
-            await page.wait_for_timeout(2500)
-            me = await page.evaluate("""() => {
-                const a = document.querySelector('a[href*="/personal/"]');
-                return a ? a.getAttribute('href') : '';
-            }""")
-            if not me:
+            # 个人主页(config personal_url 优先)
+            url = await self._personal_home(page)
+            if not url:
                 return False
-            url = me if me.startswith("http") else ("https://www.laohu8.com" + me)
             await page.goto(url, wait_until="domcontentloaded", timeout=40000)
             await page.wait_for_timeout(3000)
             titles = await page.evaluate("""() => {
@@ -458,15 +461,9 @@ class LaohuPublisher(BrowserPublisher):
         # 去个人主页, 用标题匹配本次发的帖子(不靠"第一个/post/", 那可能是旧帖/评论链接)
         key = (self._cur_title or "").strip()[:14]
         try:
-            await page.goto("https://www.laohu8.com/", wait_until="domcontentloaded", timeout=30000)
-            await page.wait_for_timeout(2000)
-            me = await page.evaluate("""() => {
-                const a = document.querySelector('a[href*="/personal/"]');
-                return a ? a.getAttribute('href') : '';
-            }""")
-            if me:
-                url = me if me.startswith("http") else ("https://www.laohu8.com" + me)
-                await page.goto(url, wait_until="domcontentloaded", timeout=30000)
+            home = await self._personal_home(page)
+            if home:
+                await page.goto(home, wait_until="domcontentloaded", timeout=30000)
                 await page.wait_for_timeout(3000)
             # 标题匹配的帖子链接
             href = await page.evaluate("""(key) => {

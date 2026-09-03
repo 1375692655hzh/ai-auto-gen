@@ -32,10 +32,14 @@ class XueqiuPublisher(BrowserPublisher):
 
     async def is_logged_in(self, page) -> bool:
         # 注意: writeV2 不登录也会渲染编辑器(有标题框), 不能用"有标题框"判断。
-        # 铁判据: xq_a_token Cookie 存在且非空。
+        # xqat/u 单独也不保险: 登录弹窗一打开就可能预置这些 Cookie(扫码确认前就存在)。
+        # 铁判据 = Cookie 在 + 页面右上角不再显示"未登录"(真登录后该字样才消失)。
         try:
-            return any(c["name"] == "xq_a_token" and c["value"]
-                       for c in await page.context.cookies())
+            have = {c["name"]: c["value"] for c in await page.context.cookies()}
+            if not (have.get("xqat") and have.get("u")):
+                return False
+            html = await page.content()
+            return "未登录" not in html
         except Exception:
             return False
 

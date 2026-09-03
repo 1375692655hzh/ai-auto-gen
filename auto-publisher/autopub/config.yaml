@@ -31,12 +31,14 @@ browser:
 throttle:
   min_interval_seconds: 60      # 篇间最小间隔
   max_consecutive_failures: 3   # 连续失败几次就停
+  retry_cooldown_minutes: 30    # 同篇×同平台失败后冷却N分钟才许重试(防限流; --force 可跳过)
 
 # 各平台设置(enabled=false 的不发)
 platforms:
   laohu:
-    enabled: false   # 需要实名认证, 暂停
+    enabled: true    # 已登录自己的账号(2026-09-01); 老虎要求实名, 账号需已完成
     max_daily: 10
+    personal_url: https://www.laohu8.com/personal/4226106262393242   # 个人主页(发布后抓文章链接用)
     # card=遇 $股票$ 走联想插入真卡片;strip=转纯文本;keep=原样打字面
     stock_tags: card
     append_hot: 3          # 文末追加热议榜前 N 只股票卡片(0=不加)
@@ -49,7 +51,7 @@ platforms:
     max_daily: 10
     stock_tags: strip
   weibo:
-    enabled: false
+    enabled: true    # 已登录自己的账号(2026-09-01); 微博风控最严, 日上限保持保守
     max_daily: 8
     stock_tags: strip
   futu:
@@ -73,14 +75,17 @@ platforms:
     stock_tags: keep
     append_hot: 3          # 文末加雪球美股热榜前N个 cashtag(雪球长文限插3个)
   zhihu:
-    enabled: false   # 账号触发"网络环境异常请前往安全认证"风控, 暂停; 过安全认证后可改回 true
+    enabled: true    # 已登录自己的账号(2026-09-01); 若再遇"安全认证"提示, 先到平台过认证
     max_daily: 5
     stock_tags: strip
     fill_chart_gaps: true     # 图片传不上→把依赖图表的位置用文字说明替代(保格式), 知乎专用
+  xiaohongshu:
+    enabled: false   # 登录可用; 发布流程待真站校准(先 --draft 核对), 校准后再开
+    max_daily: 5
+    stock_tags: strip
   weixin:
     enabled: false   # 新接入待验证: 先 py login.py weixin 扫码 + publish_all.py --draft 走通再开
     max_daily: 1     # 公众号群发次数有限, "真发"也只存草稿(群发永远人工点)
-    stock_tags: strip
 
 # ===== 比特浏览器模式(可选, 多账号指纹+IP 隔离) =====
 # 原理: 每个平台账号放在一个比特浏览器"窗口环境"里(客户端里建, 可各自绑独立代理 IP)。

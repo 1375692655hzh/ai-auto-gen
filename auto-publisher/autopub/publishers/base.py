@@ -134,11 +134,34 @@ class BrowserPublisher:
             return False
 
     async def wait_for_login(self, page, timeout_seconds: int = 240) -> bool:
-        """打开发文页;未登录则提示手动登录并轮询。"""
+        """打开发文页;未登录则提示手动登录并轮询。
+
+        两个"页面渲染滞后"修正(雪球实测):
+          - 首渲染可能带旧/游客 token 显示"未登录"(Cookie 其实有效) → 重载一次再判
+          - 登录在别的 tab/弹窗完成时, 本页 DOM 不刷新看不到 → Cookie 罐一变化就重载
+        """
+        async def _cookie_sig():
+            try:
+                cs = await page.context.cookies()
+                return sorted((c["name"], c["value"][:6]) for c in cs)
+            except Exception:
+                return None
+
+        async def _reload():
+            try:
+                await page.reload(wait_until="domcontentloaded", timeout=30000)
+                await page.wait_for_timeout(2500)
+            except Exception:
+                pass
+
         await page.goto(self.compose_url, wait_until="domcontentloaded", timeout=60000)
         await page.wait_for_timeout(3000)
         if await self.is_logged_in(page):
             self.logger.info(f"[{self.name}] 已登录")
+            return True
+        await _reload()                      # 旧token渲染滞后再判一次
+        if await self.is_logged_in(page):
+            self.logger.info(f"[{self.name}] 已登录(重载后确认)")
             return True
 
         self.logger.info("=" * 50)
@@ -147,8 +170,13 @@ class BrowserPublisher:
         self.logger.info("=" * 50)
         await self._shot(page, "login")
 
+        last_sig = await _cookie_sig()
         for _ in range(timeout_seconds // 3):
             await page.wait_for_timeout(3000)
+            sig = await _cookie_sig()
+            if sig != last_sig:              # Cookie 变了=别处刚完成登录 → 重载看真态
+                last_sig = sig
+                await _reload()
             if await self.is_logged_in(page):
                 self.logger.info(f"[{self.name}] 登录成功")
                 await page.wait_for_timeout(2000)
@@ -289,7 +317,13 @@ class BrowserPublisher:
                     if sp.exists():
                         state = _json.loads(sp.read_text(encoding="utf-8"))
                         if state.get("cookies"):
-                            await context.add_cookies(state["cookies"])
+                            # 只补 profile 里缺的 Cookie, 不覆盖:
+                            # 旧存档会把后来服务端轮换出的新 token 打回去, 反而登出
+                            existing = {c["name"] for c in await context.cookies()}
+                            to_add = [c for c in state["cookies"]
+                                      if c["name"] not in existing]
+                            if to_add:
+                                await context.add_cookies(to_add)
                 except Exception as e:
                     self.logger.warning(f"[{self.name}] 登录态注入失败(可能需重新 login): {e}")
                 # 抹掉自动化特征(风控检测 navigator.webdriver)
@@ -302,6 +336,10 @@ class BrowserPublisher:
 
             try:
                 if not await self.wait_for_login(page):
+                    # 登录失败也要进账本(带原因), 否则发布清单只显示❌无解释
+                    for article in articles:
+                        self.state.mark(article["id"], self.name, "failed",
+                                        note="登录超时/会话过期, 未发布(重登后重跑即可)")
                     return
                 try:
                     await self.prepare(page)          # 发布前准备(如抓热议榜)

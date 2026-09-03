@@ -57,9 +57,38 @@ async def login_one(plat: str):
         page.set_default_timeout(60000)
         await page.goto(url, wait_until="domcontentloaded")
         ok = False
-        print("等待登录(最多 5 分钟, 登录成功自动继续)...")
-        for _ in range(100):
+        print("等待登录(最多 10 分钟, 登录成功自动继续)...")
+
+        async def _cookie_sig():
+            try:
+                cs = await page.context.cookies()
+                return sorted((c["name"], c["value"][:6]) for c in cs)
+            except Exception:
+                return None
+
+        async def _reload():
+            try:
+                await page.reload(wait_until="domcontentloaded", timeout=30000)
+                await page.wait_for_timeout(2500)
+            except Exception:
+                pass
+
+        # 首渲染可能带旧/游客 token 显示未登录(Cookie 其实有效), 重载一次再判
+        await page.wait_for_timeout(3000)
+        if await pub.is_logged_in(page):
+            ok = True
+        else:
+            await _reload()
+            ok = await pub.is_logged_in(page)
+        last_sig = await _cookie_sig()
+        for _ in range(200):
+            if ok:
+                break
             await page.wait_for_timeout(3000)
+            sig = await _cookie_sig()
+            if sig != last_sig:      # Cookie 罐变化=登录刚完成(可能在别的tab) → 重载看真态
+                last_sig = sig
+                await _reload()
             try:
                 if await pub.is_logged_in(page):
                     ok = True

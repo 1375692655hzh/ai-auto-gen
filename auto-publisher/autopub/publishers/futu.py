@@ -207,23 +207,51 @@ class FutuPublisher(BrowserPublisher):
             return False
 
     async def _do_publish(self, page) -> dict:
-        # 真实发布按钮: 右上角 .submit-btn 文案"发表"(注意别点成"同步")
-        ok = await self.try_click(page, [
-            '.submit-btn',
-            'button:has-text("发表")',
-        ], "发表")
-        if not ok:
+        """富途编辑器是两步式(2026-09 实测):
+        第一步填内容, 按钮 .submit-btn 文案"下一步"(校验未过时带 no-submit 类);
+        点击后第二步面板出现真正的"發表"按钮, 再点才发布。"""
+        # 1) 等校验通过(no-submit 消失), 最多 10s; 一直不过=有要求没满足
+        for _ in range(10):
+            if await page.locator(".submit-btn.no-submit").count() == 0:
+                break
+            await page.wait_for_timeout(1000)
+        else:
+            reqs = await page.evaluate('''() => {
+                const seen = new Set(), out = [];
+                document.querySelectorAll('li,div,p,span').forEach(el => {
+                    if (el.children.length) return;
+                    const t = (el.innerText || '').trim();
+                    if (t && t.length < 30 && /不能少於|不能少于|至少|請選|请选/.test(t)
+                        && !seen.has(t)) { seen.add(t); out.push(t); }
+                });
+                return out.slice(0, 5);
+            }''')
+            await self._shot(page, "no_submit_stuck")
+            return {"ok": False, "url": "",
+                    "note": f"發表按钮校验未通过(要求: {reqs}), 未发布"}
+
+        # 2) 点發表(2026-09-03 用户实测: .submit-btn 直接发布, 无第二步)
+        if not await self.try_click(page, ['.submit-btn', 'button:has-text("发表")'],
+                                   "发表"):
             await self._shot(page, "no_publish")
             return {"ok": False, "url": "", "note": "发布按钮没点中"}
-        # 成功标志: 页面从 /editor 跳走
-        for _ in range(20):
+
+        # 3) 盯成功信号: URL 离开 /editor 或出现成功提示
+        import re as _re
+        for _ in range(25):
             await page.wait_for_timeout(1000)
             try:
                 url = page.url or ""
+                txt = await page.evaluate(
+                    "() => document.body ? (document.body.innerText||'').slice(0,3000) : ''")
             except Exception:
-                # 页面被关/跳转读取失败 ≠ 发布成功(乐观误判会记假 published)
                 return {"ok": False, "url": "", "note": "发布结果未知(页面跳转读取失败)"}
             if "/editor" not in url:
                 self.logger.info(f"[{self.name}] 发布后跳转: {url[:70]}")
                 return {"ok": True, "url": url, "note": ""}
-        return {"ok": False, "url": "", "note": "发布结果未知(超时)"}
+            m = _re.search(r"(發[表佈]成功|发布成功|已提交|審核中|审核中)", txt or "")
+            if m:
+                return {"ok": True, "url": url,
+                        "note": f"已发({m.group(1)}, 原地提示, 链接待核实)"}
+        await self._shot(page, "verify_timeout")
+        return {"ok": False, "url": "", "note": "发布结果未知(超时)——请到富途后台人工核实"}

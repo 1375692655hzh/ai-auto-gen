@@ -102,7 +102,7 @@ def status() -> dict:
 
 # ---------- 调用 ----------
 
-def complete(prompt: str, system: str = "", max_tokens: int = 512,
+def complete(prompt: str, system: str = "", max_tokens: int = 1024,
              temperature: float = 0.3, timeout: int = 90) -> str:
     """统一补全入口。失败/未配置返回 ""(供 chart_gap 优雅降级)。"""
     try:
@@ -146,6 +146,12 @@ def _call_openai_compatible(cfg, prompt, system, max_tokens, temperature, timeou
         raise RuntimeError(f"HTTP {r.status_code}: {detail}")
     data = r.json()
     choice = data["choices"][0]
+    if choice.get("finish_reason") == "length" and max_tokens < 8192:
+        # 思考型模型(deepseek-r1/GLM思考/o1类)会把 token 先花在思考上,
+        # 小额度必截断 —— 自动放大 8 倍重试一次(上限 8192)
+        return _call_openai_compatible(cfg, prompt, system,
+                                       min(max_tokens * 8, 8192),
+                                       temperature, timeout)
     if choice.get("finish_reason") == "length":
         raise RuntimeError("LLM 输出被 max_tokens 截断(finish_reason=length),"
                            " 提高调用方 max_tokens 或精简提示词后重试")
@@ -168,7 +174,7 @@ def test_connection() -> tuple:
     if not is_configured():
         return False, "尚未配置:请填写 API key 和模型名"
     try:
-        out = _complete_raw("请只回复两个字:正常", "", 16, 0.3, 30)
+        out = _complete_raw("请只回复两个字:正常", "", 1024, 0.3, 60)
     except Exception as e:
         return False, f"调用失败:{e}"
     if out:
