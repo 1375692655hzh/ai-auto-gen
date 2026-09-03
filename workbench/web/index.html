@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>财经工作台 · ai-auto-gen</title>
+<link rel="stylesheet" href="/css/app.css">
+</head>
+<body>
+<div id="app">
+  <!-- 顶部横向主导航(火山控制台结构: 主页面在上, 子页面在左) -->
+  <header class="topbar">
+    <div class="brand-logo">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+           stroke-linecap="round" stroke-linejoin="round">
+        <polyline points="3 17 9 11 13 15 21 7"/><polyline points="15 7 21 7 21 13"/>
+      </svg>财经工作台
+      <span class="brand-sub">ai-auto-gen · 板块四</span>
+    </div>
+    <nav class="topnav">
+      <a v-for="p in pages" :key="p.hash" :href="'#' + p.hash"
+         class="topnav-item" :class="{active: route === p.hash}">{{ p.title }}</a>
+    </nav>
+    <div class="topbar-right">
+      <span class="muted" v-if="storeStatus">库内 {{ storeStatus }}</span>
+      <div class="health" :title="healthTip">
+        <span class="dot" :class="healthClass"></span>
+        <span>{{ healthText }}</span>
+      </div>
+    </div>
+  </header>
+
+  <div class="body-row">
+    <!-- 左侧: 当前主页面的子页面菜单(由页面组件通过 WB.shell.setSubs 注册) -->
+    <aside class="subnav" v-if="subs.length">
+      <div class="subnav-title">{{ currentTitle }}</div>
+      <a v-for="s in subs" :key="s.id" class="nav-item" :class="{active: sub === s.id}"
+         @click.prevent="pickSub(s)">
+        <span class="nav-icon" v-if="s.icon" v-html="s.icon"></span>{{ s.title }}
+        <span class="sub-cnt" v-if="s.cnt != null && s.cnt !== ''">{{ s.cnt }}</span>
+      </a>
+    </aside>
+
+    <main class="content">
+      <component :is="currentPage"></component>
+    </main>
+  </div>
+</div>
+
+<script src="/vendor/vue.global.prod.js"></script>
+<script src="/js/api.js"></script>
+<script src="/js/pages/news.js"></script>
+<script src="/js/pages/article.js"></script>
+<script src="/js/pages/video.js"></script>
+<script src="/js/pages/track.js"></script>
+<script src="/js/pages/settings.js"></script>
+<script src="/js/app.js"></script>
+</body>
+</html>

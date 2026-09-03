@@ -28,15 +28,18 @@
 | `python cli.py publish run [--draft ...]` | 发全部启用平台 | **真发**！必须先 `--draft` |
 | `python cli.py publish run-video --video <mp4> --title <t> [--draft]` | B站/抖音投稿 | **真发**！必须先 `--draft` |
 | `python cli.py video build <id> [--estimate]` | Remotion 出片 | 写 ai-workflow/video/videos/&lt;id&gt;/out |
+| `python cli.py workbench serve [--bind/--port 8788/--open]` | 板块四·前端工作台（资讯/图文/视频/追踪/设置 5 页 SPA，方案见 docs/第四板块-前端工作台方案.md） | 常驻进程；只写 data/workbench/ 自有 JSON |
+| `python cli.py workbench status [--json]` | 工作台/数据源双探活 + 设置有效性 | 无 |
 
 ## 目录地图（三板块，可单独下载）
 
 ```
-cli.py / bin/aag.cmd        统一入口(P0, 自动挂三板块上 sys.path)
+cli.py / bin/aag.cmd        统一入口(P0, 自动挂四板块上 sys.path)
 global-news-sources/        板块一·来源: sources/ 注册表 + fetchers/ 抓取实现 + docs/ 源清单
 ai-workflow/                板块二·工作流: flows/ YAML引擎+步骤库 + generator/ 生成实现 + video/ Remotion
 auto-publisher/             板块三·发布: autopub/ 浏览器引擎(10平台) + adapters-kit/ Node API + publish/ 门面
-data/                       运行时数据(gitignored: 缓存/健康/运行产物)
+workbench/                  板块四·前端工作台: server/ FastAPI后端(代理+只读视图) + web/ 免构建SPA(Vue3 vendored)
+data/                       运行时数据(gitignored: 缓存/健康/运行产物/workbench配置)
 docs/                       方案与操作手册
 scripts/ skills/            工具脚本 / agent 技能
 ```
@@ -51,6 +54,7 @@ scripts/ skills/            工具脚本 / agent 技能
 | `ai-workflow/generator/output/workflows/<流>/<日期>/` | 旧引擎步骤存档（flows 新引擎在 data/runs） | 引擎写 |
 | `auto-publisher/autopub/articles/` | 待发队列（md/docx），发完全平台自动归档 `_done/` | 人/生成写 |
 | `ai-workflow/generator/output/` | 生成产物（文章/口播/长图/daily JSON） | 生成写 |
+| `data/workbench/settings.json` `tracked_accounts.json` | 工作台设置（含数据源 Key）与追踪账号清单 | workbench 写（板块四唯一写口） |
 
 ## 红线（违反会造成事故）
 
@@ -60,6 +64,7 @@ scripts/ skills/            工具脚本 / agent 技能
 4. **不改** `ai-workflow/video/src/active-story.ts`（渲染时自动生成）与 `ai-workflow/video/src/story-types.ts` 契约。
 5. B站/抖音上传框是**多文件累加**队列——绝不重复 set_input_files；适配器已有队列防重逻辑，别绕过。
 6. Chrome 调试模式（9222）接管的是用户日常浏览器：发布期间提示用户勿手动操作该浏览器。
+7. workbench（板块四）对三板块**全程只读**（views.py 只扫文件、proxy.py 只转 GET）；触发类动作未来也只经 subprocess 调 cli.py，唯一写口是 `data/workbench/` 自有 JSON。
 
 ## 常见任务配方
 

@@ -33,6 +33,7 @@ ROOT = Path(__file__).resolve().parent
 GNS = ROOT / "global-news-sources"        # 板块一: 来源
 AIWF = ROOT / "ai-workflow"               # 板块二: 工作流
 PUB = ROOT / "auto-publisher"             # 板块三: 发布
+WB = ROOT / "workbench"                   # 板块四: 前端工作台
 AUTOPUB = PUB / "autopub"
 EXIT_OK, EXIT_HUMAN, EXIT_FAIL, EXIT_CONFIG = 0, 2, 3, 4
 
@@ -126,6 +127,18 @@ def doctor(json_out: bool = False) -> int:
     # 运行时数据根
     (ROOT / "data").mkdir(exist_ok=True)
     checks.append(_check("data/ 可写", os.access(ROOT / "data", os.W_OK)))
+    # 板块四: 工作台静态资源
+    wb_ok = (WB / "web" / "index.html").exists() and \
+            (WB / "web" / "vendor" / "vue.global.prod.js").exists()
+    checks.append(_check("工作台静态资源(workbench)", wb_ok,
+                         "workbench/web/ 不完整, 请重新拉取仓库", warn=True))
+    # 供数服务探活(工作台资讯页依赖)
+    try:
+        urllib.request.urlopen("http://127.0.0.1:8787/v1/health", timeout=2)
+        checks.append(_check("供数服务(8787)", True))
+    except Exception:
+        checks.append(_check("供数服务(8787)", False,
+                             "另开终端: python cli.py sources serve (工作台资讯页依赖)", warn=True))
 
     if json_out:
         fails = [c for c in checks if c["status"] == "fail"]
@@ -274,6 +287,42 @@ def sources_cmd(args) -> int:
     if args.sub == "serve":
         from sources import serve
         return serve.run(host=args.bind or args.host, port=args.port)
+    return EXIT_FAIL
+
+
+def workbench_cmd(args) -> int:
+    if args.sub == "serve":
+        sys.path.insert(0, str(WB))
+        from server import app as wb_app
+        return wb_app.run(host=args.bind or args.host, port=args.port,
+                          open_browser=getattr(args, "open", False))
+    if args.sub == "status":
+        sys.path.insert(0, str(WB))
+        from server import config as wb_config
+        cfg = wb_config.load()
+        src = cfg["source"]
+        result = {"workbench_static": (WB / "web" / "index.html").exists(),
+                  "source": {"mode": src["mode"], "base_url": src["base_url"],
+                             "has_key": bool(src.get("api_key"))},
+                  "source_reachable": False}
+        try:
+            req = urllib.request.Request(src["base_url"].rstrip("/") + "/v1/health",
+                                         headers={"Authorization": f"Bearer {src['api_key']}"}
+                                         if src.get("api_key") else {})
+            urllib.request.urlopen(req, timeout=3)
+            result["source_reachable"] = True
+        except Exception:
+            pass
+        if args.json:
+            print(json.dumps(result, ensure_ascii=False, indent=2))
+        else:
+            print(f"工作台静态资源: {'✅' if result['workbench_static'] else '❌'}")
+            print(f"数据源({src['mode']}): {src['base_url']} "
+                  f"{'🔑' if result['source']['has_key'] else '(免密/未配 Key)'} "
+                  f"{'✅ 可达' if result['source_reachable'] else '❌ 不可达'}")
+            if not result["source_reachable"]:
+                print("  → 本机场景请另开终端: python cli.py sources serve")
+        return EXIT_OK if result["source_reachable"] else EXIT_FAIL
     return EXIT_FAIL
 
 
@@ -471,6 +520,16 @@ def main() -> int:
     p_g = sub.add_parser("gen", help="生成模块(generator/main.py 参数透传)")
     p_g.add_argument("args", nargs=argparse.REMAINDER)
 
+    p_wb = sub.add_parser("workbench", help="前端工作台(板块四)")
+    wsub = p_wb.add_subparsers(dest="sub", required=True)
+    pw_s = wsub.add_parser("serve", help="启动工作台(默认 127.0.0.1:8788)")
+    pw_s.add_argument("--host", default="127.0.0.1")
+    pw_s.add_argument("--port", type=int, default=8788)
+    pw_s.add_argument("--bind", default=None, help="显式绑定地址(如 0.0.0.0, 覆盖 --host)")
+    pw_s.add_argument("--open", action="store_true", help="启动后自动开浏览器")
+    pw_t = wsub.add_parser("status", help="工作台/数据源双探活+设置有效性")
+    pw_t.add_argument("--json", action="store_true")
+
     p_k = sub.add_parser("skills", help="把 skills/ 安装到本机 agent 技能目录")
     ksub = p_k.add_subparsers(dest="sub", required=True)
     ksub.add_parser("install", help="复制到 ~/.agents/skills 与 ~/.claude/skills(存在才装)")
@@ -488,6 +547,8 @@ def main() -> int:
         return doctor(json_out=args.json)
     if args.cmd == "sources":
         return sources_cmd(args)
+    if args.cmd == "workbench":
+        return workbench_cmd(args)
     if args.cmd == "flows":
         return flows_cmd(args)
     if args.cmd == "gen":
