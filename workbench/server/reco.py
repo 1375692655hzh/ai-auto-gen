@@ -35,7 +35,7 @@ def score_of(it: dict) -> tuple[float, list]:
 
 def recommend(since: str = "", markets: str = "", kinds: str = "",
               channels: str = "", positionings: str = "",
-              item_types: str = "", limit: int = 50) -> dict:
+              item_types: str = "", limit: int = 50, sort: str = "score") -> dict:
     qs = urllib.parse.urlencode({
         "limit": min(max(limit * 4, 100), 500),   # 取足量再打分排序截 top N
         "dedup": 1, "display": 1,
@@ -48,6 +48,9 @@ def recommend(since: str = "", markets: str = "", kinds: str = "",
     items = d.get("items") or []
     for it in items:
         it["score"], it["score_parts"] = score_of(it)
-    items.sort(key=lambda i: (-i["score"], i.get("time") or ""))
-    return {"total": len(items), "items": items[:limit],
+    if sort == "time":                            # 时间排序: 新的在前, 分数照算照显
+        items.sort(key=lambda i: i.get("time") or "", reverse=True)
+    else:
+        items.sort(key=lambda i: (-i["score"], i.get("time") or ""))
+    return {"total": len(items), "items": items[:limit], "sort": sort,
             "rule": "dup_count×3 + 官方/机构源+2 + 重大事件+2 + 情绪方向+1 + 标的×0.5"}

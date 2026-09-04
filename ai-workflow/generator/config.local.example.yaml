@@ -1,0 +1,17 @@
+# 本机覆盖示例 — 复制为 config.local.yaml(同目录, gitignored)后按需取消注释填写。
+# 与 config.yaml 的 sources: 段浅合并(按 key 覆盖); models 是整链替换(不是追加),
+# 启用时必须把要用的链位都写上。
+# 翻译链顺序(免费优先): muse(免费) → DS官方(按量,自填) → Ark(套餐) → mimo(免费)。
+sources:
+  translate:
+    models:
+    - base_url: http://127.0.0.1:20128/v1     # 主力(免费): OmniRoute 本地网关
+      api_key: omniroute-local                #   安装: npm i -g omniroute && omniroute serve --daemon
+      model: oc/muse-spark-1.2-contributor-free
+    # - base_url: https://api.deepseek.com/v1   # 备胎1(按量): ← 自填 url/key/model
+    #   api_key: sk-xxxxxxxx
+    #   model: deepseek-v4-flash
+    - model: deepseek-v4-flash                # 备胎2: Ark 套餐(全局 key, secret.local.json)
+    - base_url: http://127.0.0.1:20128/v1     # 备胎3(免费): OmniRoute → mimo
+      api_key: omniroute-local
+      model: oc/mimo-v2.5-free

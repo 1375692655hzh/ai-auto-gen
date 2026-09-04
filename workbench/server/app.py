@@ -18,7 +18,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
-from . import config, proxy, reco, stats, views, xaccounts, x_profile_enricher
+from . import config, proxy, reco, stats, views, xaccounts, x_profile_enricher, xhot
 
 WEB = Path(__file__).resolve().parent.parent / "web"
 
@@ -141,11 +141,19 @@ def create_app() -> FastAPI:
     @app.get("/wb-api/recommend")
     def recommend(since: str = "", markets: str = "", kinds: str = "",
                   channels: str = "", positionings: str = "",
-                  item_types: str = "", limit: int = 50):
+                  item_types: str = "", limit: int = 50, sort: str = "score"):
         try:
             return reco.recommend(since=since, markets=markets, kinds=kinds,
                                   channels=channels, positionings=positionings,
-                                  item_types=item_types, limit=limit)
+                                  item_types=item_types, limit=limit, sort=sort)
+        except proxy.UpstreamError as e:
+            return JSONResponse({"error": str(e)}, status_code=e.code or 502)
+
+    # ── 图文页右栏: X 热帖榜(热度=同事件簇×3+粉丝量级, 真流量待板块一补字段) ──
+    @app.get("/wb-api/x-hot")
+    def x_hot(range: str = "24h", markets: str = "", limit: int = 12):
+        try:
+            return xhot.hot(range_=range, markets=markets, limit=limit)
         except proxy.UpstreamError as e:
             return JSONResponse({"error": str(e)}, status_code=e.code or 502)
 

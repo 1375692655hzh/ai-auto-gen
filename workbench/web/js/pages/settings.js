@@ -51,7 +51,8 @@ WB.pages.settings = {
       this.testing = false;
     },
     applyTheme() {
-      document.body.classList.toggle("light", this.s.ui.theme === "light");
+      WB.theme ? WB.theme.apply(this.s.ui.theme)
+               : document.body.classList.toggle("light", this.s.ui.theme === "light");
     },
     async loadCheck() {
       try { this.check = await WB.api.get("/selfcheck"); } catch (e) {}

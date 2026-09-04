@@ -35,6 +35,7 @@ WB.pages.news = {
       sinceOpts: [["1h", "近1小时"], ["4h", "近4小时"], ["24h", "近24小时"], ["3d", "近3天"], ["", "全部"]],
       items: [], total: 0, nextCursor: "", loading: false, error: null,
       expanded: {}, bodyExpanded: {},
+      basketIds: {},                     // 已在素材池的条目 id(「已加入」态)
       /* X 池账号档案(按账号展示): xAccounts=池录入信息, xProfiles=grok x-search 缓存 */
       xAccounts: {}, xProfiles: {},
       /* /stats 聚合成品: null=未加载, statsErr=加载失败原因 */
@@ -170,7 +171,11 @@ WB.pages.news = {
       this.f.q = ""; this.f.tickers = "";
       this.reload();
     },
-    addMaterial(it) { WB.basket.add(it); },
+    addMaterial(it) { WB.basket.add(it); this.basketIds[it.id] = true; },
+    initBasketIds() {
+      this.basketIds = {};
+      for (const m of WB.basket.list()) this.basketIds[m.id] = true;
+    },
     sentimentBadge(s) {
       return s === "bull" ? "green" : s === "bear" ? "red" : s === "neutral" ? "yellow" : "";
     },
@@ -323,7 +328,7 @@ WB.pages.news = {
     /* bar-fill 宽度(唯一允许的 :style 动态绑定) */
     barW(c, max) { return max > 0 ? Math.round((c / max) * 100) + "%" : "0%"; },
   },
-  mounted() { this.registerSubs(); this.loadDict(); this.loadStats(); this.loadX(); this.load(); },
+  mounted() { this.registerSubs(); this.initBasketIds(); this.loadDict(); this.loadStats(); this.loadX(); this.load(); },
   unmounted() { if (WB.shell) WB.shell.setSubs([]); },   // 离开资讯页清空左菜单
   template: `
   <div>
@@ -451,7 +456,8 @@ WB.pages.news = {
                   {{ bodyExpanded[it.id] ? '收起' : '展开全文' }}</span>
                 <span class="act" v-if="it.text_src" @click="expanded[it.id] = !expanded[it.id]">
                   {{ expanded[it.id] ? '收起原文' : '查看原文(译前)' }}</span>
-                <span class="act" @click="addMaterial(it)">＋加入素材篮</span>
+                <span v-if="basketIds[it.id]" class="act-done">已加入 ✓</span>
+                <span v-else class="act" @click="addMaterial(it)">＋加入素材篮</span>
               </div>
             </div>
           </div>

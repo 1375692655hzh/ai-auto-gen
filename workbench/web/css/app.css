@@ -111,7 +111,7 @@ a:hover { color: var(--text); }
 .nav-item.active { background: var(--accent-weak); color: var(--accent); font-weight: 600; }
 .nav-icon { width: 15px; height: 15px; display: inline-flex; flex-shrink: 0; }
 .nav-icon svg { width: 15px; height: 15px; }
-.content { flex: 1; min-width: 0; max-width: 1440px; padding: var(--s5) var(--s5) 64px; }
+.content { flex: 1; min-width: 0; padding: var(--s5) var(--s5) 64px; }   /* 去 1440 帽: 宽屏铺满, 不再右侧留白 */
 
 /* ── 通用组件 ──────────────────────────────────────────────────────────── */
 .card { background: var(--bg-card); border: 1px solid var(--border);
@@ -197,7 +197,7 @@ select[multiple] option { padding: 3px var(--s2); border-radius: var(--s1); }
 /* 双框信息流卡片(2026-09-03 双标签制: 左=来源信息, 右=内容信息, 标签分区独立) */
 .nc-grid    { display: grid; grid-template-columns: 188px minmax(0, 1fr); gap: var(--s3); }
 .nc-src     { border: 1px solid var(--border); border-radius: var(--r-panel);
-              background: var(--bg); padding: 8px 10px; align-self: start;
+              background: var(--bg); padding: 8px 10px; align-self: stretch;
               display: flex; flex-direction: column; gap: 6px; }
 .nc-src .name { font-size: 12.5px; font-weight: 600; }
 .nc-src .brief { font-size: 11.5px; color: var(--text-mute); line-height: 1.5;
@@ -293,6 +293,13 @@ td.num { font-family: var(--mono); font-variant-numeric: tabular-nums; text-alig
   align-items: start; }
 .three-col { display: grid; grid-template-columns: 250px minmax(0, 1fr) 280px;
   gap: var(--s4); align-items: start; }
+/* 内容生成页三栏: 素材池加宽(吃掉右栏富余空间); 窄屏仍走 .three-col 的 1fr 断点 */
+.gen-cols { grid-template-columns: 400px minmax(0, 1fr) 280px; }
+/* 素材池: 顶部小搜索 + 定高上下滚动 + 超48h灰显 */
+.mat-search { width: 100%; margin-bottom: 8px; }
+.mat-pool { max-height: 560px; overflow-y: auto; }
+.list-item.stale { opacity: .45; }
+.list-item.stale:hover { opacity: .8; }
 .list-item { padding: 9px var(--s3); border: 1px solid var(--border);
   border-radius: var(--r-ctl); margin-bottom: 7px; cursor: pointer; background: transparent;
   transition: border-color 120ms var(--ease), background 120ms var(--ease); }
@@ -353,4 +360,37 @@ input[type=radio], input[type=checkbox] { accent-color: var(--accent); }
   .news-layout { grid-template-columns: 200px minmax(0, 1fr); }
   .news-status { display: none; }
   .three-col, .two-col { grid-template-columns: 1fr; }
+}
+
+/* ── 推荐信息页(2026-09-04 改版): 筛选横排 + 双栏 + 右栏热帖 sticky ── */
+.reco-filter { padding: 10px var(--s4); }
+.frow { display: flex; align-items: baseline; gap: 6px; flex-wrap: wrap; margin-bottom: 8px; }
+.frow:last-child { margin-bottom: 0; }
+.frow .lab { flex: none; font-size: 12.5px; font-weight: 600;
+             color: var(--text-mute); margin-right: 4px; }
+.reco-cols { display: grid; grid-template-columns: minmax(0, 1fr) clamp(340px, 26vw, 440px);
+             gap: var(--s4); align-items: start; }
+/* 不跟滚的侧栏: 推荐页热帖栏 + 资讯页右栏(沿用筛选项的 top:64px 约定) */
+.reco-rail, .news-status { position: sticky; top: 64px; align-self: start;
+  max-height: calc(100vh - 76px); overflow-y: auto; }
+/* X 热帖条目 */
+.xhot-item { padding: 8px 0; border-bottom: 1px solid var(--border); }
+.xhot-item:last-of-type { border-bottom: none; }
+.xhot-top { display: flex; align-items: center; gap: 6px; margin-bottom: 3px; }
+.xhot-top .rank { font-family: var(--mono); font-size: 11px; color: var(--accent);
+                  width: 16px; flex: none; }
+.xhot-top .name { font-size: 12px; font-weight: 600; white-space: nowrap;
+                  overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.xhot-fol { font-size: 11px; color: var(--text-mute); white-space: nowrap; flex: none; }
+.xhot-text { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical;
+             overflow: hidden; font-size: 12.5px; line-height: 1.5;
+             color: var(--text); text-decoration: none; }
+.xhot-text:hover { color: var(--accent); }
+.xhot-meta { font-size: 11px; margin-top: 2px; }
+/* 「已加入」态(推荐/资讯卡片通用): 灰字不响应点击 */
+.act-done { color: var(--text-dim); font-size: 12px; cursor: default; }
+
+@media (max-width: 1100px) {
+  .reco-cols { grid-template-columns: 1fr; }
+  .reco-rail { position: static; max-height: none; }
 }

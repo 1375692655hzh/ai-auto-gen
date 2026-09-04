@@ -71,6 +71,7 @@
         },
         setSub: (id) => { this.sub = id; },
       };
+      WB.theme && WB.theme.syncFromServer();   // 启动即用权威设置校正主题(含首屏)
     },
     mounted() {
       window.addEventListener("hashchange", this.onHash);

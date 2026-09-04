@@ -17,13 +17,17 @@ WB.pages.article = {
                   item_types: ["聚合", "快讯", "资讯", "分析"] },
       /* ── 推荐信息 ── */
       recoSince: "24h",
-      sinceOpts: [["1h", "近1小时"], ["4h", "近4小时"], ["24h", "近24小时"], ["3d", "近3天"], ["", "全部"]],
+      sinceOpts: [["1h", "近1小时"], ["6h", "近6小时"], ["12h", "近12小时"], ["24h", "近1天"], ["48h", "近2天"]],
       recoMarkets: [], recoPositionings: [], recoItemTypes: [],
+      recoSort: "score",                 // score=价值排序 | time=时间排序
       recoItems: [], recoTotal: 0, recoRule: "", recoLoading: false, recoErr: "",
+      basketIds: {},                     // 已在素材池的条目 id(「已加入」态)
+      /* 右栏 X 热帖榜 */
+      xhot: [], xhotRange: "24h", xhotMarkets: [], xhotRule: "",
       /* X 池账号档案(与资讯页同源: /x-accounts + /x-profiles) + 正文截断状态 */
       xAccounts: {}, xProfiles: {}, bodyExpanded: {},
-      /* ── 内容生成(实时编辑 = 信息选择 + 生成模块排列组合 + 固定模板) ── */
-      materials: [],
+      /* ── 内容生成(实时编辑 = 素材池勾选 + 生成模块排列组合 + 固定模板) ── */
+      materials: [], matQ: "",
       modules: [
         { id: "retrieve", title: "信息检索", desc: "按素材标的/关键词回查数据站, 补全上下文", on: true },
         { id: "snapshot", title: "快照抓取", desc: "抓取素材原文页面快照存档", on: false },
@@ -47,6 +51,21 @@ WB.pages.article = {
     wordCount() { return (this.editorContent || "").length; },
     onModules() { return this.modules.filter((m) => m.on).map((m) => m.id); },
     pubDraft() { return this.drafts.find((d) => d.id === this.pubDraftId) || null; },
+    /* 素材池: 顶部小搜索(正文/来源模糊匹配) */
+    filteredMaterials() {
+      const q = this.matQ.trim().toLowerCase();
+      if (!q) return this.materials;
+      return this.materials.filter((m) =>
+        (m.text || "").toLowerCase().includes(q) ||
+        (m.source || "").toLowerCase().includes(q));
+    },
+    selCount() { return this.materials.filter((m) => this.matChecked(m)).length; },
+    /* X 热帖市场 chips: 取池账号实际覆盖的市场 */
+    xMarketChips() {
+      const s = new Set();
+      for (const a of Object.values(this.xAccounts)) (a.markets || []).forEach((m) => s.add(m));
+      return [...s].sort();
+    },
   },
   methods: {
     /* ── 壳层子菜单注册(计数随数据更新) ── */
@@ -78,7 +97,8 @@ WB.pages.article = {
       const fmt = (d) => d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" +
         String(d.getDate()).padStart(2, "0") + " " + String(d.getHours()).padStart(2, "0") + ":" +
         String(d.getMinutes()).padStart(2, "0");
-      const map = { "1h": 3600e3, "4h": 4 * 3600e3, "24h": 86400e3, "3d": 3 * 86400e3 };
+      const map = { "1h": 3600e3, "6h": 6 * 3600e3, "12h": 12 * 3600e3,
+                    "24h": 86400e3, "48h": 2 * 86400e3 };
       return map[this.recoSince] ? fmt(new Date(now - map[this.recoSince])) : "";
     },
     async loadDict() {
@@ -99,6 +119,7 @@ WB.pages.article = {
         if (this.recoPositionings.length) p.set("positionings", this.recoPositionings.join(","));
         if (this.recoItemTypes.length) p.set("item_types", this.recoItemTypes.join(","));
         p.set("limit", "50");
+        p.set("sort", this.recoSort);
         const d = await WB.api.get("/recommend?" + p.toString());
         this.recoItems = d.items; this.recoTotal = d.total; this.recoRule = d.rule;
       } catch (e) { this.recoErr = e.error || "推荐接口不可用"; }
@@ -121,10 +142,33 @@ WB.pages.article = {
     },
     visibleSectors(it) { return (it.sectors || []).slice(0, 2); },
     sectorsRest(it) { return Math.max((it.sectors || []).length - 2, 0); },
-    addToGen(it) {
+    /* 加入素材: 不跳页(用户还要继续逛), 点过变「已加入」 */
+    addToPool(it) {
       WB.basket.add(it);
+      this.basketIds[it.id] = true;
       this.syncMaterials();
-      this.go("gen");
+    },
+    initBasketIds() {
+      this.basketIds = {};
+      for (const m of WB.basket.list()) this.basketIds[m.id] = true;
+    },
+    /* ── 右栏 X 热帖榜 ── */
+    async loadXHot() {
+      try {
+        const p = new URLSearchParams({ range: this.xhotRange });
+        if (this.xhotMarkets.length) p.set("markets", this.xhotMarkets.join(","));
+        const d = await WB.api.get("/x-hot?" + p.toString());
+        this.xhot = d.items; this.xhotRule = d.rule;
+      } catch (e) { this.xhot = []; }
+    },
+    toggleXhotMarket(m) {
+      const i = this.xhotMarkets.indexOf(m);
+      i >= 0 ? this.xhotMarkets.splice(i, 1) : this.xhotMarkets.push(m);
+      this.loadXHot();
+    },
+    xHotName(s) { return String(s || "").replace(/^X·/, ""); },
+    fmtFol(n) {
+      return n >= 1e4 ? (n / 1e4).toFixed(1).replace(/\.0$/, "") + "万" : String(n);
     },
     sentimentBadge(s) {
       return s === "bull" ? "green" : s === "bear" ? "red" : s === "neutral" ? "yellow" : "";
@@ -164,6 +208,21 @@ WB.pages.article = {
     /* ── 内容生成 ── */
     syncMaterials() { this.materials = WB.basket.list(); this.registerSubs(); },
     removeMaterial(id) { WB.basket.remove(id); this.syncMaterials(); },
+    /* 素材池勾选: 无 sel 字段的旧数据按已选兼容 */
+    matChecked(m) { return m.sel !== false; },
+    toggleMatSel(m) { WB.basket.setSel(m.id, !this.matChecked(m)); this.syncMaterials(); },
+    /* 时效: 距发布小时数; >48h 灰显提醒(m.time 形如 "2026-09-03 14:05") */
+    ageHours(m) {
+      const t = new Date(String(m.time || "").replace(" ", "T"));
+      return isNaN(t) ? 0 : (Date.now() - t.getTime()) / 3600e3;
+    },
+    ageText(m) {
+      const h = this.ageHours(m);
+      if (h < 1) return "刚刚";
+      if (h < 24) return Math.floor(h) + " 小时前";
+      return Math.floor(h / 24) + " 天前";
+    },
+    isStale(m) { return this.ageHours(m) > 48; },
     moveModule(i, dir) {
       const j = i + dir;
       if (j < 0 || j >= this.modules.length) return;
@@ -183,7 +242,8 @@ WB.pages.article = {
     async saveDraft() {
       const body = {
         title: this.editorTitle || "未命名草稿", content: this.editorContent,
-        items: this.materials.map((m) => m.id), modules: this.onModules,
+        items: this.materials.filter((m) => this.matChecked(m)).map((m) => m.id),
+        modules: this.onModules,
         template: this.template,
         publish: { when: this.pubWhen, time: this.pubTime,
                    accounts: this.pubAccounts, method: this.pubMethod },
@@ -283,7 +343,8 @@ WB.pages.article = {
   mounted() {
     this.registerSubs();
     this.syncMaterials();
-    this.loadDict(); this.loadReco(); this.loadX();
+    this.initBasketIds();
+    this.loadDict(); this.loadReco(); this.loadX(); this.loadXHot();
     this.loadFlows(); this.loadRuns(); this.loadDrafts();
     this.loadAccounts(); this.loadLedger(); this.loadTasks();
   },
@@ -291,34 +352,40 @@ WB.pages.article = {
 
   template: `
   <div>
-    <!-- ═══ 子页1: 推荐信息(回溯范围 + 标签筛选 + 价值排序) ═══ -->
+    <!-- ═══ 子页1: 推荐信息(回溯范围 + 排序开关 + 横排筛选 + 右栏X热帖) ═══ -->
     <div v-show="tab==='reco'">
+      <div class="reco-cols">
+      <!-- 左列: 工具栏 + 筛选卡(右缘与信息流对齐) + 信息流 -->
+      <div>
       <div class="feed-toolbar">
         <select v-model="recoSince" @change="loadReco">
           <option v-for="[v, t] in sinceOpts" :value="v">{{ t }}</option>
         </select>
-        <span class="muted">按价值、重要性排序</span>
+        <div class="radio-group">
+          <label><input type="radio" value="score" v-model="recoSort" @change="loadReco"> 价值排序</label>
+          <label><input type="radio" value="time" v-model="recoSort" @change="loadReco"> 时间排序</label>
+        </div>
         <span style="flex:1"></span>
-        <button class="btn" @click="loadReco">{{ recoLoading ? '刷新中…' : '刷新' }}</button>
+        <button class="btn" @click="loadReco(); loadXHot()">{{ recoLoading ? '刷新中…' : '刷新' }}</button>
       </div>
-      <div class="card">
-        <div class="filter-group" style="margin-bottom:8px">
-          <h4>市场</h4>
+      <div class="card reco-filter">
+        <div class="frow">
+          <span class="lab">市场</span>
           <span v-for="m in dict.markets" class="chip" :class="{on: recoMarkets.includes(m)}"
                 @click="recoToggle('recoMarkets', m)">{{ m }}</span>
         </div>
-        <div class="filter-group" style="margin-bottom:8px">
-          <h4>定位</h4>
+        <div class="frow">
+          <span class="lab">定位</span>
           <span v-for="p in tagEnums.positionings" class="chip" :class="{on: recoPositionings.includes(p)}"
                 @click="recoToggle('recoPositionings', p)">{{ p }}</span>
         </div>
-        <div class="filter-group" style="margin-bottom:0">
-          <h4>类型</h4>
+        <div class="frow">
+          <span class="lab">类型</span>
           <span v-for="t in tagEnums.item_types" class="chip" :class="{on: recoItemTypes.includes(t)}"
                 @click="recoToggle('recoItemTypes', t)">{{ t }}</span>
         </div>
       </div>
-      <p class="muted" style="margin-bottom:10px">打分规则: {{ recoRule }}(服务端透明打分, 可在每条下展开构成)</p>
+      <p class="muted" style="margin:10px 0">打分规则: {{ recoRule }}(服务端透明打分, 可在每条下展开构成)</p>
 
       <div v-if="recoErr" class="err-box">{{ recoErr }}</div>
       <div v-else-if="!recoItems.length && !recoLoading" class="empty">该范围内暂无推荐 —— 放宽回溯时间或标签</div>
@@ -365,37 +432,71 @@ WB.pages.article = {
                 <a v-if="it.url" :href="it.url" target="_blank" rel="noopener">原文链接 ↗</a>
                 <span class="act" v-if="bodyLong(it)" @click="bodyExpanded[it.id] = !bodyExpanded[it.id]">
                   {{ bodyExpanded[it.id] ? '收起' : '展开全文' }}</span>
-                <span class="act" @click="addToGen(it)">＋加入生成</span>
+                <span v-if="basketIds[it.id]" class="act-done">已加入 ✓</span>
+                <span v-else class="act" @click="addToPool(it)">＋加入素材</span>
               </div>
             </div>
           </div>
         </div>
       </div>
+      </div>
+      <!-- 右栏: X 热帖榜(热度排序, 24h/48h 切换 + 市场筛选, sticky 不跟滚) -->
+      <div class="reco-rail">
+        <div class="card">
+          <h3>X 热帖 <span class="muted">近{{ xhotRange }}</span></h3>
+          <div class="frow" style="margin-bottom:6px">
+            <span class="lab">范围</span>
+            <span class="chip" :class="{on: xhotRange==='24h'}" @click="xhotRange='24h'; loadXHot()">24h</span>
+            <span class="chip" :class="{on: xhotRange==='48h'}" @click="xhotRange='48h'; loadXHot()">48h</span>
+          </div>
+          <div class="frow">
+            <span class="lab">市场</span>
+            <span v-for="m in xMarketChips" class="chip" :class="{on: xhotMarkets.includes(m)}"
+                  @click="toggleXhotMarket(m)">{{ m }}</span>
+          </div>
+          <div v-if="!xhot.length" class="muted">窗口内暂无 X 池内容</div>
+          <div v-for="(r, i) in xhot" :key="r.id" class="xhot-item">
+            <div class="xhot-top">
+              <span class="rank">{{ i + 1 }}</span>
+              <span class="name">{{ xHotName(r.name) }}</span>
+              <span v-if="r.dup_count > 1" class="badge yellow">同事件 ×{{ r.dup_count }}</span>
+              <span v-if="r.followers" class="xhot-fol">粉 {{ fmtFol(r.followers) }}</span>
+            </div>
+            <a class="xhot-text" :href="r.url" target="_blank" rel="noopener">{{ r.text }}</a>
+            <div class="xhot-meta muted">{{ r.time }} · 热度 {{ r.heat }}</div>
+          </div>
+          <p class="muted" style="margin-top:8px;font-size:11px">热度 = {{ xhotRule }}<br>
+            真流量(点赞/转发/增速)排序待抓取层补互动字段</p>
+        </div>
+      </div>
+      </div>
     </div>
 
-    <!-- ═══ 子页2: 内容生成(信息选择 + 模块排列组合 + 固定模板 + 实时编辑) ═══ -->
-    <div v-show="tab==='gen'" class="three-col">
-      <!-- 左: 信息选择 + 历史/草稿 -->
+    <!-- ═══ 子页2: 内容生成(素材池勾选 + 模块排列组合 + 固定模板 + 实时编辑) ═══ -->
+    <div v-show="tab==='gen'" class="three-col gen-cols">
+      <!-- 左: 素材池(顶部小搜索 + 上下滚动 + 勾选参与生成 + 时效灰显) -->
       <div>
         <div class="card">
-          <h3>信息选择({{ materials.length }})</h3>
+          <h3>素材池({{ materials.length }}<template v-if="selCount !== materials.length"> · 已选 {{ selCount }}</template>)</h3>
+          <input type="text" v-model="matQ" class="mat-search" placeholder="搜索素材(正文/来源)">
           <div v-if="!materials.length" class="muted">
             空 —— 到「推荐信息」点「＋加入生成」, 或资讯页点「＋加入素材篮」</div>
-          <div v-for="m in materials" :key="m.id" class="list-item">
-            <div class="t">{{ m.text || '(无标题)' }}</div>
-            <div class="s">{{ m.time }} · {{ m.source }}
-              <a style="float:right" @click.stop="removeMaterial(m.id)">移除</a></div>
+          <div v-else-if="!filteredMaterials.length" class="muted">无匹配 —— 换个关键词</div>
+          <div class="mat-pool">
+            <div v-for="m in filteredMaterials" :key="m.id" class="list-item"
+                 :class="{sel: matChecked(m), stale: isStale(m)}">
+              <div class="t">
+                <label style="display:flex;align-items:flex-start;gap:6px;cursor:pointer">
+                  <input type="checkbox" :checked="matChecked(m)" @change="toggleMatSel(m)"
+                         style="margin-top:3px;flex:none">
+                  <span>{{ m.text || '(无标题)' }}</span></label>
+              </div>
+              <div class="s"><span :title="m.time">{{ ageText(m) }}</span><span v-if="isStale(m)"> · 超48h</span>
+                · {{ m.source }}
+                <a style="float:right" @click.stop="removeMaterial(m.id)">移除</a></div>
+            </div>
           </div>
-        </div>
-        <div class="card">
-          <h3>历史记录(生成运行)</h3>
-          <div v-if="!runs.length" class="muted">暂无(data/runs/)</div>
-          <div v-for="r in runs.slice(0, 6)" :key="r.flow + r.date" class="list-item">
-            <div class="t">{{ r.flow }} @ {{ r.date }}
-              <span class="badge" :class="r.status === 'done' ? 'green' : 'yellow'"
-                    style="float:right">{{ r.status }}</span></div>
-            <div class="s">{{ r.mtime }}</div>
-          </div>
+          <div class="muted" style="margin-top:8px">勾选参与生成(存草稿只记勾选项); 超 48h 灰显提醒</div>
         </div>
       </div>
 
@@ -444,7 +545,7 @@ WB.pages.article = {
         </div>
       </div>
 
-      <!-- 右: 草稿箱 -->
+      <!-- 右: 草稿箱 + 历史记录(原左栏, 挪到草稿下方) -->
       <div>
         <div class="card">
           <h3>草稿({{ drafts.length }})</h3>
@@ -457,6 +558,16 @@ WB.pages.article = {
               <a style="margin-left:10px" @click="pubDraftId = d.id; go('pub')">去发布</a>
               <a style="margin-left:10px" @click="delDraft(d)">删除</a>
             </div>
+          </div>
+        </div>
+        <div class="card">
+          <h3>历史记录(生成运行)</h3>
+          <div v-if="!runs.length" class="muted">暂无(data/runs/)</div>
+          <div v-for="r in runs.slice(0, 6)" :key="r.flow + r.date" class="list-item">
+            <div class="t">{{ r.flow }} @ {{ r.date }}
+              <span class="badge" :class="r.status === 'done' ? 'green' : 'yellow'"
+                    style="float:right">{{ r.status }}</span></div>
+            <div class="s">{{ r.mtime }}</div>
           </div>
         </div>
       </div>

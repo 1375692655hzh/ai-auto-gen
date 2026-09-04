@@ -4,9 +4,12 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>财经工作台 · ai-auto-gen</title>
-<link rel="stylesheet" href="/css/app.css?v=0903d">
+<link rel="stylesheet" href="/css/app.css?v=0904c">
 </head>
 <body>
+<!-- 主题防闪: 首绘前按 localStorage 缓存挂 body.light;
+     权威值由 app.js 启动时拉 /settings 校正(见 WB.theme.syncFromServer) -->
+<script>try{document.body.classList.toggle("light",localStorage.getItem("wb_theme")==="light")}catch(e){}</script>
 <div id="app">
   <!-- 顶部横向主导航(火山控制台结构: 主页面在上, 子页面在左) -->
   <header class="topbar">
@@ -48,12 +51,12 @@
 </div>
 
 <script src="/vendor/vue.global.prod.js"></script>
-<script src="/js/api.js?v=0903d"></script>
-<script src="/js/pages/news.js?v=0903d"></script>
-<script src="/js/pages/article.js?v=0903d"></script>
-<script src="/js/pages/video.js?v=0903d"></script>
-<script src="/js/pages/track.js?v=0903d"></script>
-<script src="/js/pages/settings.js?v=0903d"></script>
-<script src="/js/app.js?v=0903d"></script>
+<script src="/js/api.js?v=0904c"></script>
+<script src="/js/pages/news.js?v=0904c"></script>
+<script src="/js/pages/article.js?v=0904c"></script>
+<script src="/js/pages/video.js?v=0904c"></script>
+<script src="/js/pages/track.js?v=0904c"></script>
+<script src="/js/pages/settings.js?v=0904c"></script>
+<script src="/js/app.js?v=0904c"></script>
 </body>
 </html>
