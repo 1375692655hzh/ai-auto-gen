@@ -186,6 +186,89 @@ def publish_status(json_out: bool = False) -> int:
     return EXIT_OK
 
 
+def _cfg_local_path():
+    """config.local.yaml 与 sources._cfg_section 同源: generator/config.yaml 同目录。"""
+    p = ROOT / "ai-workflow" / "generator" / "config.yaml"
+    if not p.exists():
+        p = GNS / "config.yaml"
+    return p.with_name("config.local.yaml")
+
+
+def _yaml_set_enabled(text: str, sid: str, on: bool) -> str:
+    """行级编辑 sources.<sid>.enabled, 保留注释与其他段——config.local.yaml 是用户手维护
+    的模板(key 等), 不能整文件 safe_dump 重写(会丢注释)。原子写由调用方负责。"""
+    import re as _re
+    val = "true" if on else "false"
+    lines = text.splitlines(keepends=True) if text else []
+    if lines and not lines[-1].endswith("\n"):
+        lines[-1] += "\n"
+    src_i = next((i for i, l in enumerate(lines)
+                  if _re.match(r"^sources:\s*(#.*)?$", l.rstrip("\n"))), None)
+    if src_i is None:                       # 无 sources 段: 文件尾新开一段
+        if not text:
+            lines.append("# 本机覆盖(gitignored, 不入库) — sources 启停由 cli.py sources enable 维护\n")
+        elif lines and lines[-1] != "\n":
+            lines.append("\n")
+        lines += ["sources:\n", f"  {sid}:\n", f"    enabled: {val}\n"]
+        return "".join(lines)
+    j, sid_i = src_i + 1, None
+    while j < len(lines):
+        l = lines[j].rstrip("\n")
+        if l.strip() and not l[0].isspace():
+            break                           # 下一个顶层键: sources 段结束
+        if _re.match(r"^  " + _re.escape(sid) + r":\s*(#.*)?$", l):
+            sid_i = j
+            break
+        j += 1
+    if sid_i is None:                       # 段内无该源: 紧跟 sources: 后插入
+        lines.insert(src_i + 1, f"  {sid}:\n    enabled: {val}\n")
+        return "".join(lines)
+    k, en_i = sid_i + 1, None
+    while k < len(lines):
+        l = lines[k].rstrip("\n")
+        if l.strip() and (not l[0].isspace() or len(l) - len(l.lstrip()) <= 2):
+            break                           # 顶层键或 sources 下别的子键: sid 块结束
+        if _re.match(r"^ {4}enabled:", l):
+            en_i = k
+            break
+        k += 1
+    if en_i is None:
+        lines.insert(sid_i + 1, f"    enabled: {val}\n")
+    else:
+        lines[en_i] = _re.sub(r"(enabled:)\s*(true|false)?", rf"\1 {val}", lines[en_i])
+    return "".join(lines)
+
+
+def sources_enable_cmd(sid: str, state, as_json: bool) -> int:
+    sys.path.insert(0, str(GNS))
+    from sources import list_sources
+    cur = next((m["enabled"] for m in list_sources() if m["id"] == sid), None)
+    if cur is None:
+        msg = f"未知来源: {sid}"
+        print(json.dumps({"error": msg}, ensure_ascii=False)
+              if as_json else msg, file=sys.stderr)
+        return EXIT_CONFIG
+    on = (state == "on") if state else (not cur)
+    import tempfile
+    loc = _cfg_local_path()
+    new_text = _yaml_set_enabled(loc.read_text(encoding="utf-8") if loc.exists() else "",
+                                 sid, on)
+    loc.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=str(loc.parent), suffix=".tmp")
+    with os.fdopen(fd, "w", encoding="utf-8") as f:
+        f.write(new_text)
+    os.replace(tmp, loc)
+    now = next((m["enabled"] for m in list_sources() if m["id"] == sid), None)
+    ok = (now == on)
+    if as_json:
+        print(json.dumps({"id": sid, "enabled": now, "ok": ok, "file": str(loc)},
+                         ensure_ascii=False))
+    else:
+        mark = "✅" if ok else "❌"
+        print(f"{mark} {sid} → {'启用' if now else '停用'} (config.local.yaml)")
+    return EXIT_OK if ok else EXIT_FAIL
+
+
 def sources_cmd(args) -> int:
     sys.path.insert(0, str(GNS))
     from sources import list_sources, fetch_one
@@ -287,10 +370,24 @@ def sources_cmd(args) -> int:
     if args.sub == "serve":
         from sources import serve
         return serve.run(host=args.bind or args.host, port=args.port)
+    if args.sub == "enable":
+        return sources_enable_cmd(args.sid, args.state, args.json)
     return EXIT_FAIL
 
 
 def workbench_cmd(args) -> int:
+    if args.sub == "refresh-x-surge":
+        sys.path.insert(0, str(WB))
+        from server import x_surge
+        hours = 48 if (args.range == "48h") else 24
+        rep = x_surge.collect(range_h=hours, limit=args.limit, force=args.force)
+        x_surge.fetch_rss()                         # SoPilot 热帖(蹭蹭流量页数据源)
+        return 0 if not rep.get("circuit_break") else 3
+    if args.sub == "refresh-yt-track":
+        sys.path.insert(0, str(WB))
+        from server import yt_track
+        _, code = yt_track.collect(force=args.force)   # 0 正常/跳过, 3 配额熔断, 4 无 key
+        return code
     if args.sub == "enrich-x-profiles":
         sys.path.insert(0, str(WB))
         from server import x_profile_enricher
@@ -491,6 +588,11 @@ def main() -> int:
     ps_sv.add_argument("--host", default="127.0.0.1")
     ps_sv.add_argument("--port", type=int, default=8787)
     ps_sv.add_argument("--bind", default=None, help="显式绑定地址(如 0.0.0.0, 覆盖 --host)")
+    ps_en = ssub.add_parser("enable", help="启用/停用来源(行级写 config.local.yaml 覆盖, 不动库文件)")
+    ps_en.add_argument("sid", help="来源 id(list 可查)")
+    ps_en.add_argument("state", nargs="?", choices=["on", "off"], default=None,
+                       help="on/off, 缺省=翻转当前状态")
+    ps_en.add_argument("--json", action="store_true")
 
     p_fl = sub.add_parser("flows", help="生成工作流(板块二)")
     fsub = p_fl.add_subparsers(dest="sub", required=True)
@@ -540,6 +642,16 @@ def main() -> int:
     pw_e.add_argument("--handles", default="", help="只抓指定账号(逗号分隔, 可带@)")
     pw_e.add_argument("--provider", default="grok-cli", help="档案来源(暂仅 grok-cli)")
     pw_e.add_argument("--json", action="store_true")
+    pw_s = wsub.add_parser("refresh-x-surge",
+                           help="X起爆帖互动采集(FxTwitter四件套 → data/workbench/x_engagement.json 时序快照)")
+    pw_s.add_argument("--range", default="24h", choices=["24h", "48h"], help="回看窗口")
+    pw_s.add_argument("--limit", type=int, default=300, help="单轮最多采集帖数")
+    pw_s.add_argument("--force", action="store_true", help="忽略20分钟采集冷却全部重抓")
+    pw_y = wsub.add_parser("refresh-yt-track",
+                           help="YouTube热点追踪采集(Data API v3 → data/workbench/yt_channels.json + yt_videos.json 快照)")
+    pw_y.add_argument("--force", action="store_true",
+                      help="忽略5分钟采集冷却与重入锁全部重抓")
+    pw_y.add_argument("--json", action="store_true", help="报告本就是单行 JSON, 此参数仅为习惯兼容")
 
     p_k = sub.add_parser("skills", help="把 skills/ 安装到本机 agent 技能目录")
     ksub = p_k.add_subparsers(dest="sub", required=True)

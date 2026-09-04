@@ -58,39 +58,103 @@ def _load_raw() -> dict:
     return pool
 
 
+def _pool_mtime() -> float:
+    """主池与 local 覆盖的最新 mtime——local 变更同样必须触发重读。"""
+    mt = 0.0
+    for f in (POOL_FILE, POOL_FILE.with_name("twitter_pool.local.yaml")):
+        try:
+            mt = max(mt, f.stat().st_mtime)
+        except OSError:
+            pass
+    return mt
+
+
+def _acct_view(a: dict, pos_map: dict) -> dict:
+    """池账号行 → 前端视图。load_accounts / manage_payload 共用的单一映射源。"""
+    handle = str(a.get("handle") or "").strip().lstrip("@")
+    role = str(a.get("role") or "")
+    return {
+        "handle": handle,
+        "uid": str(a.get("uid") or ""),
+        "name": str(a.get("name") or ""),
+        "homepage": str(a.get("homepage") or f"https://x.com/{handle}"),
+        "markets": [str(m) for m in (a.get("markets") or [])],
+        "role": role,
+        "positioning": pos_map.get(role, ""),
+        "lang": str(a.get("lang") or ""),
+        "tier": str(a.get("tier") or ""),
+        "priority": str(a.get("priority") or ""),
+        "note": str(a.get("note") or ""),
+    }
+
+
 def load_accounts(force: bool = False) -> dict:
-    """→ {handle_key: account_view}; mtime 缓存, 池文件变更自动重读。"""
-    try:
-        mtime = POOL_FILE.stat().st_mtime
-    except OSError:
-        mtime = 0.0
+    """→ {handle_key: account_view}(仅启用账号); mtime 缓存(含 local 覆盖), 变更自动重读。"""
+    mtime = _pool_mtime()
     if not force and _cache["accounts"] is not None and _cache["mtime"] == mtime:
         return _cache["accounts"]
 
     pos_map = _role_positioning_map()
     out = {}
     for a in (_load_raw().get("accounts") or []):
-        handle = str(a.get("handle") or "").strip().lstrip("@")
-        if not handle or a.get("enabled", True) is False:
+        v = _acct_view(a, pos_map)
+        if not v["handle"] or a.get("enabled", True) is False:
             continue
-        key = handle.lower()
-        role = str(a.get("role") or "")
-        out[key] = {
-            "handle": handle,
-            "uid": str(a.get("uid") or ""),
-            "name": str(a.get("name") or ""),
-            "homepage": str(a.get("homepage") or f"https://x.com/{handle}"),
-            "markets": [str(m) for m in (a.get("markets") or [])],
-            "role": role,
-            "positioning": pos_map.get(role, ""),
-            "lang": str(a.get("lang") or ""),
-            "tier": str(a.get("tier") or ""),
-            "priority": str(a.get("priority") or ""),
-            "note": str(a.get("note") or ""),
-        }
+        out[v["handle"].lower()] = v
     _cache["mtime"] = mtime
     _cache["accounts"] = out
     return out
+
+
+def pool_handles() -> set:
+    """全池 handle 键集(含停用账号), 供偏好写入校验防孤儿键。"""
+    keys = set(load_accounts())
+    for a in (_load_raw().get("accounts") or []):
+        h = str(a.get("handle") or "").strip().lstrip("@").lower()
+        if h:
+            keys.add(h)
+    return keys
+
+
+def manage_payload() -> dict:
+    """账号管理页数据面: 全池(含停用) + grok 档案(followers/verified) + 本地偏好。
+
+    启用部分复用 load_accounts()(单一映射源), 仅停用账号补 _acct_view 映射;
+    关注/备注写 data/workbench/x_account_prefs.json(板块四唯一写口, 红线7),
+    池内字段只读——启停/角色/市场须改池文件或 local 覆盖。
+    """
+    from . import config as wb_config, x_profile_enricher    # 函数级 import 防环
+    live = load_accounts()
+    pos_map = _role_positioning_map()
+    profiles = x_profile_enricher.load_cache()["profiles"]
+    prefs = wb_config.load_x_prefs()
+    rows = []
+    for a in (_load_raw().get("accounts") or []):
+        key = str(a.get("handle") or "").strip().lstrip("@").lower()
+        base = live.get(key)
+        if base is not None:
+            row, enabled = dict(base), True
+        else:
+            row = _acct_view(a, pos_map)                     # 池内 enabled=False 被滤
+            if not row["handle"]:
+                continue
+            enabled = False
+        prof = profiles.get(key) or {}
+        pref = prefs.get(key) or {}
+        row.update({
+            "enabled": enabled,
+            "followers": int(prof.get("followers") or 0),
+            "verified": bool(prof.get("verified")),
+            "bio": str(prof.get("bio") or ""),
+            "follow": bool(pref.get("follow")),
+            "local_note": str(pref.get("note") or ""),       # 与池内 note 严格区分
+        })
+        rows.append(row)
+    rows.sort(key=lambda r: (not r["follow"], -(r["followers"] or 0), r["handle"]))
+    return {"accounts": rows, "count": len(rows),
+            "followed_n": sum(1 for r in rows if r["follow"]),
+            "disabled_n": sum(1 for r in rows if not r["enabled"]),
+            "loaded_at": time.strftime("%Y-%m-%d %H:%M:%S")}
 
 
 def payload() -> dict:

@@ -444,12 +444,14 @@ def query(markets: list | None = None, kinds: list | None = None,
           tickers: list | None = None, sentiments: list | None = None,
           event_types: list | None = None,
           item_types: list | None = None, positionings: list | None = None,
+          sectors: list | None = None,
           q: str = "", since: str = "", limit: int = 200, cursor: str = "",
           dedup: bool = True) -> tuple[list, str]:
     """只读查询。dedup=True(默认)只出簇代表条; q 拆词 LIKE AND。
     cursor = "time|id" 完整 keyset(修同分钟跳项 bug)。
     2026-09-03 双标签制: item_types/positionings 新过滤; markets 输入接受旧别名
-    (美股→美国/港股→香港/外汇大宗→全球)。"""
+    (美股→美国/港股→香港/外汇大宗→全球)。
+    2026-09-04 赛道实时筛选: sectors 输入 L1 名, 命中任一选中赛道即中(路径首段前缀匹配)。"""
     markets = _tax.norm_markets(list(markets or []))
     sql, args = "SELECT * FROM items WHERE 1=1", []
     if dedup:
@@ -473,6 +475,12 @@ def query(markets: list | None = None, kinds: list | None = None,
         sql += f" AND source_id IN ({','.join('?' * len(source_ids))})"; args += source_ids
     if sentiments:
         sql += f" AND sentiment IN ({','.join('?' * len(sentiments))})"; args += sentiments
+    if sectors:                              # 赛道 L1: "L1>L2>..." 首段前缀, 选中值之间 OR
+        conds = []
+        for s in sectors:
+            conds.append("sectors LIKE ?"); args.append(f'%"{s}>%')
+            conds.append("sectors LIKE ?"); args.append(f'%"{s}"%')
+        sql += " AND (" + " OR ".join(conds) + ")"
     if since:
         sql += " AND time>?"; args.append(since)
     for mk in (markets or []):

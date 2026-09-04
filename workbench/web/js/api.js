@@ -57,6 +57,21 @@ WB.theme = {
   },
 };
 
+/* 一键复制(蹭蹭流量/推荐卡通用): clipboard API 优先, execCommand 兜底 */
+WB.copyText = async function (text) {
+  try {
+    await navigator.clipboard.writeText(text || "");
+    WB.toast("已复制到剪贴板");
+  } catch (e) {
+    const ta = document.createElement("textarea");
+    ta.value = text || ""; ta.style.position = "fixed"; ta.style.opacity = "0";
+    document.body.appendChild(ta); ta.select();
+    try { document.execCommand("copy"); WB.toast("已复制到剪贴板"); }
+    catch (e2) { WB.toast("复制失败, 请手动选择文本"); }
+    ta.remove();
+  }
+};
+
 /* 素材篮(资讯页加入 → 图文页素材池, localStorage 持久化)
    sel = 是否勾选参与生成(素材池可能积很多, 只有勾选的进生成/草稿);
    新增默认勾选(用户刚点了加入); 旧数据无 sel 字段按已选兼容(matChecked 判 !== false) */

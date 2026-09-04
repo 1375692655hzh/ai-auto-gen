@@ -18,7 +18,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
-from . import config, proxy, reco, stats, views, xaccounts, x_profile_enricher, xhot
+from . import config, ops, proxy, stats, views, xaccounts, x_profile_enricher, x_surge, yt_track
 
 WEB = Path(__file__).resolve().parent.parent / "web"
 
@@ -116,6 +116,30 @@ def create_app() -> FastAPI:
         return {"profiles": c["profiles"], "enriched_at": c.get("enriched_at"),
                 "count": len(c["profiles"])}
 
+    # ── 账号管理(图文页子页): 全池只读 + 本地偏好(唯一写口 x_account_prefs.json) ──
+    @app.get("/wb-api/x-accounts-manage")
+    def x_accounts_manage():
+        return xaccounts.manage_payload()
+
+    @app.post("/wb-api/x-account-pref")
+    async def x_account_pref(request: Request):
+        body = await request.json()
+        handle = str(body.get("handle") or "").strip().lstrip("@").lower()
+        if not handle:
+            return JSONResponse({"error": "缺少 handle"}, status_code=400)
+        if handle not in xaccounts.pool_handles():
+            return JSONResponse({"error": f"池内无此账号: {handle}"}, status_code=404)
+        prefs = config.load_x_prefs()
+        p = prefs.setdefault(handle, {})
+        if "follow" in body:
+            p["follow"] = bool(body["follow"])
+        if "note" in body:
+            p["note"] = str(body["note"])[:200]
+        p["updated_at"] = time.strftime("%Y-%m-%d %H:%M:%S")
+        config.save_x_prefs(prefs)
+        return {"handle": handle, "follow": p.get("follow", False),
+                "note": p.get("note", "")}
+
     # ── 追踪账号(本板块自有数据, 真实增删; 指标采集留桩) ─────────────────────
     @app.get("/wb-api/track/accounts")
     def track_list():
@@ -137,25 +161,169 @@ def create_app() -> FastAPI:
             rows.pop(idx)
         return {"accounts": config.save_accounts(rows)}
 
-    # ── 图文页: 推荐信息打分(服务端, 规则透明) ───────────────────────────────
-    @app.get("/wb-api/recommend")
-    def recommend(since: str = "", markets: str = "", kinds: str = "",
-                  channels: str = "", positionings: str = "",
-                  item_types: str = "", limit: int = 50, sort: str = "score"):
+    # ── 关注来源(本板块自有数据: followed_sources.json) ─────────────────────
+    @app.get("/wb-api/followed-sources")
+    def followed_list():
+        rows = config.load_followed()
+        return {"rows": rows, "ids": [r["id"] for r in rows]}
+
+    @app.post("/wb-api/followed-sources")
+    async def followed_toggle(request: Request):
+        body = await request.json()
+        sid = str(body.get("id") or "")
+        if not sid:
+            return JSONResponse({"error": "缺少来源 id"}, status_code=400)
+        rows = config.load_followed()
+        if body.get("on"):
+            if not any(r["id"] == sid for r in rows):
+                rows.append({"id": sid, "added_at": time.strftime("%Y-%m-%d %H:%M:%S")})
+        else:
+            rows = [r for r in rows if r["id"] != sid]
+        config.save_followed(rows)
+        return {"id": sid, "on": bool(body.get("on")),
+                "ids": [r["id"] for r in rows]}
+
+    # ── 来源启停(红线7: 触发类动作只经 subprocess 调 cli.py, 不直写板块一) ────
+    @app.post("/wb-api/sources/{sid}/enabled")
+    async def source_enabled(sid: str, request: Request):
+        body = await request.json()
+        on = bool(body.get("on"))
+        import subprocess
+        cli = Path(__file__).resolve().parents[2] / "cli.py"
         try:
-            return reco.recommend(since=since, markets=markets, kinds=kinds,
-                                  channels=channels, positionings=positionings,
-                                  item_types=item_types, limit=limit, sort=sort)
+            p = subprocess.run(
+                ["py", "-3.11", str(cli), "sources", "enable", sid, "on" if on else "off", "--json"],
+                capture_output=True, text=True, encoding="utf-8", timeout=30)
+        except subprocess.TimeoutExpired:
+            return JSONResponse({"error": "cli 调用超时"}, status_code=504)
+        try:
+            out = json.loads((p.stdout or "").strip().splitlines()[-1])
+        except Exception:
+            out = {"raw": (p.stdout or p.stderr or "").strip()[:300]}
+        if p.returncode != 0 or not out.get("ok"):
+            return JSONResponse({"error": out.get("error") or out.get("raw") or f"exit {p.returncode}"},
+                                status_code=500)
+        stats.invalidate()                  # 60s 统计缓存立即作废, 注册表状态即时生效
+        return {"id": sid, "enabled": out.get("enabled")}
+
+    # ── 图文页【推荐信息】数据面: 全 X 条目 + 互动快照五选排序 ────────────────
+    @app.get("/wb-api/x-surge")
+    def x_surge_view(range: str = "24h", golden: int = 0, market: str = "",
+                     sector: str = "", min_followers: int = 0, finance: int = 0,
+                     sort: str = "time", limit: int = 100):
+        try:
+            return x_surge.build_view(range_h=int(range.rstrip("h")) if range.endswith("h") else 24,
+                                      golden=bool(golden), market=market, sector=sector,
+                                      min_followers=min_followers, finance=bool(finance),
+                                      sort=sort, limit=limit)
         except proxy.UpstreamError as e:
             return JSONResponse({"error": str(e)}, status_code=e.code or 502)
 
-    # ── 图文页右栏: X 热帖榜(热度=同事件簇×3+粉丝量级, 真流量待板块一补字段) ──
-    @app.get("/wb-api/x-hot")
-    def x_hot(range: str = "24h", markets: str = "", limit: int = 12):
+    # ── 图文页【蹭蹭流量】数据面: SoPilot 热帖 RSS(唯一来源, 读缓存零外呼) ─────
+    @app.get("/wb-api/x-surge-rss")
+    def x_surge_rss_view(sort: str = "prob", limit: int = 100):
+        return x_surge.rss_view(sort=sort, limit=limit)
+
+    # ── 视频页【热点追踪/追踪账号】: YouTube 账号库+快照增量榜(读缓存零外呼;
+    #    外呼只在 /yt/collect spawn 的 CLI 进程, 同 x_surge 架构) ────────────────
+    @app.get("/wb-api/yt/hot")
+    def yt_hot(range: str = "24h", sort: str = "views", kind: str = "all",
+               channel: str = "", q: str = "", limit: int = 100):
+        return yt_track.build_view(range=range, sort=sort, kind=kind,
+                                   channel=channel, q=q, limit=limit)
+
+    @app.get("/wb-api/yt/status")
+    def yt_status():
+        return yt_track.status_payload()
+
+    @app.get("/wb-api/yt/channels")
+    def yt_channels_list():
+        rows = config.load_yt_channels()
+        return {"channels": rows,
+                "meta": {"configured": bool(yt_track.api_key()),
+                         "enabled": sum(1 for c in rows if c.get("enabled", True)),
+                         "pending": sum(1 for c in rows if c.get("resolve_status") == "pending"),
+                         "failed": sum(1 for c in rows if c.get("resolve_status") == "failed")}}
+
+    @app.post("/wb-api/yt/channels")
+    async def yt_channels_add(request: Request):
+        body = await request.json()
+        row, err = yt_track.add_channel(str(body.get("input") or ""),
+                                        str(body.get("note") or ""),
+                                        bool(body.get("enabled", True)))
+        if err:
+            dup = "已在追踪列表" in err["error"]
+            return JSONResponse(err, status_code=409 if dup else 400)
+        return {"added": row, "channels": config.load_yt_channels()}
+
+    @app.post("/wb-api/yt/channels/{cid}/enabled")
+    async def yt_channel_enabled(cid: str, request: Request):
+        body = await request.json()
+        rows = config.load_yt_channels()
+        for r in rows:
+            if r.get("id") == cid:
+                r["enabled"] = bool(body.get("on"))
+                config.save_yt_channels(rows)
+                return {"id": cid, "enabled": r["enabled"]}
+        return JSONResponse({"error": "频道不存在"}, status_code=404)
+
+    @app.delete("/wb-api/yt/channels/{cid}")
+    def yt_channel_del(cid: str):
+        rows = [r for r in config.load_yt_channels() if r.get("id") != cid]
+        return {"removed": 1, "channels": config.save_yt_channels(rows)}
+        # 已采视频/快照保留为孤儿数据(防误删丢历史), 榜单按启用频道过滤自然隐去
+
+    @app.post("/wb-api/yt/channels/import")
+    async def yt_channels_import():
+        """从追踪主页 tracked_accounts.json 导入 platform=YouTube 的行(只复制不删源)。"""
+        imported, skipped = [], []
+        rows = config.load_yt_channels()
+        seen = {c.get("value") for c in rows}
+        for a in config.load_accounts():
+            if (a.get("platform") or "").lower() != "youtube":
+                continue
+            parsed = yt_track.parse_channel_input(a.get("account") or "")
+            if not parsed or parsed["value"] in seen:
+                skipped.append(a.get("account"))
+                continue
+            rows.append({"id": "y" + time.strftime("%m%d%H%M%S"),
+                         "input": a.get("account"), "kind": parsed["kind"],
+                         "value": parsed["value"],
+                         "handle": parsed["value"] if parsed["kind"] == "handle" else "",
+                         "channel_id": parsed["value"] if parsed["kind"] == "channel_id" else "",
+                         "title": "", "note": a.get("note") or "", "enabled": True,
+                         "resolve_status": "pending", "resolve_error": "",
+                         "subs": None, "uploads_pid": "",
+                         "added_at": time.strftime("%Y-%m-%d %H:%M:%S")})
+            seen.add(parsed["value"])
+            imported.append(a.get("account"))
+        if imported:
+            config.save_yt_channels(rows)
+        return {"imported": imported, "skipped": [s for s in skipped if s],
+                "channels": rows}
+
+    @app.post("/wb-api/yt/collect")
+    def yt_collect():
+        """立即采集: 异步 spawn CLI(一轮 30–120s, 同步会卡死浏览器请求);
+        进度/结果经 GET /yt/status 轮询(状态落 yt_videos.json last_collect)。"""
+        import subprocess
+        st = yt_track.status_payload()
+        if not st["configured"]:
+            return JSONResponse({"error": "未配置 YouTube Data API Key",
+                                 "hint": "到 设置 → YouTube 热点追踪 填写"}, status_code=400)
+        if st["running"]:
+            return JSONResponse({"error": "采集进行中", "started_at": st["started_at"]},
+                                status_code=409)
+        cli = Path(__file__).resolve().parents[2] / "cli.py"
         try:
-            return xhot.hot(range_=range, markets=markets, limit=limit)
-        except proxy.UpstreamError as e:
-            return JSONResponse({"error": str(e)}, status_code=e.code or 502)
+            subprocess.Popen(
+                ["py", "-3.11", str(cli), "workbench", "refresh-yt-track", "--json"],
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+        except Exception as e:
+            return JSONResponse({"error": f"采集进程启动失败: {e}"}, status_code=500)
+        return {"started": True}
+
 
     # ── 图文页: 草稿真实 CRUD(data/workbench/drafts.json) ────────────────────
     @app.get("/wb-api/drafts")
@@ -220,6 +388,16 @@ def create_app() -> FastAPI:
     def automation_del(tid: str):
         rows = [r for r in config.load_automation() if r.get("id") != tid]
         return {"tasks": config.save_automation(rows)}
+
+    # ── 运维页: 常驻进程/开机任务/刷新轮/存储状态 + 白名单动作(subprocess) ────
+    @app.get("/wb-api/ops/status")
+    def ops_status():
+        return ops.status_payload()
+
+    @app.post("/wb-api/ops/action")
+    async def ops_action(request: Request):
+        body = await request.json()
+        return ops.action(str(body.get("target") or ""), str(body.get("op") or ""))
 
     # ── 云端同步预留桩(本期一律 501) ─────────────────────────────────────────
     @app.post("/wb-api/cloud/{action}")

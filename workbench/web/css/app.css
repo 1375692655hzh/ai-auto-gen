@@ -164,7 +164,12 @@ select[multiple] option { padding: 3px var(--s2); border-radius: var(--s1); }
 /* ── 资讯页三栏 ─────────────────────────────────────────────────────────── */
 .news-layout { display: grid; grid-template-columns: 224px minmax(0, 1fr) 244px;
   gap: var(--s4); align-items: start; }
-.news-layout > div:first-child { position: sticky; top: 64px; }
+.news-layout > div:first-child { position: sticky; top: 64px;
+  max-height: calc(100vh - 64px - var(--s4)); overflow-y: auto;
+  scrollbar-width: thin; scrollbar-color: var(--border-light) transparent; }
+.news-layout > div:first-child::-webkit-scrollbar { width: 6px; }
+.news-layout > div:first-child::-webkit-scrollbar-thumb { background: var(--border-light); border-radius: var(--r-pill); }
+.news-layout > div:first-child::-webkit-scrollbar-track { background: transparent; }
 .filter-group { margin-bottom: var(--s4); }
 .filter-group h4 { font-size: 11.5px; color: var(--text-mute); font-weight: 600;
   margin-bottom: 7px; display: flex; justify-content: space-between; align-items: center; }
@@ -174,6 +179,12 @@ select[multiple] option { padding: 3px var(--s2); border-radius: var(--s1); }
 .feed-toolbar input[type=text] { flex: 1; min-width: 180px; }
 .feed-toolbar label { display: inline-flex; align-items: center; gap: 5px; font-size: 12px;
   color: var(--text-dim); cursor: pointer; }
+
+/* 资讯页左栏紧凑化: 仅 .news-filters 作用域生效, 不波及右栏统计卡/来源详情表/其他页 */
+.news-filters .filter-group { margin-bottom: var(--s3); }
+.news-filters .filter-group h4 { margin-bottom: 4px; }
+.news-filters .chip { padding: 1px 8px; font-size: 11.5px; margin: 0 4px 4px 0; }
+.news-filters .btn { padding: 3px 7px; font-size: 12px; }
 
 /* 信息流: 1px 分隔线行式(Impeccable: 数据用线条分区, 不卡片套卡片) */
 .feed { border-top: 1px solid var(--border); }
@@ -275,7 +286,7 @@ table.reg th .arr { color: var(--accent); margin-left: 3px; }
 table.reg td { padding: 7px 12px; border-bottom: 1px solid var(--border);
   vertical-align: middle; white-space: nowrap; }
 /* 说明列允许换行(长描述), 其余列一律不折行保持表格密度(Arco 紧凑) */
-table.reg td:nth-child(3) { white-space: normal; min-width: 200px; max-width: 340px; }
+table.reg td:nth-child(4) { white-space: normal; min-width: 200px; max-width: 340px; }
 table.reg tbody tr:last-child td { border-bottom: none; }
 table.reg tbody tr:hover { background: var(--accent-weak); }
 td.num { font-family: var(--mono); font-variant-numeric: tabular-nums; text-align: right; }
@@ -287,6 +298,29 @@ td.num { font-family: var(--mono); font-variant-numeric: tabular-nums; text-alig
 .pill.off { color: var(--text-mute); }
 .src-acts .act { color: var(--accent); cursor: pointer; font-size: 12px; white-space: nowrap; }
 .src-acts .act:hover { color: var(--text); }
+/* 状态列 = 启停开关 + 健康 pill 并排(健康与启停强挂钩的可视化) */
+.state-wrap { display: inline-flex; align-items: center; gap: var(--s2); }
+/* 纯 CSS 开关: 30x16 track + pill 圆角, ::after 为 knob; on=accent(单 accent 铁律), off=灰 */
+.switch { position: relative; display: inline-block; width: 30px; height: 16px; flex: none; border-radius: var(--r-pill); background: var(--bg-hover); border: 1px solid var(--border); cursor: pointer; transition: background .2s var(--ease), border-color .2s var(--ease); }
+.switch::after { content: ""; position: absolute; top: 2px; left: 2px; width: 10px; height: 10px; border-radius: 50%; background: var(--text-mute); transition: transform .2s var(--ease), background .2s var(--ease); }
+.switch:hover { border-color: var(--border-light); }
+.switch.on { background: var(--accent); border-color: var(--accent); }
+.switch.on:hover { filter: brightness(1.08); }
+.switch.on::after { transform: translateX(14px); background: var(--bg); }
+.switch:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+@keyframes knob-pulse { 50% { opacity: .35; } }
+.switch.busy { pointer-events: none; }
+.switch.busy::after { animation: knob-pulse .8s linear infinite; }
+/* SVG 星标(替代 emoji 星, 设计系统禁 emoji 图标): 未关注描边灰, 已关注填充 accent */
+.star { display: inline-flex; width: 15px; height: 15px; color: var(--text-mute); cursor: pointer; vertical-align: middle; transition: color 120ms var(--ease), transform 120ms var(--ease), filter 120ms var(--ease); }
+.star svg { width: 15px; height: 15px; display: block; }
+.star:hover { color: var(--accent); transform: scale(1.1); filter: brightness(1.15); }
+.star.on { color: var(--accent); }
+.star.on svg { fill: currentColor; }
+/* 停用行: 逐格压暗(父级 opacity 会连带开关, 故按 td 施加), 开关列保持全不透明 */
+table.reg tbody tr.off td { opacity: .55; }
+table.reg tbody tr.off td.state-cell { opacity: 1; }
+table.reg tbody tr.off td:nth-child(4) { color: var(--text-mute); }
 
 /* ── 图文/视频页 ────────────────────────────────────────────────────────── */
 .two-col { display: grid; grid-template-columns: 300px minmax(0, 1fr); gap: var(--s4);
@@ -368,10 +402,8 @@ input[type=radio], input[type=checkbox] { accent-color: var(--accent); }
 .frow:last-child { margin-bottom: 0; }
 .frow .lab { flex: none; font-size: 12.5px; font-weight: 600;
              color: var(--text-mute); margin-right: 4px; }
-.reco-cols { display: grid; grid-template-columns: minmax(0, 1fr) clamp(340px, 26vw, 440px);
-             gap: var(--s4); align-items: start; }
-/* 不跟滚的侧栏: 推荐页热帖栏 + 资讯页右栏(沿用筛选项的 top:64px 约定) */
-.reco-rail, .news-status { position: sticky; top: 64px; align-self: start;
+/* 资讯页右栏不跟滚(沿用筛选项的 top:64px 约定); 推荐页 X 化后全宽无右栏 */
+.news-status { position: sticky; top: 64px; align-self: start;
   max-height: calc(100vh - 76px); overflow-y: auto; }
 /* X 热帖条目 */
 .xhot-item { padding: 8px 0; border-bottom: 1px solid var(--border); }
@@ -390,7 +422,30 @@ input[type=radio], input[type=checkbox] { accent-color: var(--accent); }
 /* 「已加入」态(推荐/资讯卡片通用): 灰字不响应点击 */
 .act-done { color: var(--text-dim); font-size: 12px; cursor: default; }
 
-@media (max-width: 1100px) {
-  .reco-cols { grid-template-columns: 1fr; }
-  .reco-rail { position: static; max-height: none; }
-}
+
+/* ── 蹭蹭流量子页(X起爆帖·评论卡位) ── */
+.surge-meta { font-size: 12px; color: var(--text-mute); margin: 10px 0; }
+.surge-grid { display: grid; grid-template-columns: 120px minmax(0, 1fr); gap: var(--s3); }
+.surge-rank { align-self: center; text-align: center; display: flex; flex-direction: column;
+  gap: 4px; align-items: center; }
+.surge-rank .prob { font-family: var(--mono); font-size: 27px; font-weight: 700;
+  color: var(--accent); line-height: 1; font-variant-numeric: tabular-nums; }
+.surge-rank .prob span { font-size: 13px; }
+.surge-rank .prob-lab { font-size: 10.5px; color: var(--text-mute); }
+.badge.golden { border-color: var(--yellow); color: var(--yellow); }
+.surge-top { display: flex; align-items: center; gap: 6px; margin-bottom: 3px; flex-wrap: wrap; }
+.surge-top .rank-no { font-family: var(--mono); font-size: 11px; color: var(--text-mute); }
+.surge-stats { display: flex; gap: 14px; flex-wrap: wrap; margin-top: 5px;
+  font-family: var(--mono); font-size: 11.5px; color: var(--text-dim);
+  font-variant-numeric: tabular-nums; }
+.surge-stats .grow { color: var(--green); }
+.surge-stats .exposure { color: var(--accent); }
+.surge-parts { font-size: 11px; margin-top: 2px; }
+/* FV 金融价值视图(推荐信息页): P0/P1 分组头 + 分组描边 + P3 归档灰显 */
+.group-head { display: flex; align-items: center; gap: 8px; margin: 14px 0 2px; }
+.news-card.tier-p0 { border-left: 3px solid var(--red); }
+.news-card.tier-p1 { border-left: 3px solid var(--yellow); }
+.news-card.p3-dim { opacity: .55; }
+@media (max-width: 900px) { .surge-grid { grid-template-columns: 1fr; } }
+/* 账号管理表: 中文徽章/动作不竖排折行 */
+.tbl td .badge, .tbl td .act { white-space: nowrap; }

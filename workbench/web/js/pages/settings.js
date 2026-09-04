@@ -7,8 +7,12 @@ WB.pages.settings = {
     return {
       s: { source: { mode: "local", base_url: "http://127.0.0.1:8787", api_key: "", timeout_s: 15 },
            ui: { theme: "dark", page_size: 100, remember_filters: true },
+           translate: { base_url: "", api_key: "", model: "" },
+           youtube: { api_key: "" },
            cloud: { endpoint: "", account: "", sync_enabled: false } },
       hasKey: false, keyTail: "", testResult: null, testing: false,
+      tHasKey: false, tKeyTail: "",
+      yHasKey: false, yKeyTail: "",
       check: null, saving: false,
     };
   },
@@ -16,6 +20,8 @@ WB.pages.settings = {
     async load() {
       const d = await WB.api.get("/settings");
       this.s = d; this.hasKey = d.source.has_key; this.keyTail = d.source.key_tail;
+      this.tHasKey = d.translate.has_key; this.tKeyTail = d.translate.key_tail;
+      this.yHasKey = (d.youtube || {}).has_key; this.yKeyTail = (d.youtube || {}).key_tail;
       this.applyTheme();
     },
     async save() {
@@ -25,9 +31,16 @@ WB.pages.settings = {
           source: { mode: this.s.source.mode, base_url: this.s.source.base_url,
                     api_key: this.s.source.api_key, timeout_s: this.s.source.timeout_s },
           ui: this.s.ui,
+          translate: { base_url: this.s.translate.base_url,
+                       api_key: this.s.translate.api_key, model: this.s.translate.model },
+          youtube: { api_key: (this.s.youtube || {}).api_key || "" },
         });
         this.s.source.api_key = "";                 // 不保留明文
         this.hasKey = d.source.has_key; this.keyTail = d.source.key_tail;
+        this.s.translate.api_key = "";
+        this.tHasKey = d.translate.has_key; this.tKeyTail = d.translate.key_tail;
+        if (this.s.youtube) this.s.youtube.api_key = "";
+        this.yHasKey = (d.youtube || {}).has_key; this.yKeyTail = (d.youtube || {}).key_tail;
         this.applyTheme();
         WB.toast("设置已保存");
         this.$root.refreshHealth && this.$root.refreshHealth();
@@ -106,7 +119,37 @@ WB.pages.settings = {
       <button class="btn primary" :disabled="saving" @click="save">保存设置</button>
     </div>
 
-    <!-- 3. 环境自检 -->
+    <!-- 3. 翻译模型(蹭蹭流量推文翻译, OpenAI 兼容 /chat/completions) -->
+    <div class="card">
+      <h3>翻译模型 <span class="muted">蹭蹭流量推文翻译 · 采集轮自动补译</span></h3>
+      <div class="form-row"><label>接口地址</label>
+        <input type="text" v-model="s.translate.base_url" placeholder="https://api.deepseek.com"
+               style="width:320px"></div>
+      <div class="form-row"><label>API Key</label>
+        <input type="password" v-model="s.translate.api_key"
+               :placeholder="tHasKey ? '已配置(尾号 ' + tKeyTail + '), 留空保持不变' : 'sk-...'"
+               style="width:320px">
+        <span class="muted">仅存本机服务端, 不回显明文</span></div>
+      <div class="form-row"><label>模型</label>
+        <input type="text" v-model="s.translate.model" placeholder="deepseek-v4-flash"
+               style="width:220px"></div>
+      <button class="btn primary" :disabled="saving" @click="save">保存设置</button>
+    </div>
+
+    <!-- 4. YouTube 热点追踪(视频页【热点追踪/追踪账号】数据源, Data API v3) -->
+    <div class="card">
+      <h3>YouTube 热点追踪 <span class="muted">视频页·热点追踪 · Data API v3</span></h3>
+      <div class="form-row"><label>API Key</label>
+        <input type="password" v-model="s.youtube.api_key"
+               :placeholder="yHasKey ? '已配置(尾号 ' + yKeyTail + '), 留空保持不变' : 'Google Cloud Console → 启用 YouTube Data API v3'"
+               style="width:360px">
+        <span class="muted">仅存本机服务端, 不回显明文</span></div>
+      <button class="btn primary" :disabled="saving" @click="save">保存设置</button>
+      <p class="muted" style="margin-top:8px">免费配额 1 万单位/天; 采集由任务计划每天一次执行
+        (bin/yttrack_task.bat), 也可在视频页【热点追踪】手动「立即采集」</p>
+    </div>
+
+    <!-- 5. 环境自检 -->
     <div class="card">
       <h3>环境自检 <button class="btn" style="float:right" @click="loadCheck">刷新</button></h3>
       <div v-if="check">

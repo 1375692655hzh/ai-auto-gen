@@ -15,15 +15,20 @@ WB.pages.article = {
       dict: { markets: [] },
       tagEnums: { positionings: ["官方", "机构", "大V", "快讯源", "新闻源"],
                   item_types: ["聚合", "快讯", "资讯", "分析"] },
-      /* ── 推荐信息 ── */
-      recoSince: "24h",
+      /* ── 推荐信息/蹭蹭流量(X 统一数据面: 同一加载器, 两份预设状态) ──
+         reco=选素材视角(默认时间序), surge=卡位视角(默认起爆序); 全部只显示 X 条目 */
       sinceOpts: [["1h", "近1小时"], ["6h", "近6小时"], ["12h", "近12小时"], ["24h", "近1天"], ["48h", "近2天"]],
-      recoMarkets: [], recoPositionings: [], recoItemTypes: [],
-      recoSort: "score",                 // score=价值排序 | time=时间排序
-      recoItems: [], recoTotal: 0, recoRule: "", recoLoading: false, recoErr: "",
+      sortOpts: [["fv", "金融价值"], ["time", "时间顺序"], ["growth", "增速"],
+                 ["pred", "预测浏览"], ["exposure", "评论曝光"]],
+      xfReco: { since: "12h", sort: "fv", markets: [], sectors: [], golden: false,
+                bigOnly: false, finance: false, items: [], total: 0, meta: {}, loading: false },
+      hideP3: false,                     /* FV 视图: 隐藏低值(P3)折叠开关 */
+      /* ── 账号管理(全 X 池只读 + 本地偏好 x_account_prefs.json) ── */
+      xaccts: { items: [], meta: {}, q: "", pos: "", followOnly: false, loading: false },
+      /* 蹭蹭流量 = SoPilot 热帖 RSS(唯一来源, 不走数据站) */
+      xfSurge: { sort: "prob", items: [], total: 0, meta: {}, loading: false },
+      rssSortOpts: [["prob", "爆火概率"], ["views", "浏览量"], ["exposure", "评论曝光"], ["time", "时间"]],
       basketIds: {},                     // 已在素材池的条目 id(「已加入」态)
-      /* 右栏 X 热帖榜 */
-      xhot: [], xhotRange: "24h", xhotMarkets: [], xhotRule: "",
       /* X 池账号档案(与资讯页同源: /x-accounts + /x-profiles) + 正文截断状态 */
       xAccounts: {}, xProfiles: {}, bodyExpanded: {},
       /* ── 内容生成(实时编辑 = 素材池勾选 + 生成模块排列组合 + 固定模板) ── */
@@ -66,6 +71,31 @@ WB.pages.article = {
       for (const a of Object.values(this.xAccounts)) (a.markets || []).forEach((m) => s.add(m));
       return [...s].sort();
     },
+    /* FV 分组视图: 仅 sort=fv 时按 P0/P1/其余分组, 其余排序原样单列 */
+    recoGroups() {
+      const items = this.xfReco.items || [];
+      if (this.xfReco.sort !== "fv") return [{ key: "all", label: "", cls: "", items }];
+      const g = { P0: [], P1: [], rest: [] };
+      items.forEach((r) => g[r.fv_tier === "P0" || r.fv_tier === "P1" ? r.fv_tier : "rest"].push(r));
+      const rest = this.hideP3 ? g.rest.filter((r) => r.fv_tier !== "P3") : g.rest;
+      const out = [];
+      if (g.P0.length) out.push({ key: "p0", label: "打断级 P0", cls: "red", items: g.P0 });
+      if (g.P1.length) out.push({ key: "p1", label: "今日必读 P1", cls: "yellow", items: g.P1 });
+      if (rest.length) out.push({ key: "rest", label: "简报候选与归档", cls: "", items: rest });
+      return out;
+    },
+    /* 账号管理行过滤: 关键词(名称/handle/市场) + 定位 chips + 仅看关注; 排序服务端已定 */
+    xacctRows() {
+      const q = this.xaccts.q.trim().toLowerCase();
+      let rows = this.xaccts.items;
+      if (this.xaccts.pos) rows = rows.filter((a) => a.positioning === this.xaccts.pos);
+      if (this.xaccts.followOnly) rows = rows.filter((a) => a.follow);
+      if (q) rows = rows.filter((a) =>
+        (a.name || "").toLowerCase().includes(q) ||
+        (a.handle || "").toLowerCase().includes(q) ||
+        (a.markets || []).some((m) => m.toLowerCase().includes(q)));
+      return rows;
+    },
   },
   methods: {
     /* ── 壳层子菜单注册(计数随数据更新) ── */
@@ -75,9 +105,12 @@ WB.pages.article = {
       const I = (p) => '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" ' +
         'stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">' + p + "</svg>";
       WB.shell.setSubs([
-        { id: "reco", title: "推荐信息", cnt: this.recoTotal || "",
+        { id: "reco", title: "推荐信息", cnt: this.xfReco.total || "",
           icon: I('<polygon points="12 2 15 9 22 9.3 16.5 14 18.5 21 12 17 5.5 21 7.5 14 2 9.3 9 9"/>'),
           onPick: () => { this.tab = "reco"; } },
+        { id: "surge", title: "蹭蹭流量", cnt: this.xfSurge.total || "",
+          icon: I('<polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>'),
+          onPick: () => { this.tab = "surge"; } },
         { id: "gen", title: "内容生成", cnt: this.materials.length || "",
           icon: I('<path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/>'),
           onPick: () => { this.tab = "gen"; } },
@@ -87,19 +120,22 @@ WB.pages.article = {
         { id: "auto", title: "自动化任务", cnt: this.tasks.length || "",
           icon: I('<circle cx="12" cy="12" r="9"/><polyline points="12 7 12 12 15.5 14"/>'),
           onPick: () => { this.tab = "auto"; } },
+        { id: "xaccts", title: "账号管理", cnt: this.xaccts.meta.count || "",
+          icon: I('<path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/>'),
+          onPick: () => { this.tab = "xaccts"; } },
       ], this.tab);
     },
     go(t) { this.tab = t; if (WB.shell) WB.shell.setSub(t); },
 
-    /* ── 推荐信息 ── */
-    sinceValue() {
+    /* ── X 统一数据面: 推荐信息/蹭蹭流量共用加载器(两份预设状态各自独立) ── */
+    sinceValue(since) {
       const now = new Date();
       const fmt = (d) => d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" +
         String(d.getDate()).padStart(2, "0") + " " + String(d.getHours()).padStart(2, "0") + ":" +
         String(d.getMinutes()).padStart(2, "0");
       const map = { "1h": 3600e3, "6h": 6 * 3600e3, "12h": 12 * 3600e3,
                     "24h": 86400e3, "48h": 2 * 86400e3 };
-      return map[this.recoSince] ? fmt(new Date(now - map[this.recoSince])) : "";
+      return map[since] ? fmt(new Date(now - map[since])) : "";
     },
     async loadDict() {
       try {
@@ -107,73 +143,121 @@ WB.pages.article = {
         const mk = new Set();
         for (const s of d.sources) (s.markets || []).forEach((m) => mk.add(m));
         this.dict = { markets: [...mk].sort() };
-      } catch (e) { /* 数据站未起时 loadReco 会报错展示 */ }
+      } catch (e) { /* 数据站未起时 loadXF 会报错展示 */ }
     },
-    async loadReco() {
-      this.recoLoading = true; this.recoErr = "";
+    async loadXF(key) {
+      const st = this[key];
+      st.loading = true;
       try {
-        const p = new URLSearchParams();
-        const s = this.sinceValue();
-        if (s) p.set("since", s);
-        if (this.recoMarkets.length) p.set("markets", this.recoMarkets.join(","));
-        if (this.recoPositionings.length) p.set("positionings", this.recoPositionings.join(","));
-        if (this.recoItemTypes.length) p.set("item_types", this.recoItemTypes.join(","));
-        p.set("limit", "50");
-        p.set("sort", this.recoSort);
-        const d = await WB.api.get("/recommend?" + p.toString());
-        this.recoItems = d.items; this.recoTotal = d.total; this.recoRule = d.rule;
-      } catch (e) { this.recoErr = e.error || "推荐接口不可用"; }
-      this.recoLoading = false;
+        const p = new URLSearchParams({ range: st.since, sort: st.sort, limit: "100" });
+        if (st.golden) p.set("golden", "1");
+        if (st.bigOnly) p.set("min_followers", "100000");
+        if (st.finance) p.set("finance", "1");
+        if (st.markets.length) p.set("market", st.markets.join(","));
+        if (st.sectors.length) p.set("sector", st.sectors[0]);
+        const d = await WB.api.get("/x-surge?" + p.toString());
+        (d.items || []).forEach((r, i) => { r.rank = i + 1; });   // 服务端已排好序
+        st.items = d.items; st.total = d.total;
+        st.meta = { ...(d.meta || {}), golden_n: d.golden_n, err: "" };
+      } catch (e) {
+        st.items = [];
+        st.meta = { ...(st.meta || {}), err: (e && e.error) || "接口不可用" };
+      }
+      st.loading = false;
       this.registerSubs();
     },
-    recoToggle(group, val) {
-      const arr = this[group];
-      const i = arr.indexOf(val);
-      i >= 0 ? arr.splice(i, 1) : arr.push(val);
-      this.loadReco();
+    /* 蹭蹭流量(RSS 版): 只吃 SoPilot 热帖缓存, 无筛选维度仅四选排序 */
+    async loadSurgeRss() {
+      const st = this.xfSurge;
+      st.loading = true;
+      try {
+        const d = await WB.api.get("/x-surge-rss?sort=" + st.sort);
+        st.items = d.items; st.total = d.total; st.meta = d.meta || {};
+      } catch (e) { st.items = []; }
+      st.loading = false;
+      this.registerSubs();
     },
-    scoreParts(it) {
-      return (it.score_parts || []).map((p) => p[0] + " +" + p[1]).join(" · ");
+    /* ── FV 金融价值徽章/明细(对齐 news.js 标签辅助, 双实现保持两处一致) ── */
+    tierBadge(t) { return { P0: "red", P1: "yellow", P2: "blue", P3: "" }[t] || ""; },
+    fvTitle(r) {
+      const p = r.fv_parts || {};
+      return "事件" + (p.event ?? 0) + " · 主体" + (p.entity ?? 0) +
+             " · 信源" + (p.source ?? 0) + " · 影响面" + (p.impact ?? 0) +
+             " · 意外度" + (p.surprise ?? 5) + "(缺省) · 印证时效" + (p.proof ?? 0) +
+             " — 阈值 P0≥75 / P1≥60 / P2≥40";
     },
-    /* 赛道路径分层展示(与资讯页同规则): [L1, "L2[>L3]"], 最多 2 条 +n 收口 */
     sectorParts(sec) {
       const p = String(sec).split(">");
       return [p[0] || "", p.slice(1).join(">")];
     },
-    visibleSectors(it) { return (it.sectors || []).slice(0, 2); },
-    sectorsRest(it) { return Math.max((it.sectors || []).length - 2, 0); },
-    /* 加入素材: 不跳页(用户还要继续逛), 点过变「已加入」 */
-    addToPool(it) {
-      WB.basket.add(it);
-      this.basketIds[it.id] = true;
+    visibleSectors(r) { return (r.sectors || []).slice(0, 2); },
+    sectorsRest(r) { return Math.max((r.sectors || []).length - 2, 0); },
+    /* 兼容两代值域: 库存 bullish/bearish 与筛选枚举 bull/bear */
+    sentimentBadge(s) {
+      return (s === "bullish" || s === "bull") ? "green"
+           : (s === "bearish" || s === "bear") ? "red"
+           : s === "neutral" ? "yellow" : "";
+    },
+    sentimentText(s) {
+      return { bullish: "利好", bull: "利好", bearish: "利空", bear: "利空",
+               neutral: "中性" }[s] || s;
+    },
+    /* ── 账号管理: 全池只读, 关注/本地备注写 data/workbench/x_account_prefs.json ── */
+    async loadXaccts() {
+      this.xaccts.loading = true;
+      try {
+        const d = await WB.api.get("/x-accounts-manage");
+        this.xaccts.items = d.accounts || [];
+        this.xaccts.meta = { count: d.count, followed_n: d.followed_n,
+                             disabled_n: d.disabled_n, err: "" };
+      } catch (e) {
+        this.xaccts.items = [];
+        this.xaccts.meta = { ...(this.xaccts.meta || {}), err: (e && e.error) || "接口不可用" };
+      }
+      this.xaccts.loading = false;
+      this.registerSubs();
+    },
+    async saveXPref(a, patch) {
+      try { await WB.api.post("/x-account-pref", { handle: a.handle, ...patch }); }
+      catch (e) { WB.toast("保存失败: " + (e.error || "")); }
+    },
+    toggleXFollow(a) {
+      a.follow = !a.follow;                              // 乐观更新, 失败由 toast 提示
+      this.xaccts.meta.followed_n = (this.xaccts.meta.followed_n || 0) + (a.follow ? 1 : -1);
+      this.saveXPref(a, { follow: a.follow });
+    },
+    saveXNote(a) { this.saveXPref(a, { note: a.local_note }); },
+    xfCopy(r) { WB.copyText(r.text_zh || r.text); },
+    xfToggleChip(key, field, val) {
+      const arr = this[key][field];
+      const i = arr.indexOf(val);
+      i >= 0 ? arr.splice(i, 1) : arr.push(val);
+      this.loadXF(key);
+    },
+    xfToggleFlag(key, field) {
+      this[key][field] = !this[key][field];
+      this.loadXF(key);
+    },
+    /* 加入素材: 不跳页(用户还要继续逛), 点过变「已加入」; 行对象凑齐 basket 五字段契约 */
+    addXToPool(r) {
+      WB.basket.add({ id: r.status_id, time: r.time, source: r.name,
+                      text: r.text_zh || r.text, url: r.reply_url });
+      this.basketIds[r.status_id] = true;
       this.syncMaterials();
     },
     initBasketIds() {
       this.basketIds = {};
       for (const m of WB.basket.list()) this.basketIds[m.id] = true;
     },
-    /* ── 右栏 X 热帖榜 ── */
-    async loadXHot() {
-      try {
-        const p = new URLSearchParams({ range: this.xhotRange });
-        if (this.xhotMarkets.length) p.set("markets", this.xhotMarkets.join(","));
-        const d = await WB.api.get("/x-hot?" + p.toString());
-        this.xhot = d.items; this.xhotRule = d.rule;
-      } catch (e) { this.xhot = []; }
-    },
-    toggleXhotMarket(m) {
-      const i = this.xhotMarkets.indexOf(m);
-      i >= 0 ? this.xhotMarkets.splice(i, 1) : this.xhotMarkets.push(m);
-      this.loadXHot();
-    },
-    xHotName(s) { return String(s || "").replace(/^X·/, ""); },
     fmtFol(n) {
       return n >= 1e4 ? (n / 1e4).toFixed(1).replace(/\.0$/, "") + "万" : String(n);
     },
-    sentimentBadge(s) {
-      return s === "bull" ? "green" : s === "bear" ? "red" : s === "neutral" ? "yellow" : "";
+    fmtN(n) {
+      if (n == null) return "—";
+      if (n >= 1e8) return (n / 1e8).toFixed(1).replace(/\.0$/, "") + "亿";
+      if (n >= 1e4) return (n / 1e4).toFixed(1).replace(/\.0$/, "") + "万";
+      return String(Math.round(n));
     },
-    sentimentText(s) { return { bull: "利好", bear: "利空", neutral: "中性" }[s] || s; },
     /* ── X 条目按账号渲染(与资讯页同实现, 保持两处一致) ── */
     async loadX() {
       try { this.xAccounts = (await WB.api.get("/x-accounts")).accounts || {}; } catch (e) {}
@@ -344,131 +428,177 @@ WB.pages.article = {
     this.registerSubs();
     this.syncMaterials();
     this.initBasketIds();
-    this.loadDict(); this.loadReco(); this.loadX(); this.loadXHot();
+    this.loadDict(); this.loadX(); this.loadXF("xfReco"); this.loadSurgeRss();
     this.loadFlows(); this.loadRuns(); this.loadDrafts();
-    this.loadAccounts(); this.loadLedger(); this.loadTasks();
+    this.loadAccounts(); this.loadLedger(); this.loadTasks(); this.loadXaccts();
   },
   unmounted() { if (WB.shell) WB.shell.setSubs([]); },
 
   template: `
   <div>
-    <!-- ═══ 子页1: 推荐信息(回溯范围 + 排序开关 + 横排筛选 + 右栏X热帖) ═══ -->
+    <!-- ═══ 子页1: 推荐信息(全 X · 互动数据 · 五选排序 · 选素材视角) ═══ -->
     <div v-show="tab==='reco'">
-      <div class="reco-cols">
-      <!-- 左列: 工具栏 + 筛选卡(右缘与信息流对齐) + 信息流 -->
-      <div>
-      <div class="feed-toolbar">
-        <select v-model="recoSince" @change="loadReco">
-          <option v-for="[v, t] in sinceOpts" :value="v">{{ t }}</option>
+            <div class="feed-toolbar">
+        <select v-model="xfReco.since" @change="loadXF('xfReco')">
+          <option v-for="[v, t] in sinceOpts" :key="v" :value="v">{{ t }}</option>
         </select>
         <div class="radio-group">
-          <label><input type="radio" value="score" v-model="recoSort" @change="loadReco"> 价值排序</label>
-          <label><input type="radio" value="time" v-model="recoSort" @change="loadReco"> 时间排序</label>
+          <label v-for="[v, t] in sortOpts" :key="v">
+            <input type="radio" :value="v" v-model="xfReco.sort" @change="loadXF('xfReco')"> {{ t }}</label>
         </div>
         <span style="flex:1"></span>
-        <button class="btn" @click="loadReco(); loadXHot()">{{ recoLoading ? '刷新中…' : '刷新' }}</button>
+        <button class="btn" @click="loadXF('xfReco')">{{ xfReco.loading ? '刷新中…' : '刷新' }}</button>
       </div>
-      <div class="card reco-filter">
+            <div class="card reco-filter">
         <div class="frow">
           <span class="lab">市场</span>
-          <span v-for="m in dict.markets" class="chip" :class="{on: recoMarkets.includes(m)}"
-                @click="recoToggle('recoMarkets', m)">{{ m }}</span>
+          <span v-for="m in xMarketChips" :key="m" class="chip" :class="{on: xfReco.markets.includes(m)}"
+                @click="xfToggleChip('xfReco', 'markets', m)">{{ m }}</span>
         </div>
         <div class="frow">
-          <span class="lab">定位</span>
-          <span v-for="p in tagEnums.positionings" class="chip" :class="{on: recoPositionings.includes(p)}"
-                @click="recoToggle('recoPositionings', p)">{{ p }}</span>
+          <span class="lab">赛道</span>
+          <span v-for="[sl, n] in (xfReco.meta.sectors_l1 || [])" :key="sl" class="chip"
+                :class="{on: xfReco.sectors.includes(sl)}" @click="xfToggleChip('xfReco', 'sectors', sl)">
+            {{ sl }}<template v-if="n"> {{ n }}</template></span>
+          <span v-if="!((xfReco.meta.sectors_l1 || []).length)" class="muted">窗口内暂无赛道打标</span>
         </div>
         <div class="frow">
-          <span class="lab">类型</span>
-          <span v-for="t in tagEnums.item_types" class="chip" :class="{on: recoItemTypes.includes(t)}"
-                @click="recoToggle('recoItemTypes', t)">{{ t }}</span>
+          <span class="lab">条件</span>
+          <span class="chip" :class="{on: xfReco.golden}" @click="xfToggleFlag('xfReco', 'golden')">仅黄金窗口(≤2h)</span>
+          <span class="chip" :class="{on: xfReco.bigOnly}" @click="xfToggleFlag('xfReco', 'bigOnly')">粉丝≥10万</span>
+          <span class="chip" :class="{on: xfReco.finance}" @click="xfToggleFlag('xfReco', 'finance')">仅投资金融</span>
+          <span v-if="xfReco.meta.sector_unlabeled_n" class="muted" style="font-size:11px">
+            赛道未打标 {{xfReco.meta.sector_unlabeled_n}} 条不参与赛道筛选</span>
         </div>
       </div>
-      <p class="muted" style="margin:10px 0">打分规则: {{ recoRule }}(服务端透明打分, 可在每条下展开构成)</p>
-
-      <div v-if="recoErr" class="err-box">{{ recoErr }}</div>
-      <div v-else-if="!recoItems.length && !recoLoading" class="empty">该范围内暂无推荐 —— 放宽回溯时间或标签</div>
+            <p class="surge-meta">
+        <template v-if="xfReco.meta.updated_at">快照 {{xfReco.meta.updated_at}} ·
+          {{xfReco.meta.data_age_min}} 分钟前 · 在跟踪 {{xfReco.meta.tracked}} 帖 · X 条目 {{xfReco.total}}</template>
+        <template v-else>暂无快照</template>
+        <span v-if="xfReco.meta.err" class="badge red" style="margin-left:8px">{{ xfReco.meta.err }}</span>
+        <span v-if="xfReco.meta.data_age_min > 90" class="badge yellow" style="margin-left:8px">
+          数据偏旧 —— 跑 python cli.py workbench refresh-x-surge</span>
+        <span class="muted" style="margin-left:8px">{{ xfReco.meta.rule }}</span>
+      </p>
+      <div v-if="!xfReco.items.length && !xfReco.loading" class="empty">
+        窗口内暂无 X 内容 —— 放宽时间范围, 或先跑 sources refresh + refresh-x-surge</div>
+      <p v-if="xfReco.sort === 'fv' && xfReco.items.length" class="surge-meta">
+        <label style="cursor:pointer"><input type="checkbox" v-model="hideP3"> 隐藏低值(P3 归档)</label>
+      </p>
       <div class="feed">
-        <div v-for="it in recoItems" :key="it.id" class="news-card">
-          <div class="nc-grid">
-            <!-- 左框 X 账号版(与资讯页同规则: 账号名+handle+账号级标签+简介) -->
-            <div class="nc-src" v-if="isX(it)">
-              <div class="name">{{ xName(it) }}</div>
-              <div class="who">@{{ it.author_handle }}</div>
-              <div class="nc-badges" style="margin-bottom:0">
-                <span v-if="xPos(it)" class="badge blue">{{ xPos(it) }}</span>
-                <span v-for="m in xMarkets(it)" class="badge">{{ m }}</span>
-              </div>
-              <div class="brief" v-if="xBrief(it)">{{ xBrief(it) }}</div>
+        <template v-for="g in recoGroups" :key="g.key">
+          <div v-if="g.label" class="group-head">
+            <span class="badge" :class="g.cls">{{ g.label }}</span>
+            <span class="muted">{{ g.items.length }} 条</span>
+          </div>
+          <div v-for="r in g.items" :key="r.status_id" class="news-card"
+               :class="{ 'tier-p0': g.key === 'p0', 'tier-p1': g.key === 'p1', 'p3-dim': r.fv_tier === 'P3' }">
+          <div class="surge-grid">
+            <!-- 左: 金融价值分 + P档(悬浮看六维明细) -->
+            <div class="surge-rank">
+              <div class="prob">{{ r.fv_score }}<span>分</span></div>
+              <div class="prob-lab">金融价值</div>
+              <span class="badge" :class="tierBadge(r.fv_tier)" :title="fvTitle(r)">{{ r.fv_tier }}</span>
+              <span v-if="r.golden" class="badge golden" style="margin-top:4px">黄金窗口</span>
             </div>
-            <!-- 左框通用版: 来源信息(推荐场景密度优先: 来源名+定位+市场) -->
-            <div class="nc-src" v-else>
-              <div class="name">{{ it.source }}</div>
-              <div class="nc-badges" style="margin-bottom:0">
-                <span v-if="it.positioning" class="badge blue">{{ it.positioning }}</span>
-                <span v-for="m in it.markets" class="badge">{{ m }}</span>
+            <!-- 右: 帖子(译文优先, 悬停看原文) + 标签行(对齐资讯页双标签制) -->
+            <div class="surge-body">
+              <div class="surge-top">
+                <span class="rank-no">#{{ r.rank }}</span>
+                <b>{{ r.name }}</b>
+                <span class="muted">@{{ r.handle }}</span>
+                <span v-if="r.positioning" class="badge blue">{{ r.positioning }}</span>
+                <span v-if="r.followers" class="xhot-fol">粉 {{ fmtFol(r.followers) }}</span>
+                <span class="muted" style="margin-left:auto">{{ r.time }}</span>
               </div>
-            </div>
-            <!-- 右框: 内容信息(价值分 + 条目级标签 + 正文) -->
-            <div class="nc-body">
-              <div class="nc-badges">
-                <span class="nc-time">{{ it.time }}</span>
-                <span class="badge blue" :title="scoreParts(it)">价值 {{ it.score }}</span>
-                <span v-if="it.item_type" class="badge">{{ it.item_type }}</span>
-                <template v-for="sec in visibleSectors(it)">
+              <div class="nc-badges" style="margin-bottom:0">
+                <span v-for="m in r.markets" :key="m" class="badge">{{ m }}</span>
+                <template v-for="sec in visibleSectors(r)" :key="sec">
                   <span class="badge yellow" :title="sec">{{ sectorParts(sec)[0] }}</span>
                   <span v-if="sectorParts(sec)[1]" class="badge" :title="sec">{{ sectorParts(sec)[1] }}</span>
                 </template>
-                <span v-if="sectorsRest(it)" class="badge"
-                      :title="(it.sectors || []).join('\\n')">+{{ sectorsRest(it) }}</span>
-                <span v-if="it.sentiment" class="badge" :class="sentimentBadge(it.sentiment)">
-                  {{ sentimentText(it.sentiment) }}</span>
-                <span v-if="it.dup_count > 1" class="badge yellow">同事件 ×{{ it.dup_count }}</span>
+                <span v-if="sectorsRest(r)" class="badge" :title="(r.sectors || []).join('\\n')">+{{ sectorsRest(r) }}</span>
+                <span v-if="r.event_type" class="badge">{{ r.event_type }}</span>
+                <span v-if="r.sentiment" class="badge" :class="sentimentBadge(r.sentiment)">{{ sentimentText(r.sentiment) }}</span>
+                <span v-for="t in r.tickers" :key="t" class="badge">{{ t }}</span>
+                <span v-if="r.dup_count > 1" class="badge yellow">同事件 ×{{ r.dup_count }}</span>
               </div>
-              <div class="news-text" :class="{clamp: bodyClamp(it)}">{{ it.title ? it.title + ' — ' : '' }}{{ it.text }}</div>
-              <div class="muted" style="margin-top:4px">{{ scoreParts(it) }}</div>
+              <a class="xhot-text" :href="r.reply_url" target="_blank" rel="noopener"
+                 :title="r.text_zh ? '原文: ' + r.text : ''">{{ r.text_zh || r.text }}</a>
+              <div class="surge-stats">
+                <span>👍 {{ fmtN(r.likes) }}</span>
+                <span>🔁 {{ fmtN(r.retweets) }}</span>
+                <span>💬 {{ fmtN(r.replies) }}</span>
+                <span>👁 {{ fmtN(r.views) }}</span>
+              </div>
+              <div class="surge-parts muted">
+                参考: <template v-if="r.growth_views_h != null">增速 {{ fmtN(r.growth_views_h) }}/时</template><template v-else>增速 —(攒基线中)</template><template v-if="r.views_pred != null"> · 预测浏览 {{ fmtN(r.views_pred) }}</template><template v-if="r.reply_exposure != null"> · 评论可蹭 ~{{ fmtN(r.reply_exposure) }} 曝光</template> · {{ r.age_h }}h 前</div>
               <div class="news-actions">
-                <a v-if="it.url" :href="it.url" target="_blank" rel="noopener">原文链接 ↗</a>
-                <span class="act" v-if="bodyLong(it)" @click="bodyExpanded[it.id] = !bodyExpanded[it.id]">
-                  {{ bodyExpanded[it.id] ? '收起' : '展开全文' }}</span>
-                <span v-if="basketIds[it.id]" class="act-done">已加入 ✓</span>
-                <span v-else class="act" @click="addToPool(it)">＋加入素材</span>
+                <a :href="r.reply_url" target="_blank" rel="noopener">去评论 ↗</a>
+                <span class="act" @click="xfCopy(r)">一键复制</span>
+                <span v-if="basketIds[r.status_id]" class="act-done">已加入 ✓</span>
+                <span v-else class="act" @click="addXToPool(r)">＋加入素材</span>
               </div>
             </div>
           </div>
         </div>
+        </template>
       </div>
-      </div>
-      <!-- 右栏: X 热帖榜(热度排序, 24h/48h 切换 + 市场筛选, sticky 不跟滚) -->
-      <div class="reco-rail">
-        <div class="card">
-          <h3>X 热帖 <span class="muted">近{{ xhotRange }}</span></h3>
-          <div class="frow" style="margin-bottom:6px">
-            <span class="lab">范围</span>
-            <span class="chip" :class="{on: xhotRange==='24h'}" @click="xhotRange='24h'; loadXHot()">24h</span>
-            <span class="chip" :class="{on: xhotRange==='48h'}" @click="xhotRange='48h'; loadXHot()">48h</span>
-          </div>
-          <div class="frow">
-            <span class="lab">市场</span>
-            <span v-for="m in xMarketChips" class="chip" :class="{on: xhotMarkets.includes(m)}"
-                  @click="toggleXhotMarket(m)">{{ m }}</span>
-          </div>
-          <div v-if="!xhot.length" class="muted">窗口内暂无 X 池内容</div>
-          <div v-for="(r, i) in xhot" :key="r.id" class="xhot-item">
-            <div class="xhot-top">
-              <span class="rank">{{ i + 1 }}</span>
-              <span class="name">{{ xHotName(r.name) }}</span>
-              <span v-if="r.dup_count > 1" class="badge yellow">同事件 ×{{ r.dup_count }}</span>
-              <span v-if="r.followers" class="xhot-fol">粉 {{ fmtFol(r.followers) }}</span>
-            </div>
-            <a class="xhot-text" :href="r.url" target="_blank" rel="noopener">{{ r.text }}</a>
-            <div class="xhot-meta muted">{{ r.time }} · 热度 {{ r.heat }}</div>
-          </div>
-          <p class="muted" style="margin-top:8px;font-size:11px">热度 = {{ xhotRule }}<br>
-            真流量(点赞/转发/增速)排序待抓取层补互动字段</p>
+    </div>
+
+    <!-- ═══ 子页: 蹭蹭流量(SoPilot 热帖 RSS · 评论卡位) ═══ -->
+    <div v-show="tab==='surge'">
+      <div class="feed-toolbar">
+        <div class="radio-group">
+          <label v-for="[v, t] in rssSortOpts" :key="v">
+            <input type="radio" :value="v" v-model="xfSurge.sort" @change="loadSurgeRss()"> {{ t }}</label>
         </div>
+        <span class="muted">数据源: SoPilot 今日热帖公开 RSS(非本站数据站)</span>
+        <span style="flex:1"></span>
+        <button class="btn" @click="loadSurgeRss()">{{ xfSurge.loading ? '刷新中…' : '刷新' }}</button>
       </div>
+      <p class="surge-meta">
+        <template v-if="xfSurge.meta.updated_at">RSS 抓取 {{ xfSurge.meta.updated_at }} ·
+          在榜 {{ xfSurge.total }} 帖(48h 保留)</template>
+        <template v-else>暂无数据 —— 跑一轮 python cli.py workbench refresh-x-surge</template>
+        <span class="muted" style="margin-left:8px">{{ xfSurge.meta.rule }}</span>
+      </p>
+      <div v-if="!xfSurge.items.length && !xfSurge.loading" class="empty">
+        暂无数据 —— 跑一轮 python cli.py workbench refresh-x-surge(RSS 每 30 分钟随任务计划自动更新)</div>
+      <div class="feed">
+        <div v-for="(r, i) in xfSurge.items" :key="r.status_id" class="news-card">
+          <div class="surge-grid">
+            <div class="surge-rank">
+              <div class="prob">{{ r.prob == null ? '—' : r.prob }}<span>%</span></div>
+              <div class="prob-lab">爆火概率</div>
+            </div>
+            <div class="surge-body">
+              <div class="surge-top">
+                <span class="rank-no">#{{ i + 1 }}</span>
+                <b>{{ r.name }}</b>
+                <span class="muted">@{{ r.handle }}</span>
+                <span class="muted" style="margin-left:auto">{{ r.time }}</span>
+              </div>
+              <a class="xhot-text" :href="r.reply_url" target="_blank" rel="noopener"
+                 :title="r.text_zh ? '原文: ' + r.text : ''">{{ r.text_zh || r.text }}</a>
+              <div class="surge-stats">
+                <span>👍 {{ fmtN(r.likes) }}</span>
+                <span>🔁 {{ fmtN(r.retweets) }}</span>
+                <span>💬 {{ fmtN(r.replies) }}</span>
+                <span>🔖 {{ fmtN(r.bookmarks) }}</span>
+                <span>👁 {{ fmtN(r.views) }}</span>
+                <span v-if="r.views_pred != null">预测浏览 {{ fmtN(r.views_pred) }}</span>
+                <span v-if="r.exposure != null" class="exposure">评论可蹭 ~{{ fmtN(r.exposure) }} 曝光</span>
+              </div>
+              <div class="news-actions">
+                <a :href="r.reply_url" target="_blank" rel="noopener">去评论 ↗</a>
+                <span class="act" @click="xfCopy(r)">一键复制</span>
+                <span v-if="basketIds[r.status_id]" class="act-done">已加入 ✓</span>
+                <span v-else class="act" @click="addXToPool(r)">＋加入素材</span>
+              </div>
+            </div>
+          </div>
+        </div>
       </div>
     </div>
 
@@ -720,6 +850,55 @@ WB.pages.article = {
             <button class="btn primary" @click="saveTask">保存任务</button>
           </div>
         </div>
+      </div>
+    </div>
+
+    <!-- ═══ 子页5: 账号管理(全 X 池账号信息来源; 池只读, 关注/备注为板块四自有偏好) ═══ -->
+    <div v-show="tab==='xaccts'">
+      <div class="card">
+        <h3>X 账号池({{ xaccts.meta.count || 0 }})
+          <span class="muted">关注 {{ xaccts.meta.followed_n || 0 }} ·
+            停用 {{ xaccts.meta.disabled_n || 0 }} · 显示 {{ xacctRows.length }}</span>
+          <span v-if="xaccts.meta.err" class="badge red" style="margin-left:8px">{{ xaccts.meta.err }}</span></h3>
+        <div class="feed-toolbar">
+          <input type="text" v-model="xaccts.q" class="mat-search" placeholder="搜索(名称/handle/市场)" style="width:220px">
+          <span class="chip" :class="{on: !xaccts.pos}" @click="xaccts.pos=''">全部</span>
+          <span v-for="p in tagEnums.positionings" :key="p" class="chip"
+                :class="{on: xaccts.pos === p}" @click="xaccts.pos = xaccts.pos === p ? '' : p">{{ p }}</span>
+          <span class="chip" :class="{on: xaccts.followOnly}" @click="xaccts.followOnly=!xaccts.followOnly">★ 仅看关注</span>
+          <span style="flex:1"></span>
+          <button class="btn" @click="loadXaccts">{{ xaccts.loading ? '刷新中…' : '刷新' }}</button>
+        </div>
+        <div class="muted" style="margin:6px 0 10px">
+          池数据来自板块一 twitter_pool.yaml(只读): 启停/角色/市场改池文件或 local 覆盖后点刷新;
+          关注与备注是本板块自有偏好, 只存 data/workbench/。</div>
+        <table class="tbl">
+          <thead><tr><th>账号</th><th>市场</th><th>定位</th><th>标签</th><th>粉丝</th><th>状态</th><th>关注</th><th>备注</th></tr></thead>
+          <tbody>
+            <tr v-for="a in xacctRows" :key="a.handle"
+                :style="{background: a.follow ? 'var(--accent-weak)' : ''}">
+              <td>
+                <a :href="a.homepage" target="_blank" rel="noopener"><b>{{ a.name || '@'+a.handle }}</b></a>
+                <span v-if="a.verified" class="badge blue" title="X 认证账号" style="margin-left:4px">✓</span>
+                <div class="muted" style="font-size:11px">@{{ a.handle }}<template v-if="a.bio"> · {{ a.bio }}</template></div>
+              </td>
+              <td><span v-for="m in a.markets" :key="m" class="badge" style="margin-right:4px">{{ m }}</span></td>
+              <td><span v-if="a.positioning" class="badge blue">{{ a.positioning }}</span>
+                <div class="muted" style="font-size:11px" v-if="a.role">{{ a.role }}</div></td>
+              <td><span v-if="a.tier" class="badge yellow">{{ a.tier }}</span>
+                <span v-if="a.priority" class="badge" style="margin-left:4px">{{ a.priority }}</span>
+                <div class="muted" style="font-size:11px" v-if="a.note" :title="a.note">{{ a.note.slice(0, 24) }}</div></td>
+              <td class="mono">{{ a.followers ? fmtFol(a.followers) : '—' }}</td>
+              <td><span class="badge" :class="a.enabled ? 'green' : 'red'">{{ a.enabled ? '启用' : '停用' }}</span></td>
+              <td><span class="act" :style="{color: a.follow ? 'var(--yellow)' : ''}"
+                    @click="toggleXFollow(a)">{{ a.follow ? '★ 已关注' : '☆ 关注' }}</span></td>
+              <td><input type="text" v-model="a.local_note" @change="saveXNote(a)" placeholder="本地备注"
+                         style="width:150px;font-size:11.5px"></td>
+            </tr>
+            <tr v-if="!xacctRows.length && !xaccts.loading">
+              <td colspan="8" class="muted">无匹配账号</td></tr>
+          </tbody>
+        </table>
       </div>
     </div>
   </div>`,

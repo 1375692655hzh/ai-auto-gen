@@ -152,7 +152,7 @@ def create_app():
               info_types: str = "", channels: str = "", forms: str = "",
               item_types: str = "", positionings: str = "",
               sources: str = "", tickers: str = "", sentiments: str = "",
-              event_types: str = "", q: str = "",
+              event_types: str = "", sectors: str = "", q: str = "",
               since: str = "", limit: int = 200, cursor: str = "",
               dedup: int = 1, display: int = 1):
         csv = lambda v: [s.strip() for s in v.split(",") if s.strip()] or None
@@ -162,7 +162,7 @@ def create_app():
                                 positionings=csv(positionings),
                                 forms=csv(forms), source_ids=csv(sources),
                                 tickers=csv(tickers), sentiments=csv(sentiments),
-                                event_types=csv(event_types),
+                                event_types=csv(event_types), sectors=csv(sectors),
                                 q=q, since=since, limit=limit, cursor=cursor,
                                 dedup=bool(dedup))
         if display:                               # 中文用户默认: text/title 换成译文

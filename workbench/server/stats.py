@@ -1,9 +1,9 @@
 """统计聚合(资讯页右栏 + 来源详情子页的数据供给)。
 
 学同事看板(aag-看板/信源工作台.html)的思路, 但聚合放在服务端:
-拉取 /v1/items 全量(≤4 页 × 1000, 与看板同上限) + /v1/sources + /v1/status,
-服务端聚合好直接给前端成品, 浏览器不用搬几千条数据。
-60s 进程内缓存, 避免每次切页都重拉。
+拉取 /v1/items(单页 1000, 页数不设限, 按时间倒序在窗口下界提前收工) + /v1/sources + /v1/status,
+条目类统计只计**近 24h**、赛道模块只计**近 48h**(2026-09-04 拍板), 服务端聚合好直接给前端成品,
+浏览器不用搬几千条数据。60s 进程内缓存, 避免每次切页都重拉。
 """
 
 import time
@@ -14,25 +14,32 @@ from . import proxy, xaccounts
 
 _cache = {"at": 0.0, "data": None}
 _CACHE_TTL = 60.0
-_PAGE, _MAX_PAGES = 1000, 4          # 与看板同: store.query 单页硬顶 1000
+_PAGE = 1000                         # store.query 单页硬顶 1000, 页数不设限
+_MAX_PAGES = 500                     # 跑飞保护(=50万条), 不是数据上限: 正常靠窗口截停/翻尽游标
+_WINDOW_HOURS = 24                   # 右栏条目统计口径: 只计近 24h
+_SECTORS_WINDOW_HOURS = 48           # 赛道模块(筛选模块2)口径: 只计近 48h
 
 
-def _fetch_items() -> tuple[list, bool]:
+def _fmt(dt_epoch: float) -> str:
+    return time.strftime("%Y-%m-%d %H:%M", time.localtime(dt_epoch))
+
+
+def _fetch_items(cutoff: str) -> tuple[list, bool]:
     items, cursor = [], ""
     for _ in range(_MAX_PAGES):
         qs = f"items?limit={_PAGE}&dedup=1&display=1"
         if cursor:                       # cursor 形如 "2026-09-01 21:49|<hash>", 含空格须转义
             qs += "&cursor=" + urllib.parse.quote(cursor, safe="")
         d = proxy.fetch_json(qs)
-        items.extend(d.get("items") or [])
+        page = d.get("items") or []
+        items.extend(page)
         cursor = d.get("next_cursor") or ""
         if not cursor:
             return items, False
-    return items, True                  # 截断标记: 库里还有更多
-
-
-def _now_str() -> str:
-    return time.strftime("%Y-%m-%d %H:%M")
+        # store 按时间倒序分页: 整页都早于 24h 下界, 后续页必然更早, 提前收工(不算截断)
+        if page and (page[-1].get("time") or "") < cutoff:
+            return items, False
+    return items, True                  # 仅跑飞保护触发: 视为截断
 
 
 def aggregate() -> dict:
@@ -42,16 +49,23 @@ def aggregate() -> dict:
     health = proxy.fetch_json("health")
     status = proxy.fetch_json("status")
     sources = proxy.fetch_json("sources").get("sources") or []
-    raw_items, truncated = _fetch_items()
 
-    now = _now_str()
-    # 预测市场类源会把结算日(数年后)写进 time, 聚合前剔除(看板同款处理)
-    items = [i for i in raw_items if (i.get("time") or "") <= now]
-    future_n = len(raw_items) - len(items)
+    now = _fmt(time.time())
+    # 双窗口: 右栏条目统计=24h, 赛道模块=48h(2026-09-04 拍板)。串比较=时间比较(同格式)。
+    cutoff = _fmt(time.time() - _WINDOW_HOURS * 3600)
+    cutoff_48 = _fmt(time.time() - _SECTORS_WINDOW_HOURS * 3600)
+    raw_items, truncated = _fetch_items(cutoff_48)      # 翻页到 48h 下界即提前收工
 
-    def count(fn):
+    # 预测市场类源会把结算日(数年后)写进 time, 聚合前剔除(看板同款处理);
+    # 48h 窗口内再切出 24h 子集供条目类统计
+    items_48 = [i for i in raw_items if cutoff_48 <= (i.get("time") or "") <= now]
+    future_n = len(raw_items) - len([i for i in raw_items if (i.get("time") or "") <= now])
+    items = [i for i in items_48 if (i.get("time") or "") >= cutoff]
+    out_of_window = len(items_48) - len(items)
+
+    def count(fn, pool=None):
         c = Counter()
-        for i in items:
+        for i in (pool if pool is not None else items):
             v = fn(i)
             vals = [v] if isinstance(v, str) else (v or [])
             for x in vals:
@@ -91,7 +105,10 @@ def aggregate() -> dict:
     store = health.get("store") or {}
     data = {
         "total": store.get("items"), "clusters": store.get("clusters"),
+        "window": "24h", "since": cutoff,
+        "sectors_window": "48h", "sectors_since": cutoff_48, "sectors_fetched": len(items_48),
         "fetched": len(items), "truncated": truncated, "future_excluded": future_n,
+        "out_of_window": out_of_window,
         "span": [items[-1].get("time"), items[0].get("time")] if items else None,
         "refresh": {"round_started_at": refresh.get("round_started_at"),
                     "new": new_round, "sources_total": len(rs),
@@ -102,7 +119,8 @@ def aggregate() -> dict:
         "channels": count(lambda i: i.get("channel")),
         "item_types": count(lambda i: i.get("item_type")),
         "positionings": count(lambda i: i.get("positioning")),
-        "sectors_l1": count(lambda i: [str(s).split(">")[0] for s in (i.get("sectors") or [])]),
+        "sectors_48h": count(lambda i: [str(s).split(">")[0] for s in (i.get("sectors") or [])],
+                             pool=items_48),
         "events": count(lambda i: i.get("event_type")),
         "top_sources": [[per_source_name.get(sid, sid), n, sid]
                         for sid, n in per_source.most_common(14)],
@@ -115,3 +133,9 @@ def aggregate() -> dict:
     _cache["at"] = time.time()
     _cache["data"] = data
     return data
+
+
+def invalidate() -> None:
+    """来源启停等写动作后调: 60s 缓存立即作废, 下次聚合拿到新注册表状态。"""
+    _cache["at"] = 0.0
+    _cache["data"] = None

@@ -2,7 +2,7 @@
    信息筛选 = 标签筛选(双标签制: 市场/定位/类型/赛道L1/情绪) + 信息流 + 统计右栏(同事看板式);
    来源详情 = /stats 来源注册表(前端搜索+排序), 「筛选」跳回信息筛选。
    数据全部来自 workbench 代理的 /wb-api/* → sources serve;
-   统计来自 /stats(服务端聚合, 60s 缓存), 右栏与来源详情共用一份。
+   统计来自 /stats(服务端聚合, 60s 缓存, 条目类统计只计近24h窗口), 右栏与来源详情共用一份。
    2026-09-03 对齐 commit 0188415 双标签制(taxonomy.py 单一真相):
    卡片改【来源信息】+【内容信息】双框, 源级标签(定位/市场/简介)与条目级标签(类型/赛道/情绪/标的)分区独立。 */
 window.WB = window.WB || {};
@@ -15,7 +15,7 @@ WB.pages.news = {
       tab: "feed",
       /* 筛选枚举: 市场从 /v1/sources 聚合(新 8 值); 定位/类型/赛道/情绪为封闭枚举
          (对齐 taxonomy.py, commit 0188415; 值域封闭, 前端硬编码) */
-      dict: { markets: [], sources: [], sectorsTop: [] },
+      dict: { markets: [], sources: [] },
       enums: {
         item_types: ["聚合", "快讯", "资讯", "分析"],
         sentiments: [["bull", "利好"], ["bear", "利空"], ["neutral", "中性"]],
@@ -27,12 +27,13 @@ WB.pages.news = {
                      "消费", "军工与航空航天", "工业与机器人", "交通运输", "农业与食品"],
       },
       /* sources 保留: 来源详情页与右栏条形图会写入, 仅 UI 不再提供多选框;
-         sectors 为客户端过滤(serve 无 sectors 参数, 全库过滤属板块一 follow-up) */
+         sectors 已升级服务端过滤(serve sectors 参数, 2026-09-04) */
       f: { markets: [], positionings: [], item_types: [], sentiments: [],
            sectors: [], sources: [], q: "", tickers: "",
-           since: "24h", dedup: true, display: true },
+           since: "24h", dedup: true, display: true, follow: false },
       showAllSectors: false,
-      sinceOpts: [["1h", "近1小时"], ["4h", "近4小时"], ["24h", "近24小时"], ["3d", "近3天"], ["", "全部"]],
+      sinceOpts: [["1h", "近1小时"], ["4h", "近4小时"], ["24h", "近24小时"],
+                  ["48h", "近48小时"], ["3d", "近3天"], ["", "全部"]],
       items: [], total: 0, nextCursor: "", loading: false, error: null,
       expanded: {}, bodyExpanded: {},
       basketIds: {},                     // 已在素材池的条目 id(「已加入」态)
@@ -40,36 +41,26 @@ WB.pages.news = {
       xAccounts: {}, xProfiles: {},
       /* /stats 聚合成品: null=未加载, statsErr=加载失败原因 */
       stats: null, statsErr: "",
+      /* 关注来源清单(workbench 自有 followed_sources.json), 来源详情 ⭐ 写入 */
+      followed: [], regMsg: "",
       /* 来源详情表: 排序(默认条目数降序, 再点反向) + 前端搜索 */
       sortKey: "count", sortDir: -1, regQ: "",
+      busyId: "",
     };
   },
   computed: {
     activeCount() {
       return ["markets", "positionings", "item_types", "sentiments", "sectors", "sources"]
-        .reduce((n, k) => n + this.f[k].length, 0) + (this.f.q ? 1 : 0) + (this.f.tickers ? 1 : 0);
+        .reduce((n, k) => n + this.f[k].length, 0) + (this.f.q ? 1 : 0)
+        + (this.f.tickers ? 1 : 0) + (this.f.follow ? 1 : 0);
     },
     arrow() { return this.sortDir === 1 ? "↑" : "↓"; },
-    /* 赛道 L1 过滤: 客户端作用于已加载条目(任一路径首段命中即中) */
-    feedItems() {
-      if (!this.f.sectors.length) return this.items;
-      return this.items.filter((it) => (it.sectors || [])
-        .some((s) => this.f.sectors.includes(String(s).split(">")[0])));
-    },
-    /* 赛道 chips: 常驻 top6(stats 高频, 兜底枚举前 6), 展开出全 19 */
-    sectorCountMap() {
-      const m = {};
-      for (const [k, n] of (this.stats && this.stats.sectors_l1) || []) m[k] = n;
-      return m;
-    },
-    sectorChipsTop() {
-      return this.dict.sectorsTop.length ? this.dict.sectorsTop
-        : this.enums.sectors_l1.slice(0, 6);
-    },
-    sectorChipsRest() {
-      const top = new Set(this.sectorChipsTop);
-      return this.enums.sectors_l1.filter((s) => !top.has(s));
-    },
+    /* 信息流: 筛选已全部服务端化(sectors 2026-09-04 起走 serve 参数), 直接透出 */
+    feedItems() { return this.items; },
+    /* 赛道 chips(筛选模块2): 48h 实时聚合并收敛 —— 只出窗口内实际出现的标签, 计数降序 */
+    sector48() { return (this.stats && this.stats.sectors_48h) || []; },
+    sector48Top() { return this.sector48.slice(0, 8); },
+    sector48Rest() { return this.showAllSectors ? this.sector48.slice(8) : []; },
     /* 右栏条形图 top8 + 各自最大值(算宽度百分比) */
     marketBars() { return this.stats ? this.stats.markets.slice(0, 8) : []; },
     marketMax() { return this.marketBars.reduce((m, r) => Math.max(m, r[1]), 0); },
@@ -111,7 +102,8 @@ WB.pages.news = {
       if (!st) return this.statsErr ? "" : "加载中…";
       const rf = st.refresh || {};
       let t = st.sources.length + " 源 · 存活 " +
-        (rf.sources_ok != null ? rf.sources_ok : "-") + " · 熔断 " + (st.dead || []).length;
+        (rf.sources_ok != null ? rf.sources_ok : "-") + " · 熔断 " + (st.dead || []).length +
+        " · 关注 " + this.followed.length;
       if (this.regQ.trim()) t += " · 匹配 " + this.regRows.length;
       return t;
     },
@@ -129,13 +121,19 @@ WB.pages.news = {
       if (this.f.since === "1h") return fmt(new Date(now - 3600e3));
       if (this.f.since === "4h") return fmt(new Date(now - 4 * 3600e3));
       if (this.f.since === "24h") return fmt(new Date(now - 24 * 3600e3));
+      if (this.f.since === "48h") return fmt(new Date(now - 48 * 3600e3));
       if (this.f.since === "3d") return fmt(new Date(now - 3 * 86400e3));
       return "";
     },
     buildQuery(cursor) {
       const p = new URLSearchParams();
-      for (const k of ["markets", "positionings", "item_types", "sentiments", "sources"])
+      for (const k of ["markets", "positionings", "item_types", "sentiments", "sectors"])
         if (this.f[k].length) p.set(k, this.f[k].join(","));
+      /* 关注模式(模块1标签): 关注清单并入 sources 过滤, 与手选源取并集 */
+      const srcs = this.f.follow
+        ? [...new Set([...this.f.sources, ...this.followed])]
+        : this.f.sources;
+      if (srcs.length) p.set("sources", srcs.join(","));
       if (this.f.q) p.set("q", this.f.q);
       if (this.f.tickers) p.set("tickers", this.f.tickers);
       const s = this.sinceValue();
@@ -161,14 +159,13 @@ WB.pages.news = {
       const arr = this.f[group];
       const i = arr.indexOf(val);
       i >= 0 ? arr.splice(i, 1) : arr.push(val);
-      if (group === "sectors") return;    // 赛道是客户端过滤, 不必重拉
-      this.reload();
+      this.reload();                      // 赛道已服务端化, 所有标签组都要重拉
     },
     onSearch() { this.reload(); },
     clearAll() {
       for (const k of ["markets", "positionings", "item_types", "sentiments", "sectors", "sources"])
         this.f[k] = [];
-      this.f.q = ""; this.f.tickers = "";
+      this.f.q = ""; this.f.tickers = ""; this.f.follow = false;
       this.reload();
     },
     addMaterial(it) { WB.basket.add(it); this.basketIds[it.id] = true; },
@@ -187,16 +184,43 @@ WB.pages.news = {
         const d = await WB.api.get("/v1/sources");
         const mk = new Set();
         for (const s of d.sources) (s.markets || []).forEach((m) => mk.add(m));
-        this.dict = { markets: [...mk].sort(), sources: d.sources, sectorsTop: [] };
+        this.dict = { markets: [...mk].sort(), sources: d.sources };
       } catch (e) { /* 数据站未起: load() 会报错展示 */ }
     },
     async loadStats() {
       this.statsErr = "";
       try { this.stats = await WB.api.get("/stats"); }
       catch (e) { this.statsErr = (e && e.error) || "统计接口不可用"; return; }
-      /* 高频赛道 L1 top6 进筛选区常驻位 */
-      this.dict.sectorsTop = (this.stats.sectors_l1 || []).slice(0, 6).map((r) => r[0]);
       this.registerSubs();               // 更新左菜单上的源总数
+    },
+    /* 关注清单(workbench 自有数据) + ⭐ 切换 + 启停(cli subprocess, 红线7) */
+    async loadFollows() {
+      try { this.followed = (await WB.api.get("/followed-sources")).ids || []; }
+      catch (e) { /* 接口异常: 关注功能静默降级为空 */ }
+    },
+    isFollowed(id) { return this.followed.includes(id); },
+    async toggleFollow(id) {
+      const on = !this.isFollowed(id);
+      try {
+        this.followed = (await WB.api.post("/followed-sources", { id, on })).ids || [];
+        this.regMsg = on ? `已关注 ${id}` : `已取关 ${id}`;
+        if (this.f.follow) this.reload();  // 关注模式下列表即时增减
+      } catch (e) { this.regMsg = (e && e.error) || "关注操作失败"; }
+      setTimeout(() => { this.regMsg = ""; }, 2500);
+    },
+    async toggleEnabled(s) {
+      if (this.busyId) return;
+      this.busyId = s.id;
+      this.regMsg = `${s.enabled ? "停用" : "启用"} ${s.id} …`;
+      try {
+        const d = await WB.api.post(`/sources/${encodeURIComponent(s.id)}/enabled`,
+                                    { on: !s.enabled });
+        s.enabled = d.enabled;
+        this.regMsg = `${s.id} → ${d.enabled ? "启用" : "停用"}`;
+        this.loadStats();                  // 注册表状态变化, 重拉统计(服务端已失效缓存)
+      } catch (e) { this.regMsg = (e && e.error) || "启停失败"; }
+      finally { this.busyId = ""; }
+      setTimeout(() => { this.regMsg = ""; }, 2500);
     },
     /* X 账号档案: 池录入(/x-accounts) + grok 增强缓存(/x-profiles), 失败静默降级 */
     async loadX() {
@@ -255,7 +279,7 @@ WB.pages.news = {
       return ((it.title ? it.title.length + 3 : 0) + (it.text || "").length) > 300;
     },
     bodyClamp(it) { return this.bodyLong(it) && !this.bodyExpanded[it.id]; },
-    pickXAccount(h) { this.f.q = h; this.f.since = ""; this.reload(); },
+    pickXAccount(h) { this.f.q = h; this.f.since = "24h"; this.reload(); },
     /* 源对象查询: 先 dict(全量注册表), 兜底 stats.sources_detail, 都没有返回 null */
     sourceInfo(id) {
       const d = (this.dict.sources || []).find((s) => s.id === id);
@@ -278,14 +302,14 @@ WB.pages.news = {
     },
     visibleSectors(it) { return (it.sectors || []).slice(0, 2); },
     sectorsRest(it) { return Math.max((it.sectors || []).length - 2, 0); },
-    /* 右栏条形图点击 = 反查信息流。统计口径是全库窗口, 同步放开 since 避免 24h 截出 0 条 */
-    pickMarket(m) { this.f.markets = [m]; this.f.since = ""; this.reload(); },
-    pickSource(sid) { this.f.sources = [sid]; this.f.since = ""; this.reload(); },
-    pickTicker(t) { this.f.tickers = t; this.f.since = ""; this.reload(); },
-    pickPositioning(p) { this.f.positionings = [p]; this.f.since = ""; this.reload(); },
-    /* 来源详情「筛选」= 单源过滤并跳回信息流子页(同上放开时间窗); 同步左侧菜单高亮 */
+    /* 右栏条形图点击 = 反查信息流。统计口径=近24h, 同步切 since=24h 保持口径一致 */
+    pickMarket(m) { this.f.markets = [m]; this.f.since = "24h"; this.reload(); },
+    pickSource(sid) { this.f.sources = [sid]; this.f.since = "24h"; this.reload(); },
+    pickTicker(t) { this.f.tickers = t; this.f.since = "24h"; this.reload(); },
+    pickPositioning(p) { this.f.positionings = [p]; this.f.since = "24h"; this.reload(); },
+    /* 来源详情「筛选」= 单源过滤并跳回信息流子页(同上对齐 24h 口径); 同步左侧菜单高亮 */
     srcFilter(id) {
-      this.f.sources = [id]; this.f.since = ""; this.tab = "feed";
+      this.f.sources = [id]; this.f.since = "24h"; this.tab = "feed";
       if (WB.shell) WB.shell.setSub("feed");
       this.reload();
     },
@@ -328,22 +352,28 @@ WB.pages.news = {
     /* bar-fill 宽度(唯一允许的 :style 动态绑定) */
     barW(c, max) { return max > 0 ? Math.round((c / max) * 100) + "%" : "0%"; },
   },
-  mounted() { this.registerSubs(); this.initBasketIds(); this.loadDict(); this.loadStats(); this.loadX(); this.load(); },
+  mounted() { this.registerSubs(); this.initBasketIds(); this.loadDict(); this.loadStats(); this.loadFollows(); this.loadX(); this.load(); },
   unmounted() { if (WB.shell) WB.shell.setSubs([]); },   // 离开资讯页清空左菜单
   template: `
   <div>
     <!-- 子页选择在左侧 subnav(壳层 WB.shell), 页内不再渲染页签 -->
     <!-- 子页1: 信息筛选(三栏: 筛选 / 双框信息流 / 统计右栏) -->
     <div class="news-layout" v-show="tab==='feed'">
-      <!-- 左栏: 标签筛选器(双标签制: 源级=市场/定位, 条目级=类型/赛道/情绪) -->
-      <div>
+      <!-- 左栏: 筛选模块1(基础: 市场/关注/定位/类型/情绪) + 模块2(赛道·48h 实时聚合) -->
+      <div class="news-filters">
         <div class="card">
-          <h3>标签筛选 <span v-if="activeCount" class="badge blue">{{ activeCount }}</span></h3>
+          <h3>筛选 <span v-if="activeCount - f.sectors.length" class="badge blue">{{ activeCount - f.sectors.length }}</span></h3>
           <div class="filter-group">
             <h4>市场 <span class="clear" v-if="f.markets.length" @click="f.markets=[]; reload()">清空</span></h4>
             <span v-for="m in dict.markets" class="chip" :class="{on: f.markets.includes(m)}"
                   @click="toggle('markets', m)">{{ m }}</span>
             <div class="muted" v-if="!dict.markets.length">(需数据站在线)</div>
+          </div>
+          <div class="filter-group">
+            <h4>关注 <span class="clear" v-if="f.follow" @click="f.follow=false; reload()">清空</span></h4>
+            <span class="chip" :class="{on: f.follow}" @click="f.follow=!f.follow; reload()">
+              ⭐ 只看关注源({{ followed.length }})</span>
+            <div class="muted" v-if="f.follow && !followed.length">还没关注任何源 —— 到「来源详情」点亮 ⭐</div>
           </div>
           <div class="filter-group">
             <h4>定位 <span class="clear" v-if="f.positionings.length" @click="f.positionings=[]; reload()">清空</span></h4>
@@ -356,23 +386,26 @@ WB.pages.news = {
                   @click="toggle('item_types', t)">{{ t }}</span>
           </div>
           <div class="filter-group">
-            <h4>赛道 <span class="muted">作用于已加载</span>
-              <span class="clear" v-if="f.sectors.length" @click="f.sectors=[]">清空</span></h4>
-            <span v-for="s in sectorChipsTop" :key="s" class="chip" :class="{on: f.sectors.includes(s)}"
-                  @click="toggle('sectors', s)">{{ s }}<template v-if="sectorCountMap[s]"> {{ sectorCountMap[s] }}</template></span>
-            <template v-if="showAllSectors">
-              <span v-for="s in sectorChipsRest" :key="s" class="chip" :class="{on: f.sectors.includes(s)}"
-                    @click="toggle('sectors', s)">{{ s }}<template v-if="sectorCountMap[s]"> {{ sectorCountMap[s] }}</template></span>
-            </template>
-            <span class="act" @click="showAllSectors = !showAllSectors">
-              {{ showAllSectors ? '收起' : '展开全部(19)' }}</span>
-          </div>
-          <div class="filter-group">
             <h4>情绪 <span class="clear" v-if="f.sentiments.length" @click="f.sentiments=[]; reload()">清空</span></h4>
             <span v-for="[v, t] in enums.sentiments" class="chip" :class="{on: f.sentiments.includes(v)}"
                   @click="toggle('sentiments', v)">{{ t }}</span>
           </div>
           <button class="btn" style="width:100%;justify-content:center" @click="clearAll">清空全部筛选</button>
+        </div>
+        <div class="card">
+          <h3>赛道 <span class="muted" style="font-weight:normal">48h 实时</span>
+            <span v-if="f.sectors.length" class="badge blue">{{ f.sectors.length }}</span>
+            <span class="clear" v-if="f.sectors.length" @click="f.sectors=[]; reload()">清空</span></h3>
+          <div class="filter-group">
+            <span v-for="[s, n] in sector48Top" :key="s" class="chip" :class="{on: f.sectors.includes(s)}"
+                  @click="toggle('sectors', s)" :title="'近48h ' + n + ' 条'">{{ s }} {{ n }}</span>
+            <span v-for="[s, n] in sector48Rest" :key="s" class="chip" :class="{on: f.sectors.includes(s)}"
+                  @click="toggle('sectors', s)" :title="'近48h ' + n + ' 条'">{{ s }} {{ n }}</span>
+            <span class="act" v-if="sector48.length > 8" @click="showAllSectors = !showAllSectors">
+              {{ showAllSectors ? '收起' : '展开全部(' + sector48.length + ')' }}</span>
+            <div class="muted" v-if="!sector48.length">48h 内无赛道标签 —— 先跑 sources refresh</div>
+            <div class="muted">点击标签筛选全库 · 计数=近48h, 信息流窗口见时间选择</div>
+          </div>
         </div>
       </div>
 
@@ -398,7 +431,9 @@ WB.pages.news = {
           <p style="margin-top:10px"><code>python cli.py sources serve</code></p>
         </div>
         <div v-else-if="!feedItems.length && !loading" class="empty">
-          {{ f.sectors.length ? '已加载条目里无该赛道 —— 试试加载更多或放宽其他筛选' : '无匹配条目 —— 调整筛选或先跑 sources refresh' }}</div>
+          {{ f.follow && !followed.length ? '还没关注任何源 —— 到「来源详情」点亮 ⭐ 后回来看帖'
+            : f.sectors.length ? '48h/当前窗口内无该赛道条目 —— 试试放宽时间或折叠同事件'
+            : '无匹配条目 —— 调整筛选或先跑 sources refresh' }}</div>
 
         <div class="feed">
         <div v-for="it in feedItems" :key="it.id" class="news-card">
@@ -481,7 +516,7 @@ WB.pages.news = {
               <div class="stat-mini">
                 <div class="k">命中条数</div>
                 <div class="v">{{ activeCount ? total : stats.fetched }}</div>
-                <div class="n">{{ stats.truncated ? '已达抓取上限' : (activeCount ? '当前筛选命中' : '未筛选 · 抓取量') }}</div>
+                <div class="n">{{ stats.truncated ? '已达抓取上限' : (activeCount ? '当前筛选命中' : '近24小时 · 统计口径') }}</div>
               </div>
               <div class="stat-mini">
                 <div class="k">库内总条数</div>
@@ -562,9 +597,10 @@ WB.pages.news = {
             </div>
           </div>
           <div class="card">
-            <h3>数据站</h3>
-            <p class="muted" v-if="stats.span">数据窗口 {{ stats.span[0] }} ~ {{ stats.span[1] }}</p>
-            <p class="muted" v-else>数据站为空 —— 先跑 sources refresh</p>
+            <h3>数据站 <span class="muted" style="font-weight:normal">统计口径 近24h</span></h3>
+            <p class="muted" v-if="stats.span">窗口内 {{ stats.span[0] }} ~ {{ stats.span[1] }}</p>
+            <p class="muted" v-else>24h 内无条目 —— 先跑 sources refresh</p>
+            <p class="muted" v-if="stats.out_of_window">24h 以前 {{ stats.out_of_window }} 条未计入</p>
             <p class="muted" v-if="stats.future_excluded">已剔除未来日期行 {{ stats.future_excluded }} 条</p>
             <p class="muted" v-if="stats.dead && stats.dead.length">
               已熔断 <span class="mono">{{ stats.dead.slice(0, 5).join(', ') }}</span></p>
@@ -578,6 +614,7 @@ WB.pages.news = {
       <div class="reg-toolbar">
         <input type="text" v-model="regQ" placeholder="搜索源 ID / 说明">
         <span class="muted">{{ regSummary }}</span>
+        <span v-if="regMsg" class="badge blue">{{ regMsg }}</span>
       </div>
       <div class="err-box" v-if="statsErr">{{ statsErr }}</div>
       <div class="reg-wrap" v-else-if="stats">
@@ -585,13 +622,14 @@ WB.pages.news = {
           <table class="reg">
             <thead>
               <tr>
-                <th @click="sortReg('count')">条目数<span class="arr" v-if="sortKey==='count'">{{ arrow }}</span></th>
+                <th @click="sortReg('count')">24h条数<span class="arr" v-if="sortKey==='count'">{{ arrow }}</span></th>
+                <th>关注</th>
                 <th @click="sortReg('id')">源ID<span class="arr" v-if="sortKey==='id'">{{ arrow }}</span></th>
                 <th @click="sortReg('title')">说明<span class="arr" v-if="sortKey==='title'">{{ arrow }}</span></th>
                 <th @click="sortReg('kind')">形态<span class="arr" v-if="sortKey==='kind'">{{ arrow }}</span></th>
                 <th @click="sortReg('markets')">市场<span class="arr" v-if="sortKey==='markets'">{{ arrow }}</span></th>
                 <th @click="sortReg('positioning')">定位<span class="arr" v-if="sortKey==='positioning'">{{ arrow }}</span></th>
-                <th @click="sortReg('health')">健康<span class="arr" v-if="sortKey==='health'">{{ arrow }}</span></th>
+                <th @click="sortReg('health')">状态<span class="arr" v-if="sortKey==='health'">{{ arrow }}</span></th>
                 <th @click="sortReg('ttl_min')">TTL<span class="arr" v-if="sortKey==='ttl_min'">{{ arrow }}</span></th>
                 <th @click="sortReg('ms')">耗时<span class="arr" v-if="sortKey==='ms'">{{ arrow }}</span></th>
                 <th @click="sortReg('round_new')">上轮新增<span class="arr" v-if="sortKey==='round_new'">{{ arrow }}</span></th>
@@ -599,14 +637,15 @@ WB.pages.news = {
               </tr>
             </thead>
             <tbody>
-              <tr v-for="s in regRows" :key="s.id">
+              <tr v-for="s in regRows" :key="s.id" :class="{off: s.enabled === false}">
                 <td class="num">{{ s.count != null ? s.count : '-' }}</td>
+                <td><span class="star" :class="{on: isFollowed(s.id)}" :title="isFollowed(s.id) ? '取消关注' : '关注该源'" @click="toggleFollow(s.id)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg></span></td>
                 <td><span class="mono">{{ s.id }}</span></td>
                 <td>{{ s.brief || s.title }}<span v-if="s.pool_accounts" class="muted"> · 池内 {{ s.pool_accounts }} 账号</span></td>
                 <td><span class="badge">{{ s.kind }}</span></td>
                 <td>{{ (s.markets || []).join('、') }}</td>
                 <td>{{ s.positioning }}</td>
-                <td><span class="pill" :class="pillClass(s)">{{ pillText(s) }}</span></td>
+                <td class="state-cell"><span class="state-wrap"><span class="switch" :class="{on: s.enabled !== false, busy: busyId === s.id}" role="switch" tabindex="0" :aria-checked="s.enabled === false ? 'false' : 'true'" :title="(s.enabled === false ? '启用' : '停用') + ' ' + s.id" @click="toggleEnabled(s)" @keydown.enter="toggleEnabled(s)"></span><span class="pill" :class="pillClass(s)">{{ pillText(s) }}</span></span></td>
                 <td class="num">{{ s.ttl_min != null ? s.ttl_min + 'm' : '-' }}</td>
                 <td class="num">{{ s.ms != null ? s.ms + ' ms' : '-' }}</td>
                 <td class="num">{{ s.round_new != null ? s.round_new : '-' }}</td>
