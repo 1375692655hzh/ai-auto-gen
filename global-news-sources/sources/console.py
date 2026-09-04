@@ -1,8 +1,9 @@
-"""运维页数据面(板块四·运维): 常驻进程/开机任务/刷新轮/存储四块状态 + 白名单动作。
+"""数据站侧运维管理前端，与数据站同机、随站部署。
 
-红线适配: 全程只读取证(端口/netstat/schtasks/文件体积), 动作一律 subprocess
-(启动=拉起 cli.py/omniroute, 停止=taskkill 端口占用 PID), 不直写三板块文件;
-唯一落盘是 bat 侧自己的 data\\*_task.log。工作台自身只读展示(你在看页面=它在跑)。
+控制台负责展示常驻进程、任务计划、最近刷新轮和存储状态，并通过白名单动作
+拉起或停止数据站任务。工作台是用户端，只通过数据站地址与 Key 接入。
+
+启动: python cli.py sources console [--bind 0.0.0.0] [--port 8786]
 """
 
 import json
@@ -12,22 +13,20 @@ import subprocess
 import time
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[2]          # 仓库根
+ROOT = Path(__file__).resolve().parents[2]
 DATA = ROOT / "data"
 
 # 常驻进程清单: key → (显示名, 端口, 说明)
 PROCS = {
-    "serve":     ("数据站 sources serve", 8787, "板块一读侧供数( Bearer 鉴权 )"),
-    "workbench": ("工作台 workbench", 8788, "板块四本页面所在进程"),
-    "omniroute": ("OmniRoute 翻译网关", 20128, "翻译链免费位(muse/mimo)所在"),
+    "serve":   ("数据站 sources serve", 8787, "板块一读侧供数( Bearer 鉴权 )"),
+    "console": ("本控制台", 8786, "能打开本页=在跑"),
 }
 
-# 开机/计划任务清单(刷新型=已有; 自启型=本次新增)
-TASKS = ["aag-sources-refresh", "aag-xsurge-refresh",
-         "aag-serve", "aag-workbench", "aag-omniroute"]
+# 开机/计划任务清单
+TASKS = ["aag-sources-refresh", "aag-xsurge-refresh", "aag-serve", "aag-console"]
 
 LOG_FILES = ["refresh_task.log", "xsurge_task.log", "serve_task.log",
-             "workbench_task.log", "omniroute_task.log", r"serve\access.log"]
+             "console_task.log", r"serve\access.log"]
 
 
 def _run(cmd: list, timeout: int = 15) -> tuple[int, str]:
@@ -54,6 +53,10 @@ def _port_pid(port: int) -> int:
 def _proc_status() -> list:
     rows = []
     for key, (name, port, note) in PROCS.items():
+        if key == "console":
+            rows.append({"key": key, "name": name, "port": port, "note": note,
+                         "up": True, "pid": None})
+            continue
         pid = _port_pid(port)
         rows.append({"key": key, "name": name, "port": port, "note": note,
                      "up": pid > 0, "pid": pid})
@@ -133,7 +136,7 @@ def _spawn(cli_args: list, log: str) -> tuple[bool, str]:
     """后台拉起 cli.py 子命令(脱离本进程, 关窗口, 日志落 data\\<log>)。"""
     DATA.mkdir(exist_ok=True)
     f = open(DATA / log, "a", encoding="utf-8")
-    f.write(f"\n===== {time.strftime('%F %T')} ops 拉起: {' '.join(cli_args)} =====\n")
+    f.write(f"\n===== {time.strftime('%F %T')} console 拉起: {' '.join(cli_args)} =====\n")
     f.flush()
     subprocess.Popen(["py", "-3.11", str(ROOT / "cli.py")] + cli_args,
                      cwd=str(ROOT), stdout=f, stderr=subprocess.STDOUT,
@@ -160,27 +163,57 @@ def _action_inner(target: str, op: str) -> dict:
                 return {"ok": True, "output": "8787 本就没在跑"}
             rc, out = _run(["taskkill", "/F", "/PID", str(pid)])
             return {"ok": rc == 0, "output": out or f"taskkill pid={pid} rc={rc}"}
-    elif target == "omniroute":
-        # npm 装的 omniroute 是 .cmd shim, CreateProcess 不能直接执行, 必须经 cmd /c
-        if op == "start":
-            if _port_pid(20128):
-                return {"ok": True, "output": "20128 已在监听, 无需启动"}
-            import os
-            env = dict(os.environ, OMNIROUTE_SERVER_HOST="127.0.0.1")
-            p = subprocess.run(["cmd", "/c", "omniroute", "serve", "--daemon", "--no-open"],
-                               capture_output=True, timeout=60, env=env)
-            out = ((p.stdout or b"") + (p.stderr or b"")).decode("utf-8", errors="ignore")
-            return {"ok": p.returncode == 0, "output": out[-400:]}
-        if op == "stop":
-            p = subprocess.run(["cmd", "/c", "omniroute", "stop"],
-                               capture_output=True, timeout=30)
-            out = ((p.stdout or b"") + (p.stderr or b"")).decode("utf-8", errors="ignore")
-            return {"ok": p.returncode == 0, "output": out[-300:]}
     elif target == "refresh":
         if op == "start":                                # 立即刷一轮(幂等, 与任务计划并存)
-            return dict(zip(("ok", "output"), _spawn(["sources", "refresh"], "refresh_task.log")))
+            return dict(zip(("ok", "output"),
+                            _spawn(["sources", "refresh"], "refresh_task.log")))
     elif target == "xsurge":
         if op == "start":
             return dict(zip(("ok", "output"),
                             _spawn(["workbench", "refresh-x-surge"], "xsurge_task.log")))
     return {"ok": False, "output": f"不支持的动作: {target}/{op}"}
+
+
+# ── HTTP 路由 ────────────────────────────────────────────────────────────────
+
+def create_app(host: str = "127.0.0.1"):
+    from fastapi import FastAPI, Request
+    from fastapi.responses import FileResponse, JSONResponse
+    from sources.serve import _load_keys
+
+    app = FastAPI(title="aag-sources-console", version="1.0",
+                  docs_url=None, redoc_url=None)
+    need_auth = host not in ("127.0.0.1", "localhost", "::1")
+
+    @app.middleware("http")
+    async def guard(request: Request, call_next):
+        if need_auth and request.url.path.startswith("/admin/api"):
+            auth = request.headers.get("Authorization", "")
+            m = re.match(r"Bearer\s+(\S+)", auth)
+            if not m or m.group(1) not in _load_keys():
+                return JSONResponse({"error": "需要有效的 API Key"}, status_code=401)
+        return await call_next(request)
+
+    @app.get("/admin/api/status")
+    def admin_status():
+        return status_payload()
+
+    @app.post("/admin/api/action")
+    async def admin_action(request: Request):
+        body = await request.json()
+        return action(str(body.get("target") or ""), str(body.get("op") or ""))
+
+    @app.get("/")
+    def index():
+        page = Path(__file__).resolve().parents[1] / "web" / "console.html"
+        return FileResponse(str(page))
+
+    return app
+
+
+def run(host: str = "127.0.0.1", port: int = 8786) -> int:
+    import uvicorn
+    if host not in ("127.0.0.1", "localhost", "::1"):
+        print(f"⚠ 对外绑定 {host}——控制台含启停动作, 务必配好 api_keys.local.json")
+    uvicorn.run(create_app(host), host=host, port=port, log_level="warning")
+    return 0

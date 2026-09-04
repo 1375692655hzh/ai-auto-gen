@@ -18,7 +18,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
-from . import config, ops, proxy, stats, views, xaccounts, x_profile_enricher, x_surge, yt_track
+from . import config, proxy, stats, views, xaccounts, x_profile_enricher, x_surge, yt_track
 
 WEB = Path(__file__).resolve().parent.parent / "web"
 
@@ -388,16 +388,6 @@ def create_app() -> FastAPI:
     def automation_del(tid: str):
         rows = [r for r in config.load_automation() if r.get("id") != tid]
         return {"tasks": config.save_automation(rows)}
-
-    # ── 运维页: 常驻进程/开机任务/刷新轮/存储状态 + 白名单动作(subprocess) ────
-    @app.get("/wb-api/ops/status")
-    def ops_status():
-        return ops.status_payload()
-
-    @app.post("/wb-api/ops/action")
-    async def ops_action(request: Request):
-        body = await request.json()
-        return ops.action(str(body.get("target") or ""), str(body.get("op") or ""))
 
     # ── 云端同步预留桩(本期一律 501) ─────────────────────────────────────────
     @app.post("/wb-api/cloud/{action}")

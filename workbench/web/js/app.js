@@ -7,7 +7,6 @@
     { hash: "/article", title: "图文", comp: WB.pages.article },
     { hash: "/video", title: "视频", comp: WB.pages.video },
     { hash: "/track", title: "追踪", comp: WB.pages.track },
-    { hash: "/ops", title: "运维", comp: WB.pages.ops },
     { hash: "/settings", title: "设置", comp: WB.pages.settings },
   ];
 

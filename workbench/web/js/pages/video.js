@@ -240,7 +240,7 @@ WB.pages.video = {
 
       <!-- 热门视频解读: 近7天播放 Top20 取前10, 简介/标签由 AI 生成 -->
       <div class="card" v-if="hotInsights.length">
-        <h3>热门视频解读
+        <h3>近期热点
           <span class="muted" style="margin-left:10px;font-weight:400">近 7 天播放 Top20 · 前 10
             · 简介/标签由 AI 生成, 随采集增量补齐</span></h3>
         <div class="muted" style="margin-bottom:8px" v-if="hotMeta && !hotMeta.insight_configured">
@@ -248,7 +248,7 @@ WB.pages.video = {
         <table class="tbl">
           <thead><tr>
             <th>标题</th><th>类型</th><th>发布</th><th>播放</th><th>赞</th><th>评</th>
-            <th>内容简介</th><th>内容标签</th><th>Δ24h</th><th>Δ7d</th><th>日速</th>
+            <th>内容简介</th><th>内容标签</th>
           </tr></thead>
           <tbody>
             <tr v-for="r in hotInsights" :key="r.video_id">
@@ -265,16 +265,13 @@ WB.pages.video = {
               <td style="max-width:160px">
                 <span v-for="t in r.tags" :key="t" class="badge blue" style="margin-right:4px">{{ t }}</span>
                 <span v-if="!r.tags || !r.tags.length" class="muted">—</span></td>
-              <td class="mono">{{ deltaText(r, 'delta_24h', 'delta_24h_credible') }}</td>
-              <td class="mono">{{ deltaText(r, 'delta_7d') }}</td>
-              <td class="mono">{{ r.rate_per_day != null ? '+' + fmtNum(r.rate_per_day) : '—' }}</td>
             </tr>
           </tbody>
         </table>
       </div>
 
       <div class="card">
-        <h3>热点追踪
+        <h3>近期视频
           <span v-if="hotMeta && hotMeta.last_collect_at" class="muted" style="margin-left:10px;font-weight:400">
             采集于 {{ hotMeta.last_collect_at }}
             <span v-if="hotMeta.data_age_min != null && hotMeta.data_age_min > 1500"

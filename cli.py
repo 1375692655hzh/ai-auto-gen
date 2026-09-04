@@ -370,6 +370,9 @@ def sources_cmd(args) -> int:
     if args.sub == "serve":
         from sources import serve
         return serve.run(host=args.bind or args.host, port=args.port)
+    if args.sub == "console":
+        from sources.console import run
+        return run(host=args.bind or args.host, port=args.port)
     if args.sub == "enable":
         return sources_enable_cmd(args.sid, args.state, args.json)
     return EXIT_FAIL
@@ -588,6 +591,10 @@ def main() -> int:
     ps_sv.add_argument("--host", default="127.0.0.1")
     ps_sv.add_argument("--port", type=int, default=8787)
     ps_sv.add_argument("--bind", default=None, help="显式绑定地址(如 0.0.0.0, 覆盖 --host)")
+    ps_co = ssub.add_parser("console", help="数据站运维控制台(默认 127.0.0.1:8786)")
+    ps_co.add_argument("--host", default="127.0.0.1")
+    ps_co.add_argument("--port", type=int, default=8786)
+    ps_co.add_argument("--bind", default=None, help="显式绑定地址(如 0.0.0.0, 覆盖 --host)")
     ps_en = ssub.add_parser("enable", help="启用/停用来源(行级写 config.local.yaml 覆盖, 不动库文件)")
     ps_en.add_argument("sid", help="来源 id(list 可查)")
     ps_en.add_argument("state", nargs="?", choices=["on", "off"], default=None,

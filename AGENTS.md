@@ -19,6 +19,7 @@
 | `python cli.py sources gather [--markets/--ids/--fresh] [--json]` | 按标签聚合抓取（显式 --ids 不受 enabled 约束） | 会请求外网（TTL 内走缓存） |
 | `python cli.py sources refresh [--dry-run]` | 数据站写侧：到期源调度刷新→SQLite 服务库+快照（详见 global-news-sources/docs/供数服务.md） | **真抓外网**，任务计划每 30min 触发 |
 | `python cli.py sources serve [--bind/--port]` | 数据站读侧：只读 HTTP 供数（默认 127.0.0.1:8787，Bearer Key 鉴权） | 常驻进程 |
+| `python cli.py sources console [--bind/--port 8786]` | 数据站运维控制台（进程/任务计划/刷新轮/存储；loopback 免密，对外绑定走 Bearer key） | 常驻进程 |
 | `python cli.py sources enable <id> [on\|off]` | 启停来源（行级写 config.local.yaml 覆盖段，保留注释；缺省=翻转当前状态） | 改 config.local.yaml |
 | `python cli.py flows list/lint/run <wf>/status/new/export/import` | 生成工作流（断点续跑/审核挂起 exit 2） | `run` 会调 LLM |
 | `python cli.py gen <args>` | 生成模块透传（旧入口，等价 flows） | `run` 会调 LLM |
@@ -29,7 +30,7 @@
 | `python cli.py publish run [--draft ...]` | 发全部启用平台 | **真发**！必须先 `--draft` |
 | `python cli.py publish run-video --video <mp4> --title <t> [--draft]` | B站/抖音投稿 | **真发**！必须先 `--draft` |
 | `python cli.py video build <id> [--estimate]` | Remotion 出片 | 写 ai-workflow/video/videos/&lt;id&gt;/out |
-| `python cli.py workbench serve [--bind/--port 8788/--open]` | 板块四·前端工作台（资讯/图文/视频/追踪/运维/设置 6 页 SPA，方案见 docs/第四板块-前端工作台方案.md） | 常驻进程；只写 data/workbench/ 自有 JSON |
+| `python cli.py workbench serve [--bind/--port 8788/--open]` | 板块四·前端工作台（资讯/图文/视频/追踪/设置 5 页 SPA，方案见 docs/第四板块-前端工作台方案.md） | 常驻进程；只写 data/workbench/ 自有 JSON |
 | `python cli.py workbench refresh-yt-track [--force]` | YouTube 热点追踪采集（Data API v3 → yt_channels/yt_videos 快照；任务计划每天一次，方案见 docs/workbench-moa/16-18） | **真抓 YouTube 外网** |
 | `python cli.py workbench status [--json]` | 工作台/数据源双探活 + 设置有效性 | 无 |
 
@@ -45,10 +46,10 @@ data/                       运行时数据(gitignored: 缓存/健康/运行产�
 docs/                       方案与操作手册
 scripts/ skills/            工具脚本 / agent 技能
 bin/*_task.bat              24/7 运维: 幂等启动脚本(端口已听则零副作用退出), 由 schtasks 登录自启
-                            (aag-serve/aag-workbench/aag-omniroute) + 每15min刷新(aag-sources-refresh/aag-xsurge-refresh)
+                            (aag-serve/aag-workbench/aag-omniroute/aag-console) + 每15min刷新(aag-sources-refresh/aag-xsurge-refresh)
 ```
 
-**运维入口**：桌面快捷方式「数据站控制台」→ `bin/console.bat` 拉起工作台并打开 `http://127.0.0.1:8788/#/ops`（运维页：进程状态/启停、任务计划、最近刷新轮、存储体积，API 为 `/wb-api/ops/status|action`）。
+**运维入口**：桌面快捷方式「数据站控制台」→ `bin/console.bat` 打开数据站自带控制台 `http://127.0.0.1:8786/`（`global-news-sources/sources/console.py` + `global-news-sources/web/console.html`，与数据站同机部署，未来上云随站部署、对外绑定用 Bearer key）；工作台是用户端，只填数据站地址+key 接入。
 
 ## 状态文件（agent 的共享内存）
 
@@ -70,7 +71,7 @@ bin/*_task.bat              24/7 运维: 幂等启动脚本(端口已听则零�
 4. **不改** `ai-workflow/video/src/active-story.ts`（渲染时自动生成）与 `ai-workflow/video/src/story-types.ts` 契约。
 5. B站/抖音上传框是**多文件累加**队列——绝不重复 set_input_files；适配器已有队列防重逻辑，别绕过。
 6. Chrome 调试模式（9222）接管的是用户日常浏览器：发布期间提示用户勿手动操作该浏览器。
-7. workbench（板块四）对三板块**全程只读**（views.py 只扫文件、proxy.py 只转 GET）；运维页的触发类动作（`server/ops.py` 白名单：启动/停止 serve·omniroute、立即刷一轮）也只经 subprocess 调 cli.py / omniroute CLI，唯一写口是 `data/workbench/` 自有 JSON。注意 Windows 上 omniroute 是 .cmd shim，subprocess 必须 `cmd /c omniroute ...` 直调会 FileNotFoundError。
+7. workbench（板块四）对三板块**全程只读**（views.py 只扫文件、proxy.py 只转 GET）；唯一写口是 `data/workbench/` 自有 JSON。（服务器运维已迁至数据站自带控制台 `sources/console.py`，与工作台无关。）
 
 ## 常见任务配方
 

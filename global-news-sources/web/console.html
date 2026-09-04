@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>数据站运维控制台</title>
+<style>
+:root{color-scheme:dark;--bg:#0b1020;--card:#141b2d;--line:#29334b;--text:#e8edf7;--muted:#8f9bb3;--ok:#35d07f;--bad:#ff6376;--accent:#6ea8fe}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:14px/1.5 system-ui,-apple-system,"Segoe UI","Microsoft YaHei",sans-serif}
+.wrap{max-width:980px;margin:auto;padding:28px 20px 20px}header{margin-bottom:20px}h1{font-size:25px;margin:0 0 4px}h2{font-size:17px;margin:0}.sub,.muted,footer{color:var(--muted)}
+.keybar{display:none;position:sticky;top:0;z-index:2;gap:10px;align-items:center;padding:12px 20px;background:#352710;border-bottom:1px solid #75561c}.keybar.show{display:flex}.keybar input{flex:1;max-width:520px}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}.card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:17px;overflow:auto}.wide{grid-column:1/-1}.head{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px}
+table{width:100%;border-collapse:collapse}th,td{text-align:left;padding:9px 8px;border-bottom:1px solid var(--line);vertical-align:top}th{color:var(--muted);font-weight:600;font-size:12px}.note{color:var(--muted);font-size:12px}.mono{font-family:ui-monospace,SFMono-Regular,Consolas,monospace}
+.dot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:6px;background:var(--bad)}.dot.ok{background:var(--ok)}button,input{border:1px solid var(--line);border-radius:6px;background:#1c2740;color:var(--text);padding:7px 11px}button{cursor:pointer}button:hover{border-color:var(--accent)}button:disabled{cursor:not-allowed;opacity:.5}.actions{display:flex;gap:6px;flex-wrap:wrap}.row{display:flex;gap:14px;align-items:flex-start;margin:9px 0}.row label{min-width:92px;color:var(--muted)}
+.toast{position:fixed;right:20px;bottom:20px;max-width:520px;padding:10px 14px;background:#202b43;border:1px solid var(--line);border-radius:8px;box-shadow:0 8px 30px #0008;display:none}.toast.show{display:block}.error{color:var(--bad)}footer{font-size:12px;margin-top:14px}
+@media(max-width:760px){.grid{grid-template-columns:1fr}.wide{grid-column:auto}.wrap{padding:18px 12px}th,td{padding:8px 5px}.keybar{align-items:stretch;flex-wrap:wrap}.keybar span{width:100%}}
+</style>
+</head>
+<body>
+<div id="keybar" class="keybar">
+  <span>此控制台需要 API Key</span>
+  <input id="keyInput" type="password" autocomplete="off" placeholder="粘贴 Bearer Key">
+  <button id="saveKey">保存并重试</button>
+</div>
+<div class="wrap">
+  <header>
+    <h1>数据站运维控制台</h1>
+    <div class="sub">与数据站同机部署 · loopback 免密 · 对外绑定需 Key</div>
+  </header>
+  <div id="error" class="card error" hidden></div>
+  <main id="content" class="grid">
+    <section class="card wide">
+      <div class="head"><h2>常驻进程</h2><button id="refresh">刷新</button></div>
+      <table><thead><tr><th>进程</th><th>端口</th><th>状态</th><th>PID</th><th>操作</th></tr></thead><tbody id="procs"><tr><td colspan="5" class="muted">读取中…</td></tr></tbody></table>
+    </section>
+    <section class="card wide">
+      <div class="head"><h2>任务计划</h2><div class="actions"><button data-action="refresh">立即刷新一轮</button><button data-action="xsurge">立即X采集一轮</button></div></div>
+      <table><thead><tr><th>任务</th><th>状态</th><th>下次运行</th><th>间隔</th></tr></thead><tbody id="tasks"></tbody></table>
+    </section>
+    <section class="card">
+      <div class="head"><h2>最近刷新轮</h2></div><div id="rounds" class="muted">暂无轮次记录</div>
+    </section>
+    <section class="card">
+      <div class="head"><h2>存储与日志</h2></div><div id="storage"></div>
+    </section>
+  </main>
+  <footer>状态每 15s 自动刷新 · <span id="at">—</span></footer>
+</div>
+<div id="toast" class="toast"></div>
+<script>
+(() => {
+  const KEY_NAME = "aag_console_key";
+  const $ = (id) => document.getElementById(id);
+  let busy = false;
+  const esc = (v) => String(v == null ? "—" : v).replace(/[&<>"']/g, (c) => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"})[c]);
+  const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+  function key() { try { return localStorage.getItem(KEY_NAME) || ""; } catch (_) { return ""; } }
+  function showKey() { $("keybar").classList.add("show"); $("keyInput").value = key(); }
+  function hideKey() { $("keybar").classList.remove("show"); }
+  function toast(text, bad) {
+    const el = $("toast"); el.textContent = text; el.className = "toast show" + (bad ? " error" : "");
+    clearTimeout(toast.timer); toast.timer = setTimeout(() => el.className = "toast", 4500);
+  }
+  function setBusy(on) { busy = on; document.querySelectorAll("button[data-action],button[data-serve]").forEach((b) => b.disabled = on); }
+
+  async function request(path, options = {}) {
+    const headers = Object.assign({"Content-Type":"application/json"}, options.headers || {});
+    if (key()) headers.Authorization = "Bearer " + key();
+    const response = await fetch(path, Object.assign({}, options, {headers}));
+    if (response.status === 401) { showKey(); throw new Error("需要有效的 API Key"); }
+    const body = await response.json();
+    if (response.ok) hideKey();
+    if (!response.ok) throw new Error(body.error || ("HTTP " + response.status));
+    return body;
+  }
+
+  function render(d) {
+    $("procs").innerHTML = (d.procs || []).map((p) => {
+      const controls = p.key === "serve" ? `<div class="actions"><button data-serve="start">启动</button><button data-serve="stop">停止</button><button data-serve="restart">重启</button></div>` : `<span class="note">本页面所在进程</span>`;
+      return `<tr><td>${esc(p.name)}<div class="note">${esc(p.note)}</div></td><td class="mono">${esc(p.port)}</td><td><span class="dot ${p.up ? "ok" : ""}"></span>${p.up ? "运行中" : "未运行"}</td><td class="mono">${esc(p.pid)}</td><td>${controls}</td></tr>`;
+    }).join("");
+    $("tasks").innerHTML = (d.tasks || []).map((t) => `<tr><td class="mono">${esc(t.name)}</td><td><span class="dot ${t.registered ? "ok" : ""}"></span>${t.registered ? esc(t.state || "已注册") : "未注册"}</td><td>${t.registered ? esc(t.next_run || "—") : "—"}</td><td>${t.interval_min ? esc(t.interval_min) + " 分钟" : (t.registered ? "登录时/未标注" : "—")}</td></tr>`).join("");
+    const lr = d.last_round || {}, blocks = [];
+    if (lr.sources) blocks.push(`<div class="row"><label>主站刷新</label><span>${esc(lr.sources.started)} → ${esc(lr.sources.finished)}</span></div><div class="row"><label>结果</label><span>${esc(lr.sources.ok)} 源成功 / ${esc(lr.sources.fail)} 失败 / 新入库 ${esc(lr.sources.new)} 条</span></div>`);
+    if (lr.xsurge) blocks.push(`<div class="row"><label>X 起爆池</label><span>追踪 ${esc(lr.xsurge.tracked ?? "—")} · 本轮 ${esc(lr.xsurge.ok ?? 0)} 成 / ${esc(lr.xsurge.failed ?? 0)} 败 · 翻译 ${esc(lr.xsurge.translated ?? 0)}(败 ${esc(lr.xsurge.translate_failed ?? 0)})</span></div>`);
+    $("rounds").className = blocks.length ? "" : "muted"; $("rounds").innerHTML = blocks.join("") || "暂无轮次记录";
+    const st = d.storage || {}, logs = (st.logs || []).map((f) => `<tr><td class="mono">data/${esc(f.name)}</td><td>${f.mb == null ? "—" : esc(f.mb) + " MB"}</td></tr>`).join("");
+    $("storage").innerHTML = `<div class="row"><label>items.db</label><span>${st.items_db_mb == null ? "—" : esc(st.items_db_mb) + " MB"}</span></div><div class="row"><label>磁盘剩余</label><span>${st.disk_free_gb == null ? "—" : esc(st.disk_free_gb) + " GB"}</span></div><table><thead><tr><th>日志</th><th>体积</th></tr></thead><tbody>${logs}</tbody></table>`;
+    $("at").textContent = d.at || "—"; $("error").hidden = true;
+  }
+
+  async function load() {
+    try { render(await request("/admin/api/status")); }
+    catch (e) { $("error").textContent = e.message || "状态读取失败"; $("error").hidden = false; }
+  }
+  async function act(target, op) {
+    const r = await request("/admin/api/action", {method:"POST", body:JSON.stringify({target, op})});
+    toast((r.ok ? "✓ " : "✕ ") + (r.output || "动作完成"), !r.ok);
+    return r;
+  }
+  async function runAction(target, op) {
+    if (busy) return; setBusy(true);
+    try { await act(target, op); }
+    catch (e) { toast("✕ " + (e.message || "动作失败"), true); }
+    finally { setBusy(false); setTimeout(load, 2500); }
+  }
+  async function restartServe() {
+    if (busy) return; setBusy(true);
+    try { await act("serve", "stop"); await sleep(2000); await act("serve", "start"); }
+    catch (e) { toast("✕ " + (e.message || "重启失败"), true); }
+    finally { setBusy(false); setTimeout(load, 2500); }
+  }
+
+  document.addEventListener("click", (e) => {
+    const serve = e.target.closest("button[data-serve]");
+    if (serve) return serve.dataset.serve === "restart" ? restartServe() : runAction("serve", serve.dataset.serve);
+    const action = e.target.closest("button[data-action]");
+    if (action) runAction(action.dataset.action, "start");
+  });
+  $("refresh").addEventListener("click", load);
+  $("saveKey").addEventListener("click", () => { try { localStorage.setItem(KEY_NAME, $("keyInput").value.trim()); } catch (_) {} load(); });
+  $("keyInput").addEventListener("keydown", (e) => { if (e.key === "Enter") $("saveKey").click(); });
+  load(); setInterval(load, 15000);
+})();
+</script>
+</body>
+</html>
