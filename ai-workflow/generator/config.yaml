@@ -24,10 +24,10 @@ sources:
     # 均可自填, 留空继承全局配置(secret.local.json); models 为空则退回单 model 行为。
     models:
     - model: deepseek-v4-flash          # 主力(全局 key)
+    - base_url: http://127.0.0.1:20128/v1   # 备胎1(免费): OmniRoute 本地网关(npm i -g omniroute
+      api_key: omniroute-local          #   && omniroute serve --daemon), 零 key 走 OpenCode Free 池;
+      model: oc/muse-spark-1.2-contributor-free  # 未装/未启动时秒级失败, 自动落备胎2
     - model: glm-5.3-flash              # 备胎2: 质量同档, 走套餐额度(慢)
-    # - base_url: https://<zen兼容端点>/v1   # 备胎1(免费池)示例: 需自填 url+key
-    #   api_key: sk-xxxxxxxx
-    #   model: muse-spark-1.2-contributor-free
     batch: 10
     max_chars: 1500
     round_cap: 120
