@@ -23,12 +23,10 @@ sources:
     # global-news-sources/docs/翻译模型实测与推荐.md)。每项 base_url/api_key/model
     # 均可自填, 留空继承全局配置(secret.local.json); models 为空则退回单 model 行为。
     models:
-    # 主力: DeepSeek 官网按量(2026-09-04 拍板; 官网价 $0.22/1M输入 $0.66/1M输出 闲时)。
-    # key 不走库文件: 在本机 config.local.yaml(gitignored) 的 sources.translate.models
-    # 写全链覆盖, api_key 填 sk-...(platform.deepseek.com 控制台申请)。
-    # 未配 key 时本项继承全局 Ark key → 401 → 链自动落备胎1, 无事故。
-    - base_url: https://api.deepseek.com/v1
-      model: deepseek-v4-flash
+    - model: deepseek-v4-flash          # 主力: 默认继承全局(secret.local.json 的 base_url/key);
+                                        #   要换别家(如 DS 官网按量/中转) → 在本机 config.local.yaml
+                                        #   (gitignored) 的 sources.translate.models 全链覆盖,
+                                        #   该项自填 base_url/api_key/model 三个字段即可
     - base_url: http://127.0.0.1:20128/v1   # 备胎1(免费): OmniRoute 本地网关(npm i -g omniroute
       api_key: omniroute-local          #   && omniroute serve --daemon), 零 key 走 OpenCode Free 池;
       model: oc/muse-spark-1.2-contributor-free  # 未装/未启动时秒级失败, 自动落备胎2
