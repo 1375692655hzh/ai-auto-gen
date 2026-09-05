@@ -47,6 +47,7 @@ docs/                       方案与操作手册
 scripts/ skills/            工具脚本 / agent 技能
 bin/*_task.bat              24/7 运维: 幂等启动脚本(端口已听则零副作用退出), 由 schtasks 登录自启
                             (aag-serve/aag-workbench/aag-omniroute/aag-console) + 每15min刷新(aag-sources-refresh/aag-xsurge-refresh)
+                            登记必须经 bin/silent_run.vbs 静默包装(/tr "wscript.exe ...\\silent_run.vbs ...\\xx_task.bat"), 直跑bat会弹黑窗打扰桌面
 ```
 
 **运维入口**：桌面快捷方式「数据站控制台」→ `bin/console.bat` 打开数据站自带控制台 `http://127.0.0.1:8786/`（`global-news-sources/sources/console.py` + `global-news-sources/web/console.html`，与数据站同机部署，未来上云随站部署、对外绑定用 Bearer key）；工作台是用户端，只填数据站地址+key 接入。
