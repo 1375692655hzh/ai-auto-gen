@@ -50,13 +50,16 @@ def _record_locked(source_id: str, ok: bool, error: str = "") -> None:
     else:
         n = rec.get("consecutive_failures", 0) + 1
         rec.update({"status": "dead" if n >= DEAD_AFTER else "degraded",
-                    "consecutive_failures": n, "last_error": error[:200]})
+                    "consecutive_failures": n, "last_error": error[:200],
+                    "last_fail": datetime.now().strftime("%Y-%m-%d %H:%M")})
     d[source_id] = rec
     try:
         f = _health_file()
         f.parent.mkdir(parents=True, exist_ok=True)
-        f.write_text(json.dumps(d, ensure_ascii=False, indent=2),
-                               encoding="utf-8")
+        tmp = f.with_suffix(".tmp")           # 原子写: 进程被杀不留半截 JSON
+        tmp.write_text(json.dumps(d, ensure_ascii=False, indent=2),
+                       encoding="utf-8")
+        os.replace(tmp, f)
     except Exception:
         pass
 

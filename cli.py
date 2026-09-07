@@ -353,18 +353,28 @@ def sources_cmd(args) -> int:
     if args.sub == "refresh":
         from sources import refresh as refresh_mod
         import contextlib, io
-        buf = io.StringIO()
-        with contextlib.redirect_stdout(buf):     # fetcher 的 print 不污染 --json 输出
-            rep = refresh_mod.run(dry_run=args.dry_run)
         if args.json:
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf):     # fetcher 的 print 不污染 --json 输出
+                rep = refresh_mod.run(dry_run=args.dry_run)
             print(json.dumps(rep, ensure_ascii=False, indent=2))
         else:
-            print(f"本轮: 计划 {rep.get('planned',0)} 源 / 成功 {rep.get('ok',0)} / "
-                  f"空 {rep.get('empty',0)} / 失败 {rep.get('failed',0)} / "
-                  f"跳过 {rep.get('skipped',0)} | 入库 {rep.get('stored',0)} 条 | "
-                  f"耗时 {rep.get('elapsed_s',0)}s")
+            # 过程输出(逐源心跳)直通 stderr: bat 2>&1 合流后实时落日志, 不再整轮吞进内存
+            with contextlib.redirect_stdout(sys.stderr):
+                rep = refresh_mod.run(dry_run=args.dry_run)
+            if rep.get("locked_out"):
+                print(f"[{rep.get('started_at','')}] 本轮: 已有实例在跑, 跳过", flush=True)
+                return EXIT_OK
+            print(f"[{rep.get('started_at','')}] 本轮: 计划 {rep.get('planned',0)} 源 / "
+                  f"成功 {rep.get('ok',0)} / 空 {rep.get('empty',0)} / "
+                  f"失败 {rep.get('failed',0)} / 跳过 {rep.get('skipped',0)} | "
+                  f"入库 {rep.get('stored',0)} 条 | "
+                  f"抓取 {rep.get('fetch_elapsed_s',0)}s / 全程 {rep.get('elapsed_s',0)}s",
+                  flush=True)
             for f in rep.get("failures", [])[:20]:
-                print(f"  ⚠ {f}")
+                print(f"  ⚠ {f}", flush=True)
+        if args.dry_run:
+            return EXIT_OK
         return EXIT_OK if rep.get("ok") or rep.get("empty") else EXIT_FAIL
 
     if args.sub == "serve":
@@ -379,6 +389,45 @@ def sources_cmd(args) -> int:
 
 
 def workbench_cmd(args) -> int:
+    if args.sub == "analyze-video":
+        sys.path.insert(0, str(WB))
+        from server import vstudio
+        return vstudio.run_analyze_cli(args)
+    if args.sub == "gen-script":
+        sys.path.insert(0, str(WB))
+        from server import vstudio
+        return vstudio.run_generate_cli(args)
+    if args.sub == "build-video":
+        sys.path.insert(0, str(WB))
+        from server import vstudio
+        return vstudio.run_build_cli(args)
+    if args.sub == "test-llm":
+        sys.path.insert(0, str(WB))
+        from server import config, vstudio
+        import contextlib
+        import io
+        model = ""
+        code, error = 3, "llm_connection_failed"
+        try:
+            # 不透传传输层输出或异常, 防止供应商响应泄露密钥。
+            with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+                cfg = config.load().get("compose") or {}
+                base, key, model = (str(cfg.get(k) or "").strip()
+                                    for k in ("base_url", "api_key", "model"))
+                if not all((base, key, model)):
+                    code, error = 4, "no_llm_config"
+                elif vstudio.chat_completions(base, key, model,
+                        [{"role": "user", "content": "ping"}],
+                        temperature=0, max_tokens=8, timeout=25):
+                    code, error = 0, ""
+        except Exception:
+            pass
+        print(json.dumps({"ok": code == 0, "model": model, "error": error}))
+        return code
+    if args.sub == "gen-post":
+        sys.path.insert(0, str(WB))
+        from server import gcompose
+        return gcompose.run_compose_cli(args)
     if args.sub == "refresh-x-surge":
         sys.path.insert(0, str(WB))
         from server import x_surge
@@ -659,6 +708,17 @@ def main() -> int:
     pw_y.add_argument("--force", action="store_true",
                       help="忽略5分钟采集冷却与重入锁全部重抓")
     pw_y.add_argument("--json", action="store_true", help="报告本就是单行 JSON, 此参数仅为习惯兼容")
+    pw_va = wsub.add_parser("analyze-video", help="视频工坊分析任务(CLI 子进程入口)")
+    pw_va.add_argument("--json", action="store_true", help="输出单行 JSON")
+    pw_va.add_argument("--url", default=None, help="人工补跑时覆盖任务 URL")
+    pw_va.add_argument("--force", action="store_true", help="人工补跑时忽略分析缓存")
+    pw_vg = wsub.add_parser("gen-script", help="视频工坊口播脚本生成任务(CLI 子进程入口)")
+    pw_vg.add_argument("--json", action="store_true", help="输出单行 JSON")
+    pw_vb = wsub.add_parser("build-video", help="视频制作渲染编排(CLI 子进程入口, 真渲染分钟级)")
+    pw_vb.add_argument("--json", action="store_true", help="输出单行 JSON")
+    wsub.add_parser("test-llm", help="测试成稿模型连接(最小 ping, JSON 输出)")
+    pw_gp = wsub.add_parser("gen-post", help="内容生成成稿编排(CLI 子进程入口: 检索/行情图/技术位/观点聚合/LLM)")
+    pw_gp.add_argument("--json", action="store_true", help="输出单行 JSON")
 
     p_k = sub.add_parser("skills", help="把 skills/ 安装到本机 agent 技能目录")
     ksub = p_k.add_subparsers(dest="sub", required=True)
@@ -669,7 +729,10 @@ def main() -> int:
     vsub = p_v.add_subparsers(dest="sub", required=True)
     pv_b = vsub.add_parser("build", help="Remotion 出片")
     pv_b.add_argument("args", nargs=argparse.REMAINDER)
-    vsub.add_parser("new", help="新建视频项目(转 generator video)")
+    pv_n = vsub.add_parser("new", help="新建视频项目(node scripts/new-article.mjs 参数透传)")
+    pv_n.add_argument("args", nargs=argparse.REMAINDER)
+    pv_r = vsub.add_parser("remove", help="删除视频项目目录(videos/<id>/ 整目录)")
+    pv_r.add_argument("project_id", help="项目 id(videos/ 下目录名)")
 
     args = ap.parse_args()
 
@@ -731,6 +794,25 @@ def main() -> int:
             r = subprocess.run(["node", "scripts/build.mjs"] + args.args,
                                cwd=str(AIWF / "video"))
             return r.returncode
+        if args.sub == "new":
+            r = subprocess.run(["node", "scripts/new-article.mjs"] + args.args,
+                               cwd=str(AIWF / "video"))
+            return r.returncode
+        if args.sub == "remove":
+            import re as _re
+            import shutil as _shutil
+            pid = args.project_id
+            base = (AIWF / "video" / "videos").resolve()
+            if not _re.fullmatch(r"[\w\-]+", pid):
+                print(f"❌ 非法项目 id: {pid}", file=sys.stderr)
+                return EXIT_FAIL
+            target = (base / pid).resolve()
+            if base not in target.parents or not target.is_dir():
+                print(f"❌ 项目不存在: {target}", file=sys.stderr)
+                return EXIT_FAIL
+            _shutil.rmtree(target)
+            print(f"✅ 已删除 {target}")
+            return EXIT_OK
     ap.print_help()
     return EXIT_FAIL
 

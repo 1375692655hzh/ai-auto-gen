@@ -32,6 +32,30 @@ from . import proxy, x_profile_enricher
 DATA_DIR = Path(__file__).resolve().parents[2] / "data" / "workbench"
 ENGAGE_FILE = DATA_DIR / "x_engagement.json"
 TEXTS_FILE = DATA_DIR / "x_surge_texts.json"     # 推文译文缓存 {status_id: {zh, ts}}
+
+_SURGE_LOCK_FH = None                            # 模块级持有锁句柄, 防 GC 提前释放
+
+
+def _acquire_single_lock() -> bool:
+    """单实例锁(msvcrt 字节锁, 进程死亡内核自动释放): 计划任务/手跑/页面触发互斥。"""
+    global _SURGE_LOCK_FH
+    try:
+        import msvcrt
+    except ImportError:
+        return True                              # 非 Windows 降级无锁(本仓运行环境是 Windows)
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    fh = open(DATA_DIR / "x_surge.lock", "a+b")
+    try:
+        msvcrt.locking(fh.fileno(), msvcrt.LK_NBLCK, 1)
+    except OSError:
+        fh.close()
+        return False
+    fh.seek(0)
+    fh.truncate()
+    fh.write(f"pid={os.getpid()} started={datetime.now():%F %T}".encode())
+    fh.flush()
+    _SURGE_LOCK_FH = fh
+    return True
 RSS_FILE = DATA_DIR / "x_surge_rss.json"         # SoPilot 热帖 RSS 缓存(蹭蹭流量页唯一数据源)
 RSS_URL = "https://sopilot.net/rss/hottweets"
 RSS_RETAIN_H = 48
@@ -192,6 +216,9 @@ class _RateLimited(Exception):
 
 def collect(range_h: int = 24, limit: int = 300, force: bool = False) -> dict:
     """一轮采集: 全量候选→先跳冷却→再截断→并发拉→追加快照→原子落盘→顺带补翻译。"""
+    if not _acquire_single_lock():
+        return {"ok": 0, "fail": 0, "circuit_break": False, "locked_out": True,
+                "note": "另一实例在跑, 本轮放弃(单实例锁)"}
     eng = load_engage()
     now = time.time()
     cands = _x_cands(_fetch_window(range_h))

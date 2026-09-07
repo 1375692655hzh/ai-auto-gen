@@ -1,0 +1,11 @@
+# workbench(板块四·前端工作台) 最小依赖
+# 独立安装(只跑工作台接远端数据站)时: pip install -r workbench/requirements.txt
+fastapi
+uvicorn
+pyyaml
+requests
+
+# ---- 以下为可选增强(完整仓库内成稿/视频功能用, 独立安装可跳过) ----
+# pandas        # 成稿 K 线图数据处理
+# yfinance      # 美股/全球行情源
+# mplfinance    # K 线图渲染

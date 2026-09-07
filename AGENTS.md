@@ -17,7 +17,7 @@
 | `python cli.py doctor [--json]` | 环境体检（密钥/浏览器/队列/账本） | 无 |
 | `python cli.py sources list/check/fetch <id>` | 来源库（110 源+四标签+健康+缓存，list 支持 --markets/--channels/--forms 过滤） | `check/fetch` 会请求外网 |
 | `python cli.py sources gather [--markets/--ids/--fresh] [--json]` | 按标签聚合抓取（显式 --ids 不受 enabled 约束） | 会请求外网（TTL 内走缓存） |
-| `python cli.py sources refresh [--dry-run]` | 数据站写侧：到期源调度刷新→SQLite 服务库+快照（详见 global-news-sources/docs/供数服务.md） | **真抓外网**，任务计划每 30min 触发 |
+| `python cli.py sources refresh [--dry-run]` | 数据站写侧：到期源调度刷新→SQLite 服务库+快照（详见 global-news-sources/docs/供数服务.md）；单实例锁（撞锁跳过 exit 0）+12min 抓取预算+3min 收尾预算 | **真抓外网**，任务计划每 15min 触发 |
 | `python cli.py sources serve [--bind/--port]` | 数据站读侧：只读 HTTP 供数（默认 127.0.0.1:8787，Bearer Key 鉴权） | 常驻进程 |
 | `python cli.py sources console [--bind/--port 8786]` | 数据站运维控制台（进程/任务计划/刷新轮/存储；loopback 免密，对外绑定走 Bearer key） | 常驻进程 |
 | `python cli.py sources enable <id> [on\|off]` | 启停来源（行级写 config.local.yaml 覆盖段，保留注释；缺省=翻转当前状态） | 改 config.local.yaml |
@@ -29,9 +29,14 @@
 | `python cli.py publish login [plat]` | 一键登录平台 | 弹浏览器等人工扫码 |
 | `python cli.py publish run [--draft ...]` | 发全部启用平台 | **真发**！必须先 `--draft` |
 | `python cli.py publish run-video --video <mp4> --title <t> [--draft]` | B站/抖音投稿 | **真发**！必须先 `--draft` |
-| `python cli.py video build <id> [--estimate]` | Remotion 出片 | 写 ai-workflow/video/videos/&lt;id&gt;/out |
+| `python cli.py video build <id> [--estimate]` | Remotion 出片（横版 Story / 竖版 VerticalShort，渲染前 story-validate 门禁，QA 报告写 out/verify.json） | 写 ai-workflow/video/videos/&lt;id&gt;/out |
+| `python cli.py video remove <id>` | 删除视频项目目录（videos/&lt;id&gt;/ 整目录，不可恢复） | 删 ai-workflow/video/videos/&lt;id&gt;/ |
 | `python cli.py workbench serve [--bind/--port 8788/--open]` | 板块四·前端工作台（资讯/图文/视频/追踪/设置 5 页 SPA，方案见 docs/第四板块-前端工作台方案.md） | 常驻进程；只写 data/workbench/ 自有 JSON |
 | `python cli.py workbench refresh-yt-track [--force]` | YouTube 热点追踪采集（Data API v3 → yt_channels/yt_videos 快照；任务计划每天一次，方案见 docs/workbench-moa/16-18） | **真抓 YouTube 外网** |
+| `python cli.py workbench analyze-video [--force]` / `gen-script` | 视频工坊：YouTube 视频分析(Gemini 看片→字幕→元数据降级链)与脚本生成(muse) | **真外呼 LLM/YouTube** |
+| `python cli.py workbench build-video [--json]` | 视频制作渲染编排（workbench→CLI 子进程入口：脚本转分镜→建项目→node build.mjs 真渲染，分钟级；日志落 data/workbench/video_builds/） | **真渲染**，写 videos/&lt;project_id&gt;/ 与日志 |
+| `python cli.py workbench gen-post [--json]` | 内容生成成稿编排（workbench→CLI 子进程入口：retrieve 补全→yfinance/东财行情→mplfinance K线图→摆动点支撑阻力→大V/机构观点聚合→LLM 按 X风格/语种/字数档成稿；产物 gen_posts+gen_assets；详见 docs/workbench-moa/21-24） | **真外呼行情+LLM**，写 data/workbench/gen_* |
+| `python cli.py workbench test-llm` | 成稿模型连接测试（设置页「测试连接」按钮的后端：读 compose 段发最小 ping，输出 JSON，不透传传输层异常防泄露 key） | 调 1 次成稿 LLM |
 | `python cli.py workbench status [--json]` | 工作台/数据源双探活 + 设置有效性 | 无 |
 
 ## 目录地图（三板块，可单独下载）
@@ -46,8 +51,11 @@ data/                       运行时数据(gitignored: 缓存/健康/运行产�
 docs/                       方案与操作手册
 scripts/ skills/            工具脚本 / agent 技能
 bin/*_task.bat              24/7 运维: 幂等启动脚本(端口已听则零副作用退出), 由 schtasks 登录自启
-                            (aag-serve/aag-workbench/aag-omniroute/aag-console) + 每15min刷新(aag-sources-refresh/aag-xsurge-refresh)
-                            登记必须经 bin/silent_run.vbs 静默包装(/tr "wscript.exe ...\\silent_run.vbs ...\\xx_task.bat"), 直跑bat会弹黑窗打扰桌面
+                            (aag-serve/aag-workbench/aag-omniroute/aag-console) + 每15min刷新(aag-sources-refresh/:00相位,
+                            aag-xsurge-refresh/:07相位错开) + 每日yttrack(aag-yttrack-refresh 09:00)
+                            + 常驻自愈(aag-resident-watchdog 每15min依次调四个常驻bat, 崩溃最长15min自愈)
+                            登记必须经 bin/silent_run.vbs 静默包装(/tr "wscript.exe ...\\silent_run.vbs ...\\xx_task.bat"), 直跑bat会弹黑窗打扰桌面;
+                            vbs 是同步等待+退出码透传(IgnoreNew/执行时限才生效); 笔记本任务已放开电池限制(拔电不停+错过补跑)
 ```
 
 **运维入口**：桌面快捷方式「数据站控制台」→ `bin/console.bat` 打开数据站自带控制台 `http://127.0.0.1:8786/`（`global-news-sources/sources/console.py` + `global-news-sources/web/console.html`，与数据站同机部署，未来上云随站部署、对外绑定用 Bearer key）；工作台是用户端，只填数据站地址+key 接入。
