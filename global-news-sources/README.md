@@ -93,7 +93,7 @@ items, err = fetch_one("sina_7x24")      # 单源
 
 - 依赖：`pip install requests pyyaml`
 - enabled 开关：板块根放一份 `config.yaml`（只要 `sources:` 段，格式同 ai-workflow/generator/config.yaml）；完整仓库内自动读 `ai-workflow/generator/config.yaml`
-- 备用源 key：同名大写环境变量，或板块根/`auto-publisher/autopub/` 下的 `secret.local.json`
+- 备用源 key：同名大写环境变量，或板块根/发布仓 `autopub/`（兄弟仓 ai-auto-publisher，经 AAG_AUTOPUB_ROOT 解析）下的 `secret.local.json`
 - 缓存与健康数据默认写到项目根 `data/`（完整仓库）；独立使用时写到上级目录的 `data/`（不存在则随代码层级落盘）
 
 ## 加新源

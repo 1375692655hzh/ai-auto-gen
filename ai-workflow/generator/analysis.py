@@ -163,5 +163,6 @@ def run(topic: str | None = None, auto: bool = False) -> dict:
     print("\n===== 第 4 步:生成文章与口播稿 =====")
     r = step4_write(t, outline, related)
     print(f"文章: {r['article']}\n口播: {r['script']}")
-    print("\n提示:文章已进入 autopub 待发目录;建议先 `python auto-publisher/autopub/publish.py --platform zhihu --draft` 单平台试发。")
+    print("\n提示:文章已进入发布仓待发队列;发布板块已拆至独立仓 ai-auto-publisher,"
+          "试发见该仓 README(`python cli.py publish run --draft` 在兄弟仓就位时仍可透传)。")
     return r

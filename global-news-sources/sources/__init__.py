@@ -30,13 +30,13 @@ from sources import health as _health
 
 
 def proj_root() -> Path:
-    """AAG_ROOT > 布局启发式(向上找含 ai-workflow 或 auto-publisher 的目录) > 板块根。"""
+    """AAG_ROOT > 布局启发式(向上找含 ai-workflow/workbench/global-news-sources 的目录) > 板块根。"""
     env = os.environ.get("AAG_ROOT")
     if env:
         return Path(env)
     here = Path(__file__).resolve()
     for p in [here.parents[1]] + list(here.parents[1].parents):
-        if (p / "ai-workflow").is_dir() or (p / "auto-publisher").is_dir():
+        if any((p / d).is_dir() for d in ("ai-workflow", "workbench", "global-news-sources")):
             return p
     return here.parents[1]
 

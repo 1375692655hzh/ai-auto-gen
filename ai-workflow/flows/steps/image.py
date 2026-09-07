@@ -150,8 +150,12 @@ def render_morning_image(ctx, wf, params):
     # ---- 渲染 ----
     sys.path.insert(0, str(GEN_ROOT))
     from image_digest import render_digest_image
-    out_cfg = (load_cfg().get("output") or {}).get("images_dir", "../../auto-publisher/autopub/images")
-    out_dir = Path(out_cfg) if Path(out_cfg).is_absolute() else GEN_ROOT / out_cfg
+    out_cfg = (load_cfg().get("output") or {}).get("images_dir", "")
+    if out_cfg:
+        out_dir = Path(out_cfg) if Path(out_cfg).is_absolute() else GEN_ROOT / out_cfg
+    else:
+        from common import AUTOPUB_ROOT          # 发布仓 autopub/(拆仓后指向兄弟仓)
+        out_dir = AUTOPUB_ROOT / "images"
     out = str(out_dir / f"早报长图-{date}.png")
     render_digest_image(payload, date, out)
     print(f"长图: {out} ({len(cards)}卡 {'[降级版]' if degraded else ''})")

@@ -5,16 +5,16 @@
   python cli.py doctor [--json]            环境体检(密钥/浏览器/队列/账本)
   python cli.py gen <args...>              生成模块(passthrough 到 ai-workflow/generator/main.py)
       例: gen morning / gen daily / gen run morning-paper --auto / gen fetch / gen llm-status
-  python cli.py publish status [--json]    发布账本+待发队列(原生)
-  python cli.py publish login [plat...]    一键登录(passthrough)
-  python cli.py publish run [args...]      发全部平台(passthrough, 支持 --draft/--platforms/--file)
-  python cli.py publish run-video <args..> 视频发布 B站/抖音(passthrough)
   python cli.py video build <id> [args..]  Remotion 出片(passthrough)
+  python cli.py publish status [--json]    发布账本+待发队列(读兄弟仓 ai-auto-publisher)
+  python cli.py publish login/run/run-video  发布命令(薄 shim: 兄弟仓 ai-auto-publisher 就位则透传)
 
 三板块布局(可单独下载):
   global-news-sources/  来源采集(注册表+fetchers+缓存健康)
   ai-workflow/          生成工作流(flows 引擎+generator+video)
-  auto-publisher/       自动发布(autopub 浏览器引擎+adapters-kit+publish 门面)
+  workbench/            前端工作台(FastAPI 后端+免构建 SPA)
+  (发布板块 2026-09-07 拆为独立私有仓 ai-auto-publisher:
+   https://github.com/1375692655hzh/ai-auto-publisher — 克隆为兄弟目录后 publish 命令自动恢复)
 
 退出码约定(agent 靠此决策):
   0 成功 | 2 需人工介入(登录/审核/验证码) | 3 业务失败 | 4 配置缺失
@@ -32,10 +32,35 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent
 GNS = ROOT / "global-news-sources"        # 板块一: 来源
 AIWF = ROOT / "ai-workflow"               # 板块二: 工作流
-PUB = ROOT / "auto-publisher"             # 板块三: 发布
 WB = ROOT / "workbench"                   # 板块四: 前端工作台
-AUTOPUB = PUB / "autopub"
 EXIT_OK, EXIT_HUMAN, EXIT_FAIL, EXIT_CONFIG = 0, 2, 3, 4
+
+PUB_REPO_URL = "https://github.com/1375692655hzh/ai-auto-publisher"
+
+
+def _autopub_root() -> Path:
+    """发布板块 2026-09-07 拆为独立仓 ai-auto-publisher(私有)。
+    解析顺序: AAG_AUTOPUB_ROOT 环境变量 > 兄弟仓 ../ai-auto-publisher/autopub
+    > 仓内旧路径(未拆分的老布局); 都不在也指向兄弟仓路径, 让报错路径说真话。"""
+    env = os.environ.get("AAG_AUTOPUB_ROOT")
+    if env:
+        return Path(env)
+    for p in (ROOT.parent / "ai-auto-publisher" / "autopub",
+              ROOT / "auto-publisher" / "autopub"):
+        if p.is_dir():
+            return p
+    return ROOT.parent / "ai-auto-publisher" / "autopub"
+
+
+AUTOPUB = _autopub_root()
+PUB = AUTOPUB.parent                      # 发布仓根(含 publish/ 门面包)
+
+
+def _publish_missing() -> int:
+    print(f"发布板块已拆至独立仓 ai-auto-publisher ({PUB_REPO_URL})", file=sys.stderr)
+    print("克隆为兄弟目录 ../ai-auto-publisher 或设 AAG_AUTOPUB_ROOT 后, 本命令自动恢复。",
+          file=sys.stderr)
+    return EXIT_CONFIG
 
 # Windows 任务计划/重定向场景: stdout 回退 GBK 会导致 ⚠ 等符号崩进程(部署实录 2026-09-02)
 for _s in (sys.stdout, sys.stderr):
@@ -99,17 +124,22 @@ def doctor(json_out: bool = False) -> int:
     checks.append(_check("中文字体(长图渲染)", any(Path(f).exists() for f in fonts),
                          "config.yaml fonts: 段指定本机字体路径"))
     # LLM 密钥
+    pub_present = AUTOPUB.is_dir()
     secret = AUTOPUB / "secret.local.json"
     has_key = secret.exists() or bool(os.environ.get("AUTOPUB_API_KEY"))
     checks.append(_check("LLM 密钥", has_key,
-                         "python auto-publisher/autopub/webapp/app.py 网页里填, 或设 AUTOPUB_API_KEY"))
+                         "发布仓网页控制台填(ai-auto-publisher/autopub/webapp), 或设 AUTOPUB_API_KEY",
+                         warn=not pub_present))
+    # 发布仓就位(拆仓后为兄弟仓 ai-auto-publisher)
+    checks.append(_check("发布仓(autopub)", pub_present,
+                         f"克隆 {PUB_REPO_URL} 为兄弟目录, 或设 AAG_AUTOPUB_ROOT", warn=True))
     # Chrome 调试口(CDP 发布模式)
     try:
         urllib.request.urlopen("http://127.0.0.1:9222/json/version", timeout=2)
         checks.append(_check("Chrome 调试口(9222)", True))
     except Exception:
         checks.append(_check("Chrome 调试口(9222)", False,
-                             "双击 auto-publisher/autopub/chrome_debug.bat 启动自动化 Chrome(发布前必须)",
+                             "双击发布仓 autopub/chrome_debug.bat 启动自动化 Chrome(发布前必须)",
                              warn=True))
     # 待发队列
     queue = AUTOPUB / "articles"
@@ -123,7 +153,8 @@ def doctor(json_out: bool = False) -> int:
             n_pub = len(json.loads(state_f.read_text(encoding="utf-8")))
         except Exception:
             pass
-    checks.append(_check(f"发布账本({n_pub}篇已记录)", state_f.exists()))
+    checks.append(_check(f"发布账本({n_pub}篇已记录)", state_f.exists(),
+                         "发布仓未就位或尚无账本(不影响源/工作流/工作台)", warn=True))
     # 运行时数据根
     (ROOT / "data").mkdir(exist_ok=True)
     checks.append(_check("data/ 可写", os.access(ROOT / "data", os.W_OK)))
@@ -158,6 +189,8 @@ def doctor(json_out: bool = False) -> int:
 # ---------- publish status: 原生读账本 ----------
 
 def publish_status(json_out: bool = False) -> int:
+    if not AUTOPUB.is_dir():
+        return _publish_missing()
     state_f = AUTOPUB / "state.json"
     data = {}
     if state_f.exists():
@@ -601,7 +634,7 @@ def main() -> int:
     p_d = sub.add_parser("doctor", help="环境体检")
     p_d.add_argument("--json", action="store_true")
 
-    p_s = sub.add_parser("publish", help="发布板块")
+    p_s = sub.add_parser("publish", help="发布板块(已拆独立仓 ai-auto-publisher, 就位则透传)")
     psub = p_s.add_subparsers(dest="sub", required=True)
     ps_st = psub.add_parser("status", help="账本+队列")
     ps_st.add_argument("--json", action="store_true")
@@ -738,7 +771,12 @@ def main() -> int:
     pv_r = vsub.add_parser("remove", help="删除视频项目目录(videos/<id>/ 整目录)")
     pv_r.add_argument("project_id", help="项目 id(videos/ 下目录名)")
 
-    args = ap.parse_args()
+    argv = sys.argv[1:]
+    if len(argv) >= 2 and argv[0] == "publish" and argv[1] in ("login", "run", "run-video"):
+        # argparse REMAINDER 抓不到以 - 开头的首参(publish run --draft 曾报 unrecognized), 预切透传
+        args = argparse.Namespace(cmd="publish", sub=argv[1], args=argv[2:])
+    else:
+        args = ap.parse_args()
 
     if args.cmd == "doctor":
         return doctor(json_out=args.json)
@@ -751,6 +789,8 @@ def main() -> int:
     if args.cmd == "gen":
         return _passthrough(AIWF / "generator" / "main.py", args.args)
     if args.cmd == "publish":
+        if not AUTOPUB.is_dir():
+            return _publish_missing()
         if args.sub == "status":
             return publish_status(json_out=args.json)
         if args.sub == "targets":

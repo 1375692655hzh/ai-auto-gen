@@ -16,7 +16,24 @@ import yaml
 GEN_ROOT = Path(__file__).resolve().parent          # ai-workflow/generator
 AIWF_ROOT = GEN_ROOT.parent                          # ai-workflow
 PROJ_ROOT = AIWF_ROOT.parent                         # 项目根
-AUTOPUB_ROOT = PROJ_ROOT / "auto-publisher" / "autopub"
+
+
+def _autopub_root() -> Path:
+    """发布板块 2026-09-07 拆为独立仓 ai-auto-publisher(私有)。
+    解析顺序: AAG_AUTOPUB_ROOT 环境变量 > 兄弟仓 ../ai-auto-publisher/autopub
+    > 仓内旧路径(未拆分的老布局)。"""
+    import os
+    env = os.environ.get("AAG_AUTOPUB_ROOT")
+    if env:
+        return Path(env)
+    for p in (PROJ_ROOT.parent / "ai-auto-publisher" / "autopub",
+              PROJ_ROOT / "auto-publisher" / "autopub"):
+        if p.is_dir():
+            return p
+    return PROJ_ROOT.parent / "ai-auto-publisher" / "autopub"   # 不存在也指向兄弟仓, 让报错路径说真话
+
+
+AUTOPUB_ROOT = _autopub_root()
 
 # 让 generator 下的脚本无论从哪个 cwd 启动都能 import 同目录模块;
 # 同时挂上板块一(global-news-sources + fetchers)与板块二根(flows 包)
@@ -115,10 +132,19 @@ def load_cfg() -> dict:
 
 
 def out_dir(key: str) -> Path:
-    """按配置解析输出目录并确保存在。key: articles_dir / scripts_dir / research_dir"""
-    p = Path(load_cfg()["output"][key])
-    if not p.is_absolute():
-        p = GEN_ROOT / p
+    """按配置解析输出目录并确保存在。key: articles_dir / scripts_dir / research_dir
+    articles_dir/images_dir 缺省时落发布仓 autopub/(拆仓后经 AUTOPUB_ROOT 解析到兄弟仓)。"""
+    raw = str((load_cfg().get("output") or {}).get(key) or "").strip()
+    if raw:
+        p = Path(raw)
+        if not p.is_absolute():
+            p = GEN_ROOT / p
+    elif key == "articles_dir":
+        p = AUTOPUB_ROOT / "articles"
+    elif key == "images_dir":
+        p = AUTOPUB_ROOT / "images"
+    else:
+        raise KeyError(f"config.yaml output.{key} 未配置且无发布仓兜底")
     p.mkdir(parents=True, exist_ok=True)
     return p
 
@@ -154,10 +180,10 @@ def llm_require_config():
     llm = _autopub_llm()
     if not llm.is_configured():
         sys.exit(
-            "模型 API 未配置。三种方式任选:\n"
-            "  1. 打开 autopub 网页控制台(python auto-publisher/autopub/webapp/app.py → 127.0.0.1:5001)在「模型 API 设置」里填\n"
-            "  2. 设环境变量 AUTOPUB_API_KEY,并在 auto-publisher/autopub/config.yaml 的 model: 段填 provider 和 model\n"
-            "  3. 直接编辑 auto-publisher/autopub/secret.local.json(provider/api_key/model/base_url)"
+            "模型 API 未配置。三种方式任选(发布仓 autopub 目录: AAG_AUTOPUB_ROOT > 兄弟仓 ../ai-auto-publisher/autopub):\n"
+            "  1. 打开 autopub 网页控制台(autopub/webapp/app.py → 127.0.0.1:5001)在「模型 API 设置」里填\n"
+            "  2. 设环境变量 AUTOPUB_API_KEY,并在 autopub/config.yaml 的 model: 段填 provider 和 model\n"
+            "  3. 直接编辑 autopub/secret.local.json(provider/api_key/model/base_url)"
         )
     return llm
 

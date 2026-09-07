@@ -23,8 +23,16 @@ def repo_root() -> Path:
 
 
 def _autopub_root() -> Path:
-    r = repo_root() / "auto-publisher" / "autopub"
-    return r if r.is_dir() else BOARD
+    """发布板块 2026-09-07 拆为独立仓 ai-auto-publisher(私有)。
+    解析顺序: AAG_AUTOPUB_ROOT 环境变量 > 兄弟仓 > 仓内旧路径 > 板块根兜底。"""
+    env = os.environ.get("AAG_AUTOPUB_ROOT")
+    if env:
+        return Path(env)
+    for p in (repo_root().parent / "ai-auto-publisher" / "autopub",
+              repo_root() / "auto-publisher" / "autopub"):
+        if p.is_dir():
+            return p
+    return BOARD
 
 
 AUTOPUB_ROOT = _autopub_root()
@@ -44,7 +52,7 @@ def load_cfg() -> dict:
 
 
 def secret_value(key: str) -> str:
-    """同名大写环境变量优先, 其次 auto-publisher/autopub/secret.local.json, 兜底板块根。"""
+    """同名大写环境变量优先, 其次发布仓 autopub/secret.local.json, 兜底板块根。"""
     env = os.environ.get(key.upper())
     if env:
         return env

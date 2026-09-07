@@ -1,6 +1,6 @@
 output:
-  articles_dir: ../../auto-publisher/autopub/articles
-  images_dir: ../../auto-publisher/autopub/images
+  # articles_dir/images_dir 不配: 默认落发布仓 autopub/(经 common.AUTOPUB_ROOT 解析:
+  # AAG_AUTOPUB_ROOT 环境变量 > 兄弟仓 ../ai-auto-publisher/autopub > 仓内旧路径)
   scripts_dir: output/口播
   research_dir: output/research
 sources:

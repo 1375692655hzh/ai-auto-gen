@@ -4,25 +4,40 @@
   flows 清单        ai-workflow/flows/*/workflow.yaml (正则取 title, 不 import flows 引擎)
   runs 状态机       data/runs/<流>/<日期>/run.json
   生成产物          ai-workflow/generator/output/
-  待发队列          auto-publisher/autopub/articles/
-  发布账本          auto-publisher/autopub/state.json  (只读!)
+  待发队列          <发布仓>/autopub/articles/   (发布板块 2026-09-07 拆为独立仓 ai-auto-publisher)
+  发布账本          <发布仓>/autopub/state.json  (只读! 仓缺失时两队列为空, 不报错)
   视频项目          ai-workflow/video/videos/*/(project.json|out/)
 触发类动作(flows run/publish)本期一律不做, 前端按钮是桩; 未来也只经 subprocess 调 cli.py。
 """
 
 import json
+import os
 import re
 import time
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[2]         # workbench/server/views.py → 仓库根
 AIWF = REPO / "ai-workflow"
-PUB = REPO / "auto-publisher"
 RUNS = REPO / "data" / "runs"
 OUTPUT = AIWF / "generator" / "output"
-QUEUE = PUB / "autopub" / "articles"
-LEDGER = PUB / "autopub" / "state.json"
 VIDEOS = AIWF / "video" / "videos"
+
+
+def _autopub_dir() -> Path:
+    """发布仓 autopub 目录: AAG_AUTOPUB_ROOT 环境变量 > 兄弟仓 > 仓内旧路径(可能不存在)。"""
+    env = os.environ.get("AAG_AUTOPUB_ROOT")
+    if env:
+        return Path(env)
+    for p in (REPO.parent / "ai-auto-publisher" / "autopub",
+              REPO / "auto-publisher" / "autopub"):
+        if p.is_dir():
+            return p
+    return REPO.parent / "ai-auto-publisher" / "autopub"
+
+
+_AUTOPUB = _autopub_dir()
+QUEUE = _AUTOPUB / "articles"
+LEDGER = _AUTOPUB / "state.json"
 
 
 def _read_json(p: Path, default):
