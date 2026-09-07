@@ -990,6 +990,35 @@ def fetch_nasdaq_earnings() -> list:
              "source": "Nasdaq"}]
 
 
+def fetch_earnings_week(max_days: int = 5) -> list:
+    """本周财报前瞻: 明天起未来 max_days 个交易日, 每天一条聚合(与 nasdaq_earnings
+    只出今日互补)。同接口循环日期参数, 间隔 0.5s 防限频; 空日(假期)跳过。"""
+    out = []
+    day = datetime.datetime.now(_BJ).date() + datetime.timedelta(days=1)
+    while len(out) < int(max_days):
+        if day.weekday() < 5:                          # 跳过周末
+            d = day.strftime("%Y-%m-%d")
+            r = requests.get("https://api.nasdaq.com/api/calendar/earnings",
+                             params={"date": d},
+                             headers={"User-Agent": UA, "Accept": "application/json"},
+                             timeout=15)
+            r.raise_for_status()
+            rows = ((r.json().get("data") or {}).get("rows")) or []
+            if rows:
+                picks = []
+                for x in rows[:12]:
+                    eps = x.get("epsForecast") or ""
+                    picks.append(f"{x.get('symbol')}({x.get('time') or ''}"
+                                 f"{', 预期' + eps if eps else ''})")
+                wk = "一二三四五六日"[day.weekday()]
+                out.append({"time": d,
+                            "text": f"周{wk}美股财报 {len(rows)} 家: " + "、".join(picks),
+                            "source": "Nasdaq"})
+            time.sleep(0.5)
+        day += datetime.timedelta(days=1)
+    return out
+
+
 # ---------- NEWS 项目(D:\AI项目\NEWS)移植 2026-08-31: 见闻快讯/金十日历/长桥海豚, 全零鉴权 ----------
 
 

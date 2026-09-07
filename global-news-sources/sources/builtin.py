@@ -344,6 +344,12 @@ def _earnings(conf):
     return gs.fetch_nasdaq_earnings()
 
 
+@source("earnings_week", "market", "本周美股财报前瞻",
+        ttl_min=720, default_enabled=True)
+def _earnings_week(conf):
+    return gs.fetch_earnings_week(int(conf.get("max_days", 5)))
+
+
 @source("gelonghui", "peer_article", "格隆汇精选",
         ttl_min=120, default_enabled=True)
 def _glh(conf):
