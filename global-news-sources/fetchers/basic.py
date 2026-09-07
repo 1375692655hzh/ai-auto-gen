@@ -42,8 +42,21 @@ def fetch_sina_724(page_size: int = 100) -> list:
     return out
 
 
+def _is_jin10_en(data: dict, text: str) -> bool:
+    """金十英文条目判定: 双信号都中才判英文(误丢中文代价大于漏放英文)。
+    英文条目 data 无 source/pic 等字段(实测), 但字段结构可能变, 叠加内容检测兜底。"""
+    if data.get("source"):
+        return False
+    sample = (text or "")[:300]
+    cjk = sum(1 for c in sample if "一" <= c <= "鿿")
+    latin = sum(1 for c in sample if c.isascii() and c.isalpha())
+    return latin >= 10 and cjk < 5
+
+
 def fetch_jin10_flash(page_size: int = 50) -> list:
-    """金十数据快讯(中文全球, 400-700条/天, 时间精确到秒)。"""
+    """金十数据快讯(中文全球, 400-700条/天, 时间精确到秒)。
+    官方 flash_newest.js 是中英混发流(英文版快讯推进同一条流, 实测占比~44%,
+    且常与中文版同新闻成对), 按 _is_jin10_en 滤除, 只收中文。"""
     import json
     r = requests.get(
         "https://www.jin10.com/flash_newest.js",
@@ -55,9 +68,10 @@ def fetch_jin10_flash(page_size: int = 50) -> list:
     arr = json.loads(m.group(1)) if m else []
     out = []
     for it in arr[:int(page_size)]:
-        text = _strip_html(((it.get("data") or {}).get("content") or ""))
+        data = it.get("data") or {}
+        text = _strip_html(data.get("content") or "")
         t = (it.get("time") or "").strip()[:16]
-        if text and t:
+        if text and t and not _is_jin10_en(data, text):
             out.append({"time": t, "text": text, "source": "金十数据"})
     return out
 
