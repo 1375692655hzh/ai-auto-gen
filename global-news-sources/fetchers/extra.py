@@ -833,6 +833,77 @@ def fetch_calendar() -> list:
     return out
 
 
+FF_COUNTRY = {"USD": "美国", "EUR": "欧元区", "GBP": "英国", "JPY": "日本",
+              "AUD": "澳大利亚", "CAD": "加拿大", "CHF": "瑞士", "NZD": "新西兰",
+              "CNY": "中国", "SGD": "新加坡", "MXN": "墨西哥", "ALL": "全球"}
+FF_IMPACT = {"High": "重磅", "Medium": "重要", "Holiday": "休市"}
+
+
+def fetch_ff_calendar_week() -> list:
+    """ForexFactory 本周经济日历(一周前瞻, Medium+High, Low 噪声丢弃)。
+    nfs.faireconomy.media 是 ForexFactory 官方数据分发域; date 为 ISO(带 GMT
+    偏移), 转北京时间。text 在 fetcher 层合成好(store 只认 text 字段)。"""
+    r = _get("https://nfs.faireconomy.media/ff_calendar_thisweek.json",
+             "https://www.forexfactory.com/")
+    out = []
+    for it in r.json():
+        imp = (it.get("impact") or "").strip()
+        if imp not in FF_IMPACT:                      # Low 丢弃, Holiday 保留
+            continue
+        title = (it.get("title") or "").strip()
+        if not title:
+            continue
+        try:
+            t = datetime.datetime.fromisoformat(it["date"]).astimezone(
+                datetime.timezone(datetime.timedelta(hours=8))).strftime("%Y-%m-%d %H:%M")
+        except (KeyError, ValueError):
+            continue
+        parts = [FF_COUNTRY.get(it.get("country", ""), it.get("country", "")), title]
+        if it.get("forecast"):
+            parts.append(f"预期 {it['forecast']}")
+        if it.get("previous"):
+            parts.append(f"前值 {it['previous']}")
+        out.append({"time": t,
+                    "text": " ".join(p for p in parts if p) + f"（{FF_IMPACT[imp]}）",
+                    "source": "ForexFactory"})
+    return out
+
+
+def fetch_calendar_week(page_size: int = 150) -> list:
+    """一周财经前瞻(华尔街见闻经济日历·明天起未来7天, importance>=2, 中文)。
+    与 calendar 源(只出今天)同接口互补不重叠; 时间戳带日期, 天然支撑周前瞻。"""
+    now = datetime.datetime.now()
+    start = (now + datetime.timedelta(days=1)).replace(hour=0, minute=0, second=0)
+    r = _get("https://api-one-wscn.awtmt.com/apiv1/finance/macrodatas",
+             "https://wallstreetcn.com/calendar",
+             params={"start": int(start.timestamp()),
+                     "end": int(start.timestamp()) + 7 * 86400 - 1}).json()
+    items = (r.get("data") or {}).get("items") or []
+    out = []
+    for i in items:
+        ts = i.get("public_date") or 0
+        if not ts:
+            continue
+        imp = int(i.get("importance") or 0)
+        if imp < 2:
+            continue
+        event = (i.get("title") or i.get("event") or "").strip()
+        if not event:
+            continue
+        head = "【重磅】" if imp >= 3 else ""
+        tail = []
+        if i.get("forecast"):
+            tail.append(f"预期 {i['forecast']}")
+        if i.get("actual"):
+            tail.append(f"前值 {i['actual']}")
+        out.append({"time": datetime.datetime.fromtimestamp(ts).strftime("%Y-%m-%d %H:%M"),
+                    "text": f"{head}{i.get('country', '')} {event}"
+                            + ("：" + " / ".join(tail) if tail else ""),
+                    "source": "一周前瞻"})
+    out.sort(key=lambda x: x["time"])
+    return out[:int(page_size)]
+
+
 # ---------- 外围市场(新浪全球指数) ----------
 
 MARKET_CODES = {  # 新浪代码 → 显示名

@@ -206,6 +206,19 @@ def _calendar(conf):
     return ges.fetch_calendar()
 
 
+@source("ff_calendar_week", "calendar", "ForexFactory一周经济日历",
+        ttl_min=240, default_enabled=False, markets=["全球", "美国"],
+        channel="data_vendor", lang="en")  # 域限频紧(连抓即429, 窗口>70s), 按需启用
+def _ff_week(conf):
+    return ges.fetch_ff_calendar_week()
+
+
+@source("calendar_week", "calendar", "一周财经前瞻(华尔街见闻·明起7天)",
+        ttl_min=360, default_enabled=True, markets=["全球"], lang="zh")
+def _cal_week(conf):
+    return ges.fetch_calendar_week(int(conf.get("page_size", 150)))
+
+
 @source("global_markets", "market", "全球市场行情摘要", ttl_min=30)
 def _markets(conf):
     return ges.fetch_global_markets()
