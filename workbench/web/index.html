@@ -9,7 +9,7 @@
 <body>
 <!-- 主题防闪: 首绘前按 localStorage 缓存挂 body.light;
      权威值由 app.js 启动时拉 /settings 校正(见 WB.theme.syncFromServer) -->
-<script>try{document.body.classList.toggle("light",localStorage.getItem("wb_theme")==="light")}catch(e){}</script>
+<script>try{document.body.classList.toggle("light",localStorage.getItem("wb_theme")!=="dark")}catch(e){}</script>
 <div id="app">
   <!-- 顶部横向主导航(火山控制台结构: 主页面在上, 子页面在左) -->
   <header class="topbar">

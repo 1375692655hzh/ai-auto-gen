@@ -26,7 +26,7 @@ DEFAULTS = {
         "api_key": "",                              # 仅存服务端, 永不明文回显给浏览器
         "timeout_s": 15,
     },
-    "ui": {"theme": "dark", "page_size": 100, "remember_filters": True},
+    "ui": {"theme": "light", "page_size": 100, "remember_filters": True},   # 出厂默认亮色
     "translate": {                                  # 蹭蹭流量推文翻译(OpenAI兼容 /chat/completions)
         "base_url": "",                             # 如 https://api.deepseek.com
         "api_key": "",                              # 仅存服务端, 打码回显
