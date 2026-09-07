@@ -432,8 +432,12 @@ def workbench_cmd(args) -> int:
         sys.path.insert(0, str(WB))
         from server import x_surge
         hours = 48 if (args.range == "48h") else 24
-        rep = x_surge.collect(range_h=hours, limit=args.limit, force=args.force)
-        x_surge.fetch_rss()                         # SoPilot 热帖(蹭蹭流量页数据源)
+        try:
+            rep = x_surge.collect(range_h=hours, limit=args.limit, force=args.force)
+        except Exception as e:                      # 纯工作台部署(无数据站): 互动采集跳过不拦 RSS
+            rep = {"msg": f"互动采集跳过(数据站不可达: {type(e).__name__})"}
+            print(json.dumps(rep, ensure_ascii=False))
+        x_surge.fetch_rss()                         # SoPilot 热帖(蹭蹭流量页数据源, 仅依赖工作台自身)
         return 0 if not rep.get("circuit_break") else 3
     if args.sub == "refresh-yt-track":
         sys.path.insert(0, str(WB))

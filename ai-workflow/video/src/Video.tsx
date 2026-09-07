@@ -12,6 +12,7 @@ import {
 	StackedTpl,
 	VersusTpl,
 } from "./templates-extra";
+import { VPointsTpl, VStatTpl, VTitleTpl } from "./templates-vertical";
 
 const TEMPLATES: Record<string, React.FC<SceneProps>> = {
 	title: TitleTpl,
@@ -24,6 +25,9 @@ const TEMPLATES: Record<string, React.FC<SceneProps>> = {
 	versus: VersusTpl,
 	checklist: ChecklistTpl,
 	conclusion: ConclusionTpl,
+	vtitle: VTitleTpl,
+	vstat: VStatTpl,
+	vpoints: VPointsTpl,
 };
 
 export const Video: React.FC = () => {

@@ -9,19 +9,46 @@ WB.pages.settings = {
            ui: { theme: "dark", page_size: 100, remember_filters: true },
            translate: { base_url: "", api_key: "", model: "" },
            youtube: { api_key: "" },
+           gemini: { api_key: '', model: 'gemini-3.6-flash' },
+           compose: { base_url: "", api_key: "", model: "" },
+           finnhub: { api_key: "" },
+           market: { source_pref: "auto" },
+           gen_defaults: { lang: "en", tier: "free", template: "catalyst-take" },
            cloud: { endpoint: "", account: "", sync_enabled: false } },
       hasKey: false, keyTail: "", testResult: null, testing: false,
       tHasKey: false, tKeyTail: "",
       yHasKey: false, yKeyTail: "",
+      gHasKey: false, gKeyTail: "",
+      cHasKey: false, cKeyTail: "",
+      fHasKey: false, fKeyTail: "",
+      llmTest: false, llmTestResult: null,
+      // 与 article.js genTpls 同步维护
+      genTpls: [{ v: "catalyst-take", t: "事件快评 · 单票突发催化(默认)" },
+                { v: "earnings-print", t: "业绩拆解 · 财报/指引解读" },
+                { v: "macro-print", t: "数据读数 · CPI/NFP 等宏观打印" },
+                { v: "policy-call", t: "政策纪要 · 央行决议/监管" },
+                { v: "tape-recap", t: "盘面综述 · 开收盘/盘中扫描" },
+                { v: "thesis-note", t: "深度观点 · 非事件驱动论点" },
+                { v: "risk-flag", t: "风险提示 · 预警/证伪" },
+                { v: "news-flash", t: "资讯速递 · 单条重点资讯快报", zero: 1 },
+                { v: "fact-sheet", t: "披露卡 · 公告/财报要点陈列", zero: 1 },
+                { v: "week-ahead", t: "一周日历 · 下周财经事件表", zero: 1 },
+                { v: "earnings-watch", t: "财报前瞻 · 本周财报票+关注点", zero: 1 },
+                { v: "funding-trail", t: "融资脉络 · 历轮融资时间线", zero: 1 }],
       check: null, saving: false,
     };
   },
   methods: {
     async load() {
       const d = await WB.api.get("/settings");
+      d.market = { source_pref: "auto", ...(d.market || {}) };
+      d.gen_defaults = { lang: "en", tier: "free", template: "catalyst-take", ...(d.gen_defaults || {}) };
       this.s = d; this.hasKey = d.source.has_key; this.keyTail = d.source.key_tail;
       this.tHasKey = d.translate.has_key; this.tKeyTail = d.translate.key_tail;
       this.yHasKey = (d.youtube || {}).has_key; this.yKeyTail = (d.youtube || {}).key_tail;
+      this.gHasKey = (d.gemini || {}).has_key; this.gKeyTail = (d.gemini || {}).key_tail;
+      this.cHasKey = (d.compose || {}).has_key; this.cKeyTail = (d.compose || {}).key_tail;
+      this.fHasKey = (d.finnhub || {}).has_key; this.fKeyTail = (d.finnhub || {}).key_tail;
       this.applyTheme();
     },
     async save() {
@@ -34,6 +61,14 @@ WB.pages.settings = {
           translate: { base_url: this.s.translate.base_url,
                        api_key: this.s.translate.api_key, model: this.s.translate.model },
           youtube: { api_key: (this.s.youtube || {}).api_key || "" },
+          gemini: { api_key: (this.s.gemini || {}).api_key || '',
+                    model: (this.s.gemini || {}).model || 'gemini-3.6-flash' },
+          compose: { base_url: (this.s.compose || {}).base_url || "",
+                     api_key: (this.s.compose || {}).api_key || "",
+                     model: (this.s.compose || {}).model || "" },
+          finnhub: { api_key: (this.s.finnhub || {}).api_key || "" },
+          market: { ...this.s.market },
+          gen_defaults: { ...this.s.gen_defaults },
         });
         this.s.source.api_key = "";                 // 不保留明文
         this.hasKey = d.source.has_key; this.keyTail = d.source.key_tail;
@@ -41,6 +76,12 @@ WB.pages.settings = {
         this.tHasKey = d.translate.has_key; this.tKeyTail = d.translate.key_tail;
         if (this.s.youtube) this.s.youtube.api_key = "";
         this.yHasKey = (d.youtube || {}).has_key; this.yKeyTail = (d.youtube || {}).key_tail;
+        if (this.s.gemini) this.s.gemini.api_key = '';
+        this.gHasKey = (d.gemini || {}).has_key; this.gKeyTail = (d.gemini || {}).key_tail;
+        if (this.s.compose) this.s.compose.api_key = "";
+        this.cHasKey = (d.compose || {}).has_key; this.cKeyTail = (d.compose || {}).key_tail;
+        if (this.s.finnhub) this.s.finnhub.api_key = "";
+        this.fHasKey = (d.finnhub || {}).has_key; this.fKeyTail = (d.finnhub || {}).key_tail;
         this.applyTheme();
         WB.toast("设置已保存");
         this.$root.refreshHealth && this.$root.refreshHealth();
@@ -63,6 +104,19 @@ WB.pages.settings = {
       }
       this.testing = false;
     },
+    async testLlm() {
+      this.llmTest = true; this.llmTestResult = null;
+      try {
+        const saved = await WB.api.put("/settings", { compose: { ...this.s.compose } });
+        this.s.compose.api_key = "";
+        this.cHasKey = (saved.compose || {}).has_key;
+        this.cKeyTail = (saved.compose || {}).key_tail;
+        const d = await WB.api.post("/test-llm", {});
+        this.llmTestResult = { ok: d.ok, text: d.ok ? "连接正常 · " + d.model : d.error };
+      } catch (e) {
+        this.llmTestResult = { ok: false, text: e.error || "连接测试失败" };
+      } finally { this.llmTest = false; }
+    },
     applyTheme() {
       WB.theme ? WB.theme.apply(this.s.ui.theme)
                : document.body.classList.toggle("light", this.s.ui.theme === "light");
@@ -77,6 +131,13 @@ WB.pages.settings = {
     <!-- 1. 信息源连接 -->
     <div class="card">
       <h3>信息源连接</h3>
+      <div class="key-guide">
+        <b>注册来源:</b> 无需注册 —— 本机(127.0.0.1)模式免密直连;
+        局域网/云端模式向数据站管理员索取 Key(管理员在
+        <code>global-news-sources/config/api_keys.local.json</code> 创建, 可设每分钟/每日配额)。<br>
+        <b>说明:</b> 本工作台全部资讯/推荐数据都从数据站读取, 这一栏不通则资讯页为空。
+      </div>
+
       <div class="form-row"><label>连接模式</label>
         <div class="radio-group">
           <label><input type="radio" value="local" v-model="s.source.mode"> 本机(127.0.0.1)</label>
@@ -122,6 +183,16 @@ WB.pages.settings = {
     <!-- 3. 翻译模型(蹭蹭流量推文翻译, OpenAI 兼容 /chat/completions) -->
     <div class="card">
       <h3>翻译模型 <span class="muted">蹭蹭流量推文翻译 · 采集轮自动补译</span></h3>
+      <div class="key-guide">
+        <b>注册来源:</b>
+        <a href="https://platform.deepseek.com" target="_blank" rel="noopener">DeepSeek 开放平台</a>
+        → 注册 → 充值 → 「API keys」创建( sk- 开头); 任意 OpenAI 兼容服务也可
+        (月之暗面/硅基流动等, 换 base_url + model 即可)。<br>
+        <b>说明:</b> 只服务蹭蹭流量推文翻译(采集轮自动补译, 每轮 ≤60 条);
+        配置仅存本工作台(data/workbench/settings.json), 由工作台自己的采集任务执行——
+        <b>只单独部署工作台、没有数据站的用户, 照常在此配置即可生效</b>(蹭蹭流量的 RSS 源不依赖数据站)。
+      </div>
+
       <div class="form-row"><label>接口地址</label>
         <input type="text" v-model="s.translate.base_url" placeholder="https://api.deepseek.com"
                style="width:320px"></div>
@@ -136,9 +207,93 @@ WB.pages.settings = {
       <button class="btn primary" :disabled="saving" @click="save">保存设置</button>
     </div>
 
+    <!-- 4. 成稿模型(内容生成专用 LLM, 独立于翻译链, 不动翻译额度) -->
+    <div class="card">
+      <h3>成稿模型 <span class="muted">内容生成页·开始生成专用 · 独立计费</span></h3>
+      <div class="key-guide">
+        <b>注册来源:</b> 同翻译模型 ——
+        <a href="https://platform.deepseek.com" target="_blank" rel="noopener">DeepSeek 开放平台</a>
+        或任意 OpenAI 兼容服务。<br>
+        <b>说明:</b> 只服务内容生成页「开始生成」的成稿环节, 独立计费不动翻译额度;
+        配置仅存本工作台, 单独部署工作台的用户照常可用。
+      </div>
+
+      <div class="form-row"><label>接口地址</label>
+        <input type="text" v-model="s.compose.base_url" placeholder="OpenAI 兼容接口, 如 https://api.deepseek.com"
+               style="width:320px"></div>
+      <div class="form-row"><label>API Key</label>
+        <input type="password" v-model="s.compose.api_key"
+               :placeholder="cHasKey ? '已配置(尾号 ' + cKeyTail + '), 留空保持不变' : 'sk-...'"
+               style="width:320px">
+        <span class="muted">仅存本机服务端, 不回显明文</span></div>
+      <div class="form-row"><label>模型</label>
+        <input type="text" v-model="s.compose.model" placeholder="如 deepseek-v4-flash"
+               style="width:220px"></div>
+      <p class="muted">未配置时「开始生成」报配置缺失, 不回落翻译链</p>
+      <button class="btn" :disabled="llmTest || saving" @click="testLlm">{{ llmTest ? '测试中…' : '测试连接' }}</button>
+      <div v-if="llmTestResult" class="test-result" :class="llmTestResult.ok ? 'ok' : 'fail'">
+        {{ llmTestResult.ok ? '✓ ' : '✗ ' }}{{ llmTestResult.text }}</div>
+      <button class="btn primary" :disabled="saving" @click="save">保存设置</button>
+    </div>
+
+    <!-- 5. Finnhub(内容生成·聚合分析增强, 投行评级/目标价, 仅美股) -->
+    <div class="card">
+      <h3>Finnhub <span class="muted">内容生成·聚合分析增强 · 投行评级/目标价(仅美股)</span></h3>
+      <div class="key-guide">
+        <b>注册来源:</b>
+        <a href="https://finnhub.io/register" target="_blank" rel="noopener">finnhub.io 注册</a>
+        (邮箱即可, 免费 60 次/分), 注册后 Dashboard → API Key 复制。<br>
+        <b>说明:</b> 只增强内容生成·聚合分析的美股投行评级/目标价; 留空则该环节自动跳过。
+      </div>
+
+      <div class="form-row"><label>API Key</label>
+        <input type="password" v-model="s.finnhub.api_key"
+               :placeholder="fHasKey ? '已配置(尾号 ' + fKeyTail + '), 留空保持不变' : 'finnhub.io 免费注册即得(60 次/分)'"
+               style="width:360px">
+        <span class="muted">仅存本机服务端, 不回显明文; 留空则聚合分析跳过投行数据</span></div>
+      <button class="btn primary" :disabled="saving" @click="save">保存设置</button>
+    </div>
+
+    <div class="card">
+      <h3>内容生成 · 行情源</h3>
+      <div class="form-row"><label>行情数据源</label>
+        <select v-model="s.market.source_pref">
+          <option value="auto">自动(yfinance 主力, 东财兜底·默认)</option>
+          <option value="em_first">东财优先(yfinance 兜底)</option>
+          <option value="yf_only">仅用 yfinance</option>
+        </select></div>
+      <p class="muted">快照抓取/技术分析的行情数据源, 换网络环境时切换</p>
+      <button class="btn primary" :disabled="saving" @click="save">保存设置</button>
+    </div>
+
+    <div class="card">
+      <h3>内容生成 · 默认参数</h3>
+      <div class="form-row"><label>默认语种</label>
+        <select v-model="s.gen_defaults.lang">
+          <option value="en">英语</option><option value="zh-CN">简中</option>
+          <option value="zh-TW">繁中</option><option value="ja">日语</option><option value="yue">粤语</option>
+        </select></div>
+      <div class="form-row"><label>默认账号类型</label>
+        <select v-model="s.gen_defaults.tier">
+          <option value="free">免费(free)</option><option value="paid">付费(paid)</option>
+        </select></div>
+      <div class="form-row"><label>默认模板</label>
+        <select v-model="s.gen_defaults.template">
+          <option v-for="t in genTpls" :key="t.v" :value="t.v">{{ t.t }}</option>
+        </select></div>
+      <button class="btn primary" :disabled="saving" @click="save">保存设置</button>
+    </div>
+
     <!-- 4. YouTube 热点追踪(视频页【热点追踪/追踪账号】数据源, Data API v3) -->
     <div class="card">
       <h3>YouTube 热点追踪 <span class="muted">视频页·热点追踪 · Data API v3</span></h3>
+      <div class="key-guide">
+        <b>注册来源:</b>
+        <a href="https://console.cloud.google.com/apis/library/youtube.googleapis.com" target="_blank" rel="noopener">Google Cloud Console</a>
+        → 启用 YouTube Data API v3 → 「凭据」→ 创建凭据 → API 密钥(AIzaSy 开头)。<br>
+        <b>说明:</b> 只服务视频页热点追踪; 免费配额 1 万单位/天, 每天一次采集约消耗 100 单位, 免费够用。
+      </div>
+
       <div class="form-row"><label>API Key</label>
         <input type="password" v-model="s.youtube.api_key"
                :placeholder="yHasKey ? '已配置(尾号 ' + yKeyTail + '), 留空保持不变' : 'Google Cloud Console → 启用 YouTube Data API v3'"
@@ -149,7 +304,28 @@ WB.pages.settings = {
         (bin/yttrack_task.bat), 也可在视频页【热点追踪】手动「立即采集」</p>
     </div>
 
-    <!-- 5. 环境自检 -->
+    <!-- 5. 视频分析(Gemini) -->
+    <div class="card">
+      <h3>视频分析 (Gemini) <span class="muted">视频工坊·看片分析 · Google AI Studio</span></h3>
+      <div class="key-guide">
+        <b>注册来源:</b>
+        <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">Google AI Studio</a>
+        → Get API key(AIzaSy 开头), Google 账号登录即得, 有免费额度。<br>
+        <b>说明:</b> 只服务视频工坊「分析视频」—— Gemini 直接看 YouTube 视频出内容证据,
+        再转分镜/脚本; 免费额度有限, 配额用完当日会失败, 次日恢复。
+      </div>
+
+      <div class="form-row"><label>API Key</label>
+        <input type="password" v-model="s.gemini.api_key"
+               :placeholder="gHasKey ? '已配置(尾号 ' + gKeyTail + '), 留空保持不变' : 'Google AI Studio 的 Gemini API Key；用于视频分析看片通道'"
+               style="width:420px"></div>
+      <div class="form-row"><label>模型</label>
+        <input type="text" v-model="s.gemini.model" placeholder="gemini-3.6-flash" style="width:260px"></div>
+      <p class="muted">仅存服务端打码回显</p>
+      <button class="btn primary" :disabled="saving" @click="save">保存设置</button>
+    </div>
+
+    <!-- 6. 环境自检 -->
     <div class="card">
       <h3>环境自检 <button class="btn" style="float:right" @click="loadCheck">刷新</button></h3>
       <div v-if="check">

@@ -1,4 +1,4 @@
-// 一键制作流水线：审核校验 -> TTS 补齐 -> 测时长 -> 生成 active-story -> 渲染
+// 一键制作流水线：story 校验 -> 审核门禁 -> TTS 补齐(含降级链) -> 测时长 -> 生成 active-story -> 渲染 -> QA 自检(轻量)
 // 用法:
 //   node scripts/build.mjs <projectId>            正式制作（要求 status=reviewed）
 //   node scripts/build.mjs <projectId> --force    跳过审核门禁
@@ -7,9 +7,11 @@
 import msedgeTtsPkg from "msedge-tts";
 const { MsEdgeTTS, OUTPUT_FORMAT } = msedgeTtsPkg;
 import { execFileSync } from "node:child_process";
-import { existsSync, readFileSync, writeFileSync, mkdirSync, rmSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync, mkdirSync, rmSync, statSync } from "node:fs";
 import { createHash } from "node:crypto";
 import path from "node:path";
+import { validateStory } from "./story-validate.mjs";
+import { TEMPLATE_IDS } from "./template-ids.mjs";
 
 const COMPOSITOR_PKG = {
 	win32: ["compositor-win32-x64-msvc", "ffprobe.exe"],
@@ -17,7 +19,6 @@ const COMPOSITOR_PKG = {
 	linux: ["compositor-linux-x64-gnu", "ffprobe"],
 }[process.platform] || ["compositor-win32-x64-msvc", "ffprobe.exe"];
 const FFPROBE = path.join("node_modules", "@remotion", COMPOSITOR_PKG[0], COMPOSITOR_PKG[1]);
-const COMPOSITION_ID = "Story";
 
 /** 读取 .env（KEY=VALUE，等号后原样），不覆盖已有环境变量 */
 const loadEnv = () => {
@@ -50,6 +51,19 @@ for (const f of [projFile, storyFile]) {
 }
 const project = JSON.parse(readFileSync(projFile, "utf-8"));
 const story = JSON.parse(readFileSync(storyFile, "utf-8"));
+const compositionId = story.meta?.format === "vertical" ? "VerticalShort" : "Story";
+
+/* ---- story.json 结构校验（TTS/渲染之前的前置门禁） ---- */
+{
+	const { errors, warnings } = validateStory(story);
+	for (const w of warnings) console.warn(`⚠ ${w}`);
+	if (errors.length > 0) {
+		for (const e of errors) console.error(`✗ ${e}`);
+		console.error(`\nstory.json 校验未通过（${errors.length} 错误）。修好后重跑。`);
+		process.exit(1);
+	}
+	console.log(`✓ story.json 校验通过（${story.scenes.length} 场景${warnings.length ? `，${warnings.length} 警告` : ""}）`);
+}
 
 /* ---- 审核门禁 ---- */
 if (project.status !== "reviewed" && !FORCE && !ESTIMATE) {
@@ -116,13 +130,13 @@ const ttsConf =
 		? { engine: "dashscope", voice: story.meta.tts.voice ?? "longanlufeng" }
 		: { engine: "edge", voice: story.meta.voice ?? "zh-CN-XiaoxiaoNeural" };
 
-async function synth(text, outFile) {
+async function synthOnce(engine, voice, text, outFile) {
 	for (let attempt = 1; attempt <= 8; attempt++) {
 		try {
-			if (ttsConf.engine === "dashscope") {
-				await synthDashscope(text, ttsConf.voice, outFile);
+			if (engine === "dashscope") {
+				await synthDashscope(text, voice, outFile);
 			} else {
-				await synthEdge(text, ttsConf.voice, outFile);
+				await synthEdge(text, voice, outFile);
 			}
 			return true;
 		} catch (e) {
@@ -133,6 +147,24 @@ async function synth(text, outFile) {
 	return false;
 }
 
+/** 用指定引擎补齐全部缺失音频；返回 {ok, made[], failedId} */
+async function synthAll(engine, voice) {
+	const made = [];
+	for (const s of story.scenes) {
+		if (s.silent) continue;                  // 静默场景无旁白，不需要音频
+		const outFile = path.join(audioDir, `${s.id}.mp3`);
+		if (existsSync(outFile)) continue;
+		process.stdout.write(`合成语音: ${s.id} ... `);
+		if (await synthOnce(engine, voice, s.narration, outFile)) {
+			console.log("ok");
+			made.push(outFile);
+		} else {
+			return { ok: false, made, failedId: s.id };
+		}
+	}
+	return { ok: true, made };
+}
+
 if (!ESTIMATE) {
 	console.log(`TTS 引擎: ${ttsConf.engine} · 音色 ${ttsConf.voice}`);
 	// 音频缓存清单: {sceneId: narration哈希}, 文本变了只重合成变的场景
@@ -140,29 +172,29 @@ if (!ESTIMATE) {
 	const manifest = existsSync(manifestPath)
 		? JSON.parse(readFileSync(manifestPath, "utf-8"))
 		: {};
-	let synthesized = 0;
 	for (const s of story.scenes) {
-		const outFile = path.join(audioDir, `${s.id}.mp3`);
 		// 音频缓存按 narration 内容哈希失效: 改稿后复用旧音频会音画错位
 		const hash = createHash("sha1").update(s.narration).digest("hex").slice(0, 10);
+		const outFile = path.join(audioDir, `${s.id}.mp3`);
 		if (existsSync(outFile) && manifest[s.id] !== hash) {
 			rmSync(outFile);
 			console.log(`文本已改, 旧音频失效: ${s.id}`);
 		}
-		if (!existsSync(outFile)) {
-			process.stdout.write(`合成语音: ${s.id} ... `);
-			if (await synth(s.narration, outFile)) {
-				console.log("ok");
-				synthesized++;
-			} else {
-				console.error(`\n语音合成失败: ${s.id}（网络问题可重跑，已有音频会跳过）`);
-				process.exit(1);
-			}
-		}
 		manifest[s.id] = hash;
 	}
 	writeFileSync(manifestPath, JSON.stringify(manifest, null, 2));
-	if (synthesized === 0) console.log("语音已全部存在，跳过 TTS");
+	let r = await synthAll(ttsConf.engine, ttsConf.voice);
+	// 降级链：dashscope 失败/缺 key → 删掉本次已合成音频，整批改用 edge 重跑（保音色一致）
+	if (!r.ok && ttsConf.engine === "dashscope") {
+		console.warn(`\n⚠ ${r.failedId} 合成失败，DashScope 不可用 → 自动降级 Edge TTS，整批重跑保持音色一致`);
+		for (const f of r.made) rmSync(f);
+		r = await synthAll("edge", story.meta.voice ?? "zh-CN-XiaoxiaoNeural");
+	}
+	if (!r.ok) {
+		console.error(`\n语音合成失败: ${r.failedId}（网络问题可重跑，已有音频会跳过）`);
+		process.exit(1);
+	}
+	if (r.made.length === 0) console.log("语音已全部存在，跳过 TTS");
 }
 
 /* ---- 测时长 / 估算时长 ---- */
@@ -252,7 +284,7 @@ console.log(`\n开始渲染 -> ${outFile}`);
 const t0 = Date.now();
 execFileSync(
 	"npx",
-	["remotion", "render", COMPOSITION_ID, outFile, "--public-dir", projDir],
+	["remotion", "render", compositionId, outFile, "--public-dir", projDir],
 	{ stdio: "inherit", shell: true },
 );
 console.log(`\n✅ 完成，耗时 ${((Date.now() - t0) / 1000 / 60).toFixed(1)} 分钟`);
@@ -262,12 +294,45 @@ const coverFile = path.join(projDir, "out", "cover.png");
 try {
 	execFileSync(
 		"npx",
-		["remotion", "still", COMPOSITION_ID, coverFile, "--frame=20", "--public-dir", projDir],
+		["remotion", "still", compositionId, coverFile, "--frame=20", "--public-dir", projDir],
 		{ stdio: "inherit", shell: true },
 	);
 	console.log(`🖼 封面已生成 -> ${coverFile}(与视频开场同款视觉)`);
 } catch (e) {
 	console.error(`封面生成失败(不影响视频): ${e.message}`);
+}
+
+/* ---- QA 自检（轻量版）: 结果只进日志与 out/verify.json，不新增项目状态 ----
+ * 状态三态不变（draft/reviewed/built）；QA 有错时仅拒绝置 built 并以退出码 1 报告。 */
+{
+	console.log("\nQA 自检:");
+	const qa = { file: path.relative(projDir, outFile), composition: compositionId,
+		mode: ESTIMATE ? "estimate" : "build", checks: [], warnings: [], errors: [],
+		builtAt: new Date().toISOString() };
+	if (!existsSync(outFile)) qa.errors.push(`产物缺失: ${outFile}`);
+	else qa.checks.push(`产物存在（${(statSync(outFile).size / 1024 / 1024).toFixed(1)} MB）`);
+	const badTpl = frames.filter((f) => !TEMPLATE_IDS.includes(f.template));
+	if (badTpl.length === 0) qa.checks.push(`模板枚举合法（${frames.length} 场全部在注册表）`);
+	else for (const f of badTpl) qa.errors.push(`未知模板: ${f.template}（场景 ${f.id}）`);
+	if (frames.length === story.scenes.length) qa.checks.push(`场景数一致（${frames.length}）`);
+	else qa.errors.push(`场景数不一致: 时间轴 ${frames.length} ≠ story ${story.scenes.length}`);
+	if (ESTIMATE) {
+		qa.checks.push("估算模式：无音轨，跳过音频齐全性检查");
+	} else {
+		const missing = (story.scenes ?? [])
+			.filter((s) => !s.silent)
+			.filter((s) => !existsSync(path.join(audioDir, `${s.id}.mp3`)));
+		if (missing.length === 0) qa.checks.push("音频齐全（非静默场景均有 mp3）");
+		else for (const s of missing) qa.errors.push(`缺音频: ${s.id}.mp3`);
+	}
+	for (const c of qa.checks) console.log(`  ✓ ${c}`);
+	for (const w of qa.warnings) console.warn(`  ⚠ ${w}`);
+	writeFileSync(path.join(projDir, "out", "verify.json"), JSON.stringify(qa, null, "\t"));
+	console.log(`  QA 报告 -> ${path.join(projDir, "out", "verify.json")}`);
+	if (qa.errors.length > 0) {
+		for (const e of qa.errors) console.error(`  ✗ ${e}`);
+		process.exit(1);
+	}
 }
 
 /* ---- 更新项目状态（预览模式不改状态） ---- */

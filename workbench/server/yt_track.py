@@ -46,7 +46,7 @@ RUNNING_STALE_MIN = 30        # 重入锁过期(视为僵尸, 允许接管)
 DESC_HEAD = 300               # 简介开头截存长度(轻量解读输入)
 INSIGHT_TOP = 20              # 解读候选池: 近7天播放 Top20
 INSIGHT_TAKE = 10             # 解读展示条数(热榜页最前)
-INSIGHT_PER_ROUND = 5         # 每轮采集最多补几条解读(防首轮集中打 LLM)
+INSIGHT_PER_ROUND = 10        # 每轮采集最多补几条解读(免费 muse; 预覆盖整池一轮补完)
 
 _UC_RE = re.compile(r"UC[\w-]{22}")
 _URL_RE = re.compile(
@@ -278,9 +278,10 @@ def _parse_insight(text: str) -> dict | None:
 
 
 def _fill_insights(store: dict, report: dict) -> None:
-    """采集收尾补解读: 7天Top20取前10中缺 insight 或输入(title+desc)已变者,
-    每轮最多 INSIGHT_PER_ROUND 条, 0.5s 间隔; 未配置 translate 静默跳过;
-    任何异常只记 report 不影响采集主流程(与 exit code 无关)。"""
+    """采集收尾补解读: **预覆盖近7天播放 Top20 整池**(展示只取前10)——视频在 11-20 名
+    时就把解读备好, 轮动进前 10 时页面无缝显示, 不出"生成中"空窗;
+    缺 insight 或输入(title+desc)已变者才重生成, 每轮最多 INSIGHT_PER_ROUND 条、0.5s 间隔;
+    未配置 translate 静默跳过; 任何异常只记 report 不影响采集主流程(与 exit code 无关)。"""
     try:
         cfg = config.load().get("translate") or {}
         base, key, model = cfg.get("base_url"), cfg.get("api_key"), cfg.get("model")
@@ -292,7 +293,7 @@ def _fill_insights(store: dict, report: dict) -> None:
                   if c.get("enabled", True) and c.get("resolve_status") == "resolved"
                   and c.get("channel_id")}
         todo = []
-        for vid in _insight_hot_vids(store, en_ids, time.time())[:INSIGHT_TAKE]:
+        for vid in _insight_hot_vids(store, en_ids, time.time())[:INSIGHT_TOP]:
             v = store["videos"].get(vid) or {}
             h = hashlib.sha1(((v.get("title") or "") + "\n" + (v.get("description_head") or ""))
                              .encode("utf-8")).hexdigest()[:16]

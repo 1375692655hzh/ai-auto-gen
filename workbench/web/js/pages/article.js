@@ -35,13 +35,38 @@ WB.pages.article = {
       materials: [], matQ: "",
       modules: [
         { id: "retrieve", title: "信息检索", desc: "按素材标的/关键词回查数据站, 补全上下文", on: true },
-        { id: "snapshot", title: "快照抓取", desc: "抓取素材原文页面快照存档", on: false },
-        { id: "tech", title: "技术分析", desc: "对素材涉及标的生成技术面解读", on: false },
-        { id: "aggregate", title: "聚合分析", desc: "同事件多源交叉验证与要点归并", on: true },
+        { id: "snapshot", title: "快照抓取", desc: "抓素材标的近 3 个月行情 K 线图(作图文配图)", on: false },
+        { id: "tech", title: "技术分析", desc: "算素材标的近端支撑位/阻力位(纯规则, 叠画进图)", on: false },
+        { id: "aggregate", title: "聚合分析", desc: "汇总 X 大V 与机构/分析师对此事件的看法(LLM)", on: true },
       ],
+      /* 成稿参数: 平台风格(默认X) / 语种 / 免费·付费(决定字数上限) / 成稿模板(信息结构, grok 定稿 7 模板) */
+      genParams: { platform: "x", lang: "en", tier: "free", template: "catalyst-take" },
+      genLangs: [["en", "英语"], ["zh-CN", "简中"], ["zh-TW", "繁中"], ["ja", "日语"], ["yue", "粤语"]],
+      genTiers: [["free", "免费(≤280 加权字符, CJK 计2 ≈140 汉字)"],
+                 ["paid", "付费 Basic/Premium(≤25,000 字, 可发长文)"]],
+      genTpls: [{ v: "catalyst-take", t: "事件快评 · 单票突发催化(默认)" },
+                { v: "earnings-print", t: "业绩拆解 · 财报/指引解读" },
+                { v: "macro-print", t: "数据读数 · CPI/NFP 等宏观打印" },
+                { v: "policy-call", t: "政策纪要 · 央行决议/监管" },
+                { v: "tape-recap", t: "盘面综述 · 开收盘/盘中扫描" },
+                { v: "thesis-note", t: "深度观点 · 非事件驱动论点" },
+                { v: "thread-post", t: "串推 · 一帖拆多条(免费档涨触达)" },
+                { v: "risk-flag", t: "风险提示 · 预警/证伪" },
+                { v: "news-flash", t: "资讯速递 · 单条重点资讯快报", zero: 1 },
+                { v: "fact-sheet", t: "披露卡 · 公告/财报要点陈列", zero: 1 },
+                { v: "week-ahead", t: "一周日历 · 下周财经事件表", zero: 1 },
+                { v: "earnings-watch", t: "财报前瞻 · 本周财报票+关注点", zero: 1 },
+                { v: "funding-trail", t: "融资脉络 · 历轮融资时间线", zero: 1 }],
+      tplLegacy: { short: "catalyst-take", morning: "tape-recap", digest: "thesis-note" },
+      genJob: { running: false, progress: {}, result: "", error: "", hint: "" },
+      genResult: null, genTimer: null,
+      genHistory: [], historyLoading: false, historyLoaded: false,
+      calendarLoading: false, genDownloading: false, tplSuggestion: null,
       flows: [], template: "",
       editingId: "", editorTitle: "", editorContent: "",
       drafts: [], runs: [],
+      /* ── 信息检索(纯只读回查: 素材→全文/同簇/同标的; retrieveRes 按 seed_id 索引) ── */
+      retrieving: false, retrieveRes: {}, rvOpen: {},
       /* ── 内容发布 ── */
       pubDraftId: "", pubWhen: "now", pubTime: "", pubAccounts: [], pubMethod: "xai",
       accounts: [], ledger: { rows: [], stats: {} },
@@ -52,9 +77,16 @@ WB.pages.article = {
       autoModules: ["retrieve", "aggregate"],
     };
   },
+  watch: {
+    tab(t) { if (t === "gen" && !this.historyLoaded) this.loadGenHistory(); },
+  },
   computed: {
     wordCount() { return (this.editorContent || "").length; },
     onModules() { return this.modules.filter((m) => m.on).map((m) => m.id); },
+    /* X 计权字数(与 server gcompose.weighted_len 同规则: CJK/emoji×2, URL 恒=23) */
+    xwCount() { return this.xwLen(this.editorContent); },
+    xwLimit() { return this.genParams.tier === "paid" ? 25000 : 280; },
+    canGenerate() { return this.selCount > 0 && !this.genJob.running; },
     pubDraft() { return this.drafts.find((d) => d.id === this.pubDraftId) || null; },
     /* 素材池: 顶部小搜索(正文/来源模糊匹配) */
     filteredMaterials() {
@@ -291,6 +323,221 @@ WB.pages.article = {
 
     /* ── 内容生成 ── */
     syncMaterials() { this.materials = WB.basket.list(); this.registerSubs(); },
+    xwLen(s) {
+      s = String(s || "");
+      const urls = s.match(/https?:\/\/\S+/g) || [];
+      let n = urls.length * 23;
+      for (const ch of s.replace(/https?:\/\/\S+/g, "")) {
+        const o = ch.codePointAt(0);
+        n += ((o >= 0x2E80 && o <= 0x9FFF) || (o >= 0xF900 && o <= 0xFAFF) ||
+              (o >= 0x3000 && o <= 0x303F) || (o >= 0xFE30 && o <= 0xFE4F) ||
+              (o >= 0xFF00 && o <= 0xFFEF) || o >= 0x1F000) ? 2 : 1;
+      }
+      return n;
+    },
+    /* 开始生成: 端点校验+spawn CLI(检索/行情/聚合/LLM 全在子进程), 前端 2s 轮询 */
+    async startGen() {
+      const items = this.materials.filter((m) => this.matChecked(m))
+        .map((m) => ({ id: m.id, time: m.time, source: m.source, text: m.text, url: m.url }));
+      if (!items.length) { WB.toast("先勾选参与生成的素材"); return; }
+      try {
+        await WB.api.post("/gen-compose", { items, modules: this.onModules, ...this.genParams });
+      } catch (e) {
+        WB.toast("启动失败: " + (e.error || "") + (e.hint ? " —— " + e.hint : ""));
+        return;
+      }
+      this.genResult = null;
+      this.genJob = { running: true, progress: { stage: "start", pct: 0, message: "已启动" },
+                      result: "", error: "", hint: "" };
+      this.genTimer = setInterval(this.pollGen, 2000);
+    },
+    async pollGen() {
+      let d;
+      try { d = await WB.api.get("/gen-jobs"); } catch (e) { return; }
+      const j = (d || {}).compose || {};
+      this.genJob = j;
+      if (j.running) return;
+      clearInterval(this.genTimer); this.genTimer = null;
+      if (j.exit === 0 && j.result) {
+        try {
+          this.genResult = await WB.api.get("/gen-posts/" + j.result);
+          this.editorContent = this.genResult.text || "";
+          if (!this.editorTitle)
+            this.editorTitle = (this.genResult.text || "").split("\n")[0].slice(0, 40);
+          this.loadGenHistory();
+          WB.toast("成稿完成: 加权 " + this.genResult.weighted_len + " / " + this.genResult.limit);
+        } catch (e) { WB.toast("取成稿失败: " + (e.error || "")); }
+      } else if (j.exit) {
+        WB.toast("生成失败: " + (j.error || "") + (j.hint ? " —— " + j.hint : ""));
+      }
+    },
+    async copyGenText(quiet = false) {
+      if (!this.genResult) return false;
+      try {
+        try { await navigator.clipboard.writeText(this.genResult.text || ""); }
+        catch (e) {
+          const ta = document.createElement("textarea");
+          ta.value = this.genResult.text || ""; ta.style.position = "fixed"; ta.style.opacity = "0";
+          document.body.appendChild(ta); ta.select();
+          try { if (!document.execCommand("copy")) throw new Error("copy failed"); }
+          finally { ta.remove(); }
+        }
+        if (quiet !== true) WB.toast("已复制到剪贴板");
+        return true;
+      } catch (e) { WB.toast("复制失败, 请手动选择文本"); return false; }
+    },
+    copyTweet(tweet) { WB.copyText(tweet); },
+    downloadGenImage(img) {
+      const a = document.createElement("a");
+      a.href = img.url; a.download = img.file;
+      document.body.appendChild(a); a.click(); a.remove();
+    },
+    async copyGenAndDownload() {
+      if (!this.genResult || this.genDownloading) return;
+      const images = [...(this.genResult.images || [])];
+      this.genDownloading = true;
+      try {
+        if (!await this.copyGenText(true)) return;
+        for (let i = 0; i < images.length; i++) {
+          if (i) await new Promise(resolve => setTimeout(resolve, 300));
+          this.downloadGenImage(images[i]);
+        }
+        WB.toast(images.length ? "文字已复制, 图片已下载, 到 X 先贴文字再拖图" : "文字已复制, 本篇无配图");
+      } catch (e) { WB.toast("图片下载失败, 请逐张下载"); }
+      finally { this.genDownloading = false; }
+    },
+    templateTitle(slug) {
+      const tpl = this.genTpls.find(t => t.v === slug);
+      return tpl ? tpl.t.split(" · ")[0] : (slug || "—");
+    },
+    async loadGenHistory() {
+      if (this.historyLoading) return;
+      this.historyLoading = true;
+      try {
+        this.genHistory = (await WB.api.get("/gen-posts")).posts || [];
+        this.historyLoaded = true;
+      } catch (e) { WB.toast("加载生成历史失败: " + (e.error || "请求失败")); }
+      finally { this.historyLoading = false; }
+    },
+    async loadGenPost(post) {
+      try {
+        const r = await WB.api.get("/gen-posts/" + encodeURIComponent(post.id));
+        this.genResult = r; this.editingId = "";
+        this.editorContent = r.text || "";
+        this.editorTitle = this.editorContent.split("\n")[0].slice(0, 40);
+        WB.toast("已载入编辑器");
+      } catch (e) { WB.toast("载入失败: " + (e.error || "请求失败")); }
+    },
+    async deleteGenPost(post) {
+      try {
+        await WB.api.del("/gen-posts/" + encodeURIComponent(post.id));
+        this.genHistory = this.genHistory.filter(p => p.id !== post.id);
+        if (this.genResult && this.genResult.id === post.id) this.genResult = null;
+        WB.toast("已删除成稿及配图");
+      } catch (e) { WB.toast("删除失败: " + (e.error || "请求失败")); }
+    },
+    async loadCalendar(source) {
+      if (this.calendarLoading) return;
+      this.calendarLoading = true;
+      try {
+        const d = await WB.api.get("/v1/items?sources=" + encodeURIComponent(source) + "&limit=50");
+        const rows = d.items || [];
+        if (!rows.length) {
+          WB.toast("数据站暂无日历缓存, 先跑 sources refresh 或等任务计划"); return;
+        }
+        const existing = WB.basket.list();
+        const ids = new Set(existing.map(m => m.id).filter(Boolean));
+        const urls = new Set(existing.map(m => m.url).filter(Boolean));
+        let added = 0;
+        for (const row of rows) {
+          if ((row.id && ids.has(row.id)) || (row.url && urls.has(row.url))) continue;
+          const id = row.id || row.url;
+          if (!id) continue;
+          WB.basket.add({ ...row, id });
+          ids.add(id); if (row.url) urls.add(row.url);
+          added++;
+        }
+        this.syncMaterials(); this.initBasketIds();
+        WB.toast("已加入并勾选 " + added + " 条日历素材");
+      } catch (e) { WB.toast("拉取日历失败: " + (e.error || "请求失败")); }
+      finally { this.calendarLoading = false; }
+    },
+    recommendTemplate(groups) {
+      const mapping = { earnings: "earnings-print", guidance: "earnings-print",
+                        macro: "macro-print", policy: "policy-call" };
+      const names = { earnings: "财报", guidance: "指引", macro: "宏观数据", policy: "政策" };
+      const votes = {}, events = {};
+      for (const g of groups) {
+        const raw = (g.tags || {}).event_type;
+        for (const event of new Set(Array.isArray(raw) ? raw : (raw ? [raw] : []))) {
+          const tpl = mapping[event] || "catalyst-take";
+          votes[tpl] = (votes[tpl] || 0) + 1;
+          (events[tpl] ||= new Set()).add(names[event] || "其他事件");
+        }
+      }
+      const winner = Object.keys(votes).sort((a, b) => votes[b] - votes[a])[0];
+      this.tplSuggestion = winner && winner !== this.genParams.template
+        ? { template: winner, event: [...events[winner]].join("/") } : null;
+    },
+    applyTplSuggestion() {
+      if (this.tplSuggestion) this.genParams.template = this.tplSuggestion.template;
+      this.tplSuggestion = null;
+    },
+    /* 文图一起: ClipboardItem 双 MIME; X 发帖框粘贴取其一, 建议先贴文字再补图 */
+    async copyGenAll() {
+      const r = this.genResult;
+      if (!r) return;
+      if ((r.images || []).length) {
+        try {
+          const blob = await (await fetch(r.images[0].url)).blob();
+          await navigator.clipboard.write([new ClipboardItem({
+            "text/plain": new Blob([r.text], { type: "text/plain" }), "image/png": blob })]);
+          WB.toast("图文已复制 —— X 粘贴会先取一项, 建议先贴文字再用「复制图片」补图");
+          return;
+        } catch (e) { /* 降级走纯文字 */ }
+      }
+      WB.copyText(r.text);
+      WB.toast("已复制文字");
+    },
+    async copyGenImage(img) {
+      try {
+        const blob = await (await fetch(img.url)).blob();
+        await navigator.clipboard.write([new ClipboardItem({ "image/png": blob })]);
+        WB.toast("图片已复制, 到 X 发帖框直接粘贴");
+      } catch (e) { WB.toast("图片复制失败 —— 用「下载」后手动拖入 X"); }
+    },
+    /* ── 信息检索: 勾选素材 → 服务端三路回查(全文/同簇/同标的), 结果按素材折叠展示 ── */
+    async runRetrieve() {
+      const items = this.materials.filter((m) => this.matChecked(m))
+        .map((m) => ({ id: m.id, time: m.time, source: m.source, text: m.text, url: m.url }));
+      if (!items.length) { WB.toast("先勾选要检索的素材"); return; }
+      this.retrieving = true;
+      try {
+        const d = await WB.api.post("/retrieve", { items });
+        (d.groups || []).forEach((g) => { this.retrieveRes[g.seed_id] = g; });
+        this.recommendTemplate(d.groups || []);
+        WB.toast("检索完成: " + (d.groups || []).length + " 条素材, 数据站查询 " +
+                 ((d.meta || {}).queries || 0) + " 次");
+      } catch (e) {
+        WB.toast("检索失败: " + (e.error || "") + (e.hint ? " —— " + e.hint : ""));
+      }
+      this.retrieving = false;
+    },
+    toggleRv(id) { this.rvOpen[id] = !this.rvOpen[id]; },
+    mergeText(t) {
+      this.editorContent = (this.editorContent || "") + t;
+      WB.toast("已并入编辑器");
+    },
+    mergeHit(h) {
+      this.mergeText("\n\n> 【" + (h.source || "来源") + "】" + (h.time || "") + " — "
+                     + (h.text || "") + "\n> 原文: " + (h.url || "(无链接)"));
+    },
+    mergeAnchor(m) {
+      const hy = (this.retrieveRes[m.id] || {}).hydrated;
+      if (!hy) return;
+      this.mergeText("\n\n> 【原文】" + (hy.time || "") + (hy.title ? " " + hy.title : "") + " — "
+                     + (hy.full || "") + "\n> 原文: " + (hy.url || m.url || "(无链接)"));
+    },
     removeMaterial(id) { WB.basket.remove(id); this.syncMaterials(); },
     /* 素材池勾选: 无 sel 字段的旧数据按已选兼容 */
     matChecked(m) { return m.sel !== false; },
@@ -328,7 +575,8 @@ WB.pages.article = {
         title: this.editorTitle || "未命名草稿", content: this.editorContent,
         items: this.materials.filter((m) => this.matChecked(m)).map((m) => m.id),
         modules: this.onModules,
-        template: this.template,
+        template: this.genParams.template,
+        gen: { ...this.genParams },
         publish: { when: this.pubWhen, time: this.pubTime,
                    accounts: this.pubAccounts, method: this.pubMethod },
       };
@@ -344,6 +592,8 @@ WB.pages.article = {
       this.editingId = d.id;
       this.editorTitle = d.title; this.editorContent = d.content;
       this.template = d.template || "";
+      if (d.gen) this.genParams = { ...this.genParams, ...d.gen };
+      this.genParams.template = this.tplLegacy[this.genParams.template] || this.genParams.template;
       const on = new Set(d.modules || []);
       this.modules.forEach((m) => { m.on = on.has(m.id); });
       if (d.publish) {
@@ -391,7 +641,7 @@ WB.pages.article = {
       this.registerSubs();
     },
     copyFromGen() {
-      this.autoForm.template = this.template;
+      this.autoForm.template = this.genParams.template;
       this.autoModules = this.onModules.slice();
       WB.toast("已复制内容生成页的工作流配置");
     },
@@ -424,15 +674,29 @@ WB.pages.article = {
       return (ids || []).map((i) => all[i] || i).join(" → ");
     },
   },
-  mounted() {
+  async mounted() {
+    try {
+      const d = await WB.api.get("/settings");
+      const defaults = d.gen_defaults || {};
+      if (this.genLangs.some(([v]) => v === defaults.lang)) this.genParams.lang = defaults.lang;
+      if (this.genTiers.some(([v]) => v === defaults.tier)) this.genParams.tier = defaults.tier;
+      if (this.genTpls.some(t => t.v === defaults.template)) this.genParams.template = defaults.template;
+    } catch (e) {} // 取不到设置时保留现有默认值; 草稿恢复在此后覆盖。
     this.registerSubs();
     this.syncMaterials();
     this.initBasketIds();
     this.loadDict(); this.loadX(); this.loadXF("xfReco"); this.loadSurgeRss();
     this.loadFlows(); this.loadRuns(); this.loadDrafts();
     this.loadAccounts(); this.loadLedger(); this.loadTasks(); this.loadXaccts();
+    WB.api.get("/gen-jobs").then((d) => {           // 页面重开时有未完成的生成 → 续上轮询
+      const j = ((d || {}).compose) || {};
+      if (j.running) { this.genJob = j; this.genTimer = setInterval(this.pollGen, 2000); }
+    }).catch(() => {});
   },
-  unmounted() { if (WB.shell) WB.shell.setSubs([]); },
+  unmounted() {
+    if (WB.shell) WB.shell.setSubs([]);
+    if (this.genTimer) { clearInterval(this.genTimer); this.genTimer = null; }
+  },
 
   template: `
   <div>
@@ -608,6 +872,10 @@ WB.pages.article = {
       <div>
         <div class="card">
           <h3>素材池({{ materials.length }}<template v-if="selCount !== materials.length"> · 已选 {{ selCount }}</template>)</h3>
+          <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px">
+            <button class="btn" :disabled="calendarLoading" @click="loadCalendar('calendar')">拉财经日历</button>
+            <button class="btn" :disabled="calendarLoading" @click="loadCalendar('nasdaq_earnings')">拉美股财报日历</button>
+          </div>
           <input type="text" v-model="matQ" class="mat-search" placeholder="搜索素材(正文/来源)">
           <div v-if="!materials.length" class="muted">
             空 —— 到「推荐信息」点「＋加入生成」, 或资讯页点「＋加入素材篮」</div>
@@ -624,6 +892,34 @@ WB.pages.article = {
               <div class="s"><span :title="m.time">{{ ageText(m) }}</span><span v-if="isStale(m)"> · 超48h</span>
                 · {{ m.source }}
                 <a style="float:right" @click.stop="removeMaterial(m.id)">移除</a></div>
+              <div v-if="retrieveRes[m.id]" class="rv-block">
+                <a class="rv-toggle" @click="toggleRv(m.id)">
+                  {{ rvOpen[m.id] ? '▾ 收起补充信息' : '▸ 补充信息' }}
+                  {{ ((retrieveRes[m.id].related || []).length + (retrieveRes[m.id].hydrated ? 1 : 0)) || '' }}
+                </a>
+                <div v-if="rvOpen[m.id]" class="rv-list">
+                  <div v-if="retrieveRes[m.id].hydrated" class="rv-item">
+                    <span class="badge blue">原文全文</span>
+                    <span class="muted" style="margin-left:6px">{{ retrieveRes[m.id].hydrated.source }} ·
+                      {{ retrieveRes[m.id].hydrated.time }}</span>
+                    <div class="rv-full">{{ retrieveRes[m.id].hydrated.full }}</div>
+                    <div style="margin-top:4px">
+                      <a @click="mergeAnchor(m)">并入原文</a>
+                      <a v-if="retrieveRes[m.id].hydrated.url" :href="retrieveRes[m.id].hydrated.url"
+                         target="_blank" rel="noopener" style="margin-left:10px">打开 ↗</a></div>
+                  </div>
+                  <div v-for="h in retrieveRes[m.id].related" :key="h.id" class="rv-item">
+                    <span v-for="w in h.why" :key="w" class="badge blue" style="margin-right:4px">{{ w }}</span>
+                    <span class="muted">{{ h.source }} · {{ h.time }}</span>
+                    <div class="rv-text">{{ h.title ? h.title + ' —— ' : '' }}{{ h.text }}</div>
+                    <div style="margin-top:4px">
+                      <a @click="mergeHit(h)">并入</a>
+                      <a v-if="h.url" :href="h.url" target="_blank" rel="noopener" style="margin-left:10px">原文 ↗</a></div>
+                  </div>
+                  <div v-if="!(retrieveRes[m.id].related || []).length && !retrieveRes[m.id].hydrated"
+                       class="muted">{{ retrieveRes[m.id].hint || '窗口内未检到补充信息' }}</div>
+                </div>
+              </div>
             </div>
           </div>
           <div class="muted" style="margin-top:8px">勾选参与生成(存草稿只记勾选项); 超 48h 灰显提醒</div>
@@ -638,6 +934,8 @@ WB.pages.article = {
             <div class="t">
               <label style="display:flex;align-items:center;gap:6px;cursor:pointer">
                 <input type="checkbox" v-model="m.on">{{ m.title }}</label>
+              <button v-if="m.id === 'retrieve'" class="btn" style="margin-left:auto;padding:2px 10px"
+                      :disabled="retrieving" @click="runRetrieve">{{ retrieving ? '检索中…' : '执行检索' }}</button>
               <span>
                 <a @click="moveModule(i, -1)" :style="{opacity: i===0 ? .3 : 1}">↑</a>
                 <a @click="moveModule(i, 1)" style="margin-left:8px"
@@ -648,29 +946,114 @@ WB.pages.article = {
           </div>
           <div class="muted" style="margin-top:8px">执行顺序: {{ moduleTitles(onModules) || '(未启用模块)' }}</div>
           <div class="form-row" style="margin-top:12px">
-            <label>固定模板</label>
-            <select v-model="template" style="width:260px">
-              <option value="">(不使用模板)</option>
-              <option v-for="fl in flows" :value="fl.name">{{ fl.name }} — {{ fl.title }}</option>
+            <label>平台风格</label>
+            <select v-model="genParams.platform" style="width:280px">
+              <option value="x">X(Twitter) 财经帖(默认)</option>
             </select>
           </div>
+          <div class="form-row">
+            <label>语种</label>
+            <select v-model="genParams.lang" style="width:280px">
+              <option v-for="[v, t] in genLangs" :key="v" :value="v">{{ t }}</option>
+            </select>
+          </div>
+          <div class="form-row">
+            <label>账号类型</label>
+            <select v-model="genParams.tier" style="width:280px">
+              <option v-for="[v, t] in genTiers" :key="v" :value="v">{{ t }}</option>
+            </select>
+          </div>
+          <div class="form-row">
+            <label>成稿模板</label>
+            <select v-model="genParams.template" style="width:280px">
+              <optgroup label="分析类(带观点)">
+                <option v-for="t in genTpls.filter(x => !x.zero)" :key="t.v" :value="t.v">{{ t.t }}</option>
+              </optgroup>
+              <optgroup label="信息披露类(零观点)">
+                <option v-for="t in genTpls.filter(x => x.zero)" :key="t.v" :value="t.v">{{ t.t }}</option>
+              </optgroup>
+            </select>
+          </div>
+          <div v-if="tplSuggestion && tplSuggestion.template !== genParams.template" class="muted" style="margin:8px 0">
+            识别到{{ tplSuggestion.event }}类素材, 建议模板:{{ templateTitle(tplSuggestion.template) }}
+            <button class="btn" @click="applyTplSuggestion">一键切换</button>
+            <button class="btn" @click="tplSuggestion = null">忽略</button>
+          </div>
+          <div class="muted" style="margin-top:4px">
+            模板 = 信息结构, 长短由账号类型决定(免费档只留 Hook+核心事实, 付费档骨架全开);
+            披露类(零观点)模板禁观点标记(后端硬剔); 快照抓取/技术分析需素材带标的(未识别自动跳过并注明);
+            聚合分析汇 X 大V+机构观点, 设置页「Finnhub」卡可再叠加投行评级与目标价</div>
         </div>
 
         <div class="card">
           <h3>实时编辑 <span class="muted">{{ editingId ? '草稿 ' + editingId : '新草稿' }}</span></h3>
           <div class="form-row">
             <label>标题</label>
-            <input type="text" v-model="editorTitle" placeholder="文章标题" style="width:100%;max-width:420px">
+            <input type="text" v-model="editorTitle" placeholder="标题(成稿首行自动带入)" style="width:100%;max-width:420px">
           </div>
           <textarea v-model="editorContent" rows="14"
-                    placeholder="正文(生成后在此实时编辑)…" style="width:100%"></textarea>
-          <div class="muted" style="margin-top:6px">{{ wordCount }} 字</div>
-          <div class="stub-wrap" style="margin-top:10px">
-            <button class="btn stub" disabled>开始生成</button>
-            <button class="btn primary" @click="saveDraft">存草稿</button>
+                    placeholder="正文(开始生成后成稿在此, 可直接改)…" style="width:100%"></textarea>
+          <div class="muted" style="margin-top:6px">
+            加权 {{ xwCount }} / {{ xwLimit }} 字符(X 规则: CJK×2 · URL=23) · 原始 {{ wordCount }} 字符
+            <span v-if="xwCount > xwLimit" class="badge red" style="margin-left:6px">超上限</span>
+          </div>
+          <div style="margin-top:10px">
+            <button class="btn primary" :disabled="!canGenerate" @click="startGen">
+              {{ genJob.running ? '生成中… ' + (genJob.progress.pct || 0) + '%' : '开始生成' }}</button>
+            <button class="btn" @click="saveDraft">存草稿</button>
             <button class="btn" v-if="editingId" @click="newDraft">新建</button>
-            <div class="stub-tip">真生成走 <code>python cli.py flows run {{ template || '&lt;工作流&gt;' }} --auto</code>;
-              生成模块的真实编排执行本期留桩</div>
+            <div class="muted" v-if="genJob.running" style="margin-top:6px">
+              {{ genJob.progress.message || genJob.progress.stage }}</div>
+            <div v-if="genJob.error" style="margin-top:6px">
+              <span class="badge red">{{ genJob.error }}</span>
+              <span class="muted">{{ genJob.hint }}</span></div>
+          </div>
+          <!-- 成稿: 文字在上方编辑器可直接改; 此处是配图/标签/一键复制 -->
+          <div v-if="genResult" class="gen-final">
+            <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+              <b>成稿</b>
+              <span class="muted">{{ genResult.created_at }} · 加权 {{ genResult.weighted_len }}/{{ genResult.limit }}
+                · {{ moduleTitles(genResult.modules) || '纯素材' }}</span>
+              <span style="flex:1"></span>
+              <button class="btn primary" @click="copyGenAll">复制图文</button>
+              <button class="btn" @click="copyGenText">{{ (genResult.thread || []).length ? '复制全部' : '复制文字' }}</button>
+              <button class="btn" :disabled="genDownloading" @click="copyGenAndDownload">复制文字+下载全部图</button>
+            </div>
+            <ol v-if="(genResult.thread || []).length" style="list-style:none;padding:0">
+              <li v-for="(tweet, i) in genResult.thread" :key="i" class="list-item">
+                <div style="white-space:pre-wrap;overflow-wrap:anywhere">{{ tweet }}</div>
+                <span class="muted">计权 {{ xwLen(tweet) }}/{{ genResult.limit }}</span>
+                <button class="btn" @click="copyTweet(tweet)">复制本条</button>
+              </li>
+            </ol>
+            <div v-if="(genResult.tags || []).length" style="margin:8px 0">
+              <span v-for="t in genResult.tags" :key="t" class="badge blue"
+                    style="margin-right:6px">{{ t }}</span>
+            </div>
+            <div v-for="img in genResult.images" :key="img.file" class="gen-asset">
+              <img :src="img.url" :alt="img.ticker">
+              <div class="s" style="margin-top:4px">
+                <span class="muted">{{ img.ticker }} 近3月日线(绿=支撑 红=阻力 · 源 {{ img.via }})</span>
+                <a @click="copyGenImage(img)">复制图片</a>
+                <a :href="img.url" :download="img.file" @click.prevent="downloadGenImage(img)" style="margin-left:10px">下载</a>
+              </div>
+            </div>
+            <div v-if="(genResult.notes || []).length" class="muted" style="margin-top:8px">
+              <div v-for="n in genResult.notes" :key="n">· {{ n }}</div>
+            </div>
+            <div class="muted" style="margin-top:8px">复制后到 X 发布页粘贴: 先贴文字, 再用「复制图片」补图</div>
+          </div>
+        </div>
+        <div class="card">
+          <h3>生成历史 <span class="muted">保留最新 50 篇</span></h3>
+          <div v-if="historyLoading" class="muted">加载中…</div>
+          <div v-else-if="!genHistory.length" class="muted">暂无生成历史</div>
+          <div v-for="post in genHistory" :key="post.id" class="list-item">
+            <div>{{ post.summary || '(无正文)' }}</div>
+            <div class="muted">{{ post.created_at }} · {{ templateTitle(post.params.template) }}
+              · {{ post.params.tier === 'paid' ? '付费' : '免费' }} · 计权 {{ post.weighted_len }} · {{ post.image_count }} 图</div>
+            <button class="btn" @click="loadGenPost(post)">载入编辑器</button>
+            <button class="btn" @click="deleteGenPost(post)">删除</button>
           </div>
         </div>
       </div>

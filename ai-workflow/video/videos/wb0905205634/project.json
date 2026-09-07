@@ -1,0 +1,18 @@
+{
+	"id": "wb0905205634",
+	"title": "美股新高SPCX解禁暴涨逻辑",
+	"status": "built",
+	"note": "向导确认即审核（workbench 创建）；draft=待审 reviewed=可制作 built=已出片",
+	"created": "2026-09-05",
+	"date": "2026-09-05",
+	"origin": "workbench",
+	"settings": {
+		"format": "vertical",
+		"voice": "",
+		"tts_provider": "edge",
+		"enrich": "plain",
+		"title": "美股新高SPCX解禁暴涨逻辑"
+	},
+	"builtAt": "2026-09-05",
+	"output": "out/final.mp4 (1.17 min)"
+}

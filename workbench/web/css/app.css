@@ -329,11 +329,15 @@ table.reg tbody tr.off td:nth-child(4) { color: var(--text-mute); }
   gap: var(--s4); align-items: start; }
 /* 内容生成页三栏: 素材池加宽(吃掉右栏富余空间); 窄屏仍走 .three-col 的 1fr 断点 */
 .gen-cols { grid-template-columns: 400px minmax(0, 1fr) 280px; }
-/* 素材池: 顶部小搜索 + 定高上下滚动 + 超48h灰显 */
+/* 素材池: 顶部小搜索 + 整列通高滚动(用户要求加长) + 超48h灰显 */
 .mat-search { width: 100%; margin-bottom: 8px; }
-.mat-pool { max-height: 560px; overflow-y: auto; }
+.mat-pool { max-height: calc(100vh - 320px); min-height: 560px; overflow-y: auto; }
 .list-item.stale { opacity: .45; }
 .list-item.stale:hover { opacity: .8; }
+/* 成稿卡: 文字在编辑器, 此处配图/标签/复制 */
+.gen-final { border-top: 1px dashed var(--border); margin-top: 12px; padding-top: 10px; }
+.gen-asset { margin-top: 8px; }
+.gen-asset img { max-width: 100%; border: 1px solid var(--border); border-radius: 8px; }
 .list-item { padding: 9px var(--s3); border: 1px solid var(--border);
   border-radius: var(--r-ctl); margin-bottom: 7px; cursor: pointer; background: transparent;
   transition: border-color 120ms var(--ease), background 120ms var(--ease); }
@@ -449,3 +453,30 @@ input[type=radio], input[type=checkbox] { accent-color: var(--accent); }
 @media (max-width: 900px) { .surge-grid { grid-template-columns: 1fr; } }
 /* 账号管理表: 中文徽章/动作不竖排折行 */
 .tbl td .badge, .tbl td .act { white-space: nowrap; }
+
+/* ── 视频工坊: 素材池左栏布局(池 300px + 主栏 1fr; order 换位免搬模板; 窄屏沿用 .two-col 原断点纵堆) ── */
+.two-col.pool-right { grid-template-columns: 300px minmax(0, 1fr); }
+.two-col.pool-right > div:first-child { order: 2; }
+.two-col.pool-right > .card { order: 1; }
+@media (max-width: 1100px) {
+  .two-col.pool-right { grid-template-columns: 1fr; }
+}
+/* 内容生成·信息检索: 素材卡下补充信息折叠区 */
+.rv-block { margin-top: 5px; }
+.rv-toggle { font-size: 11.5px; cursor: pointer; color: var(--accent); }
+.rv-list { margin-top: 4px; }
+.rv-item { margin: 5px 0; padding: 6px 8px; border: 1px solid var(--border);
+  border-radius: 6px; font-size: 12px; }
+.rv-text { margin-top: 3px; color: var(--text-dim); display: -webkit-box;
+  -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+.rv-full { margin-top: 4px; max-height: 140px; overflow-y: auto; font-size: 12px;
+  color: var(--text-dim); white-space: pre-wrap; }
+
+/* 设置页 key 引导块: 注册来源 + 使用说明 */
+.key-guide { margin-top: 8px; padding: 8px 10px; background: var(--bg);
+  border: 1px solid var(--border); border-radius: var(--r-ctl);
+  font-size: 11.5px; color: var(--text-mute); line-height: 1.7; }
+.key-guide a { color: var(--accent); text-decoration: none; }
+.key-guide a:hover { text-decoration: underline; }
+.key-guide b { color: var(--text-dim); }
+.key-guide code { font-size: 10.5px; }

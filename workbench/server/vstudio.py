@@ -1,0 +1,1066 @@
+"""视频工坊后端：视频池、三级分析降级链、口播脚本生成与只读视图。
+
+分析按 G0 Gemini 看片 → G1 yt-dlp 字幕 → G2 热点库元数据逐级降级；每层都记录
+结果与证据，无法确认的维度显式标为 N/A。架构红线：本模块外呼仅发生在 CLI
+进程，app.py 端点零外呼（除两个 Popen spawn）；端点只读缓存或写
+data/workbench/ 自有 JSON。所有自有对象原子落盘，损坏文件按空库恢复。
+"""
+
+import hashlib
+import json
+import os
+import re
+import subprocess
+import tempfile
+import time
+from datetime import datetime
+from pathlib import Path
+
+from . import config, yt_track
+
+DATA_DIR = Path(__file__).resolve().parents[2] / "data" / "workbench"
+ANALYSES_FILE = DATA_DIR / "video_analyses.json"
+JOBS_FILE = DATA_DIR / "video_jobs.json"
+BUILD_LOG_DIR = DATA_DIR / "video_builds"
+MAX_POOL = 500
+MAX_ANALYSES = 200
+MAX_SCRIPTS = 300
+JOB_KINDS = ("analyze", "generate", "build")
+# build 是分钟级真渲染, stale 阈值独立放宽到 60 分钟; analyze/generate 维持 20 分钟
+JOB_STALE_S = {"analyze": 20 * 60, "generate": 20 * 60, "build": 60 * 60}
+SEMANTIC_KEYS = ("theme", "hook", "structure", "devices", "voice", "cta",
+                 "reusable", "visuals", "tier_note")
+
+STYLE_PRESETS = [
+    {"id": "recap-ask-conclude", "name": "财经盘后", "format": "horizontal",
+     "target_s": 210, "wc": (700, 900),
+     "prompt": "开场四拍：recap → 替观众问 → 人设 → 先说结论。"},
+    {"id": "shorts-60", "name": "60 秒 Shorts", "format": "vertical",
+     "target_s": 60, "wc": (240, 270),
+     "prompt": "五段结构：Hook / Setup / Move / Gives / Payoff + CTA。"},
+    {"id": "shorts-90", "name": "90 秒 Shorts", "format": "vertical",
+     "target_s": 90, "wc": (360, 405),
+     "prompt": "加长五段结构：Hook / Setup / Move / Gives / Payoff + CTA。"},
+    {"id": "event-fast", "name": "事件快评", "format": "horizontal",
+     "target_s": 100, "wc": (320, 450),
+     "prompt": "首句必须是‘谁 + 做了什么 + 带张力的结果’，禁用比喻或拟人开头。"},
+    {"id": "framework", "name": "框架讲解", "format": "horizontal",
+     "target_s": 210, "wc": (700, 900),
+     "prompt": "给出 2—4 个可执行检查点，结论能被观众复用。"},
+    {"id": "contrarian", "name": "反方拆解", "format": "horizontal",
+     "target_s": 210, "wc": (700, 900),
+     "prompt": "权威重构并攻击反方信源；禁止连续两段纯批评，破立交替。"},
+    {"id": "from-analysis", "name": "跟随分析", "format": "horizontal",
+     "target_s": 210, "wc": (700, 900),
+     "prompt": "必须带 analysis_key；只参考 reusable、hook.categories、structure.arc，"
+               "严禁注入或复写对方原文。"},
+]
+_STYLES = {s["id"]: s for s in STYLE_PRESETS}
+
+ANALYZE_PROMPT = r"""你是财经视频内容与商业化分析师。请完整观看给定视频，输出两部分。
+
+第一部分是供机器解析的语义 JSON：先输出一个且仅一个 ```json 代码块（JSON 必须在报告之前），字段名有且仅用以下 10 个顶层字段：
+{
+  "theme":{"one_liner":"不超过40字","title_formula":"这类片的标题公式(含情绪词位/悬念位)","topics":["2-5个主题"],"audience":"受众","format":"内容形态"},
+  "hook":{"categories":["事实recap|替观众提问|人设议程|结论承诺"],"sequence":"开场时序结构","opening_line":"开场第一句原话","evidence":[{"timestamp":"[MM:SS-MM:SS]","quote":"原文"}]},
+  "structure":{"arc":"叙事弧","chapters":[{"t":"[MM:SS-MM:SS]","label":"章节","role":"作用"}],"pacing_note":"节奏,必须含量化占比数字"},
+  "devices":[{"device":"话术装置","evidence":[{"timestamp":"[MM:SS-MM:SS]","quote":"原文"}]}],
+  "voice":{"persona":"人设","address":"称呼","tone":"语气"},
+  "cta":{"mode":"single|multiple|none","action":"动作","touchpoints":[{"layer":"层级","timestamp":"时间码","evidence":"证据"}]},
+  "reusable":{"keep":"只保留风格机制","change":"必须替换的内容表达，禁止 carbon copy","script_seeds":["可复用写法种子"]},
+  "visuals":[{"category":"版式","function":"功能","timestamp":"时间码","packaging_elements":["包装"],"subtitle_style":"字幕样式","on_screen_text":"屏幕文字"}],
+  "tier_note":"模型通道说明"
+}
+第二部分是供人阅读的 Markdown 报告，固定三段：一、内容设计分析；二、视频设计分析；三、商业化链路。
+
+证据密度下限（不达标即不合格）：
+- 开场钩子：逐句还原开场 30-60 秒，evidence 至少 3 条，每条带时间码与逐字原文；
+- devices：至少 3 种话术装置（可从命中自证/权威重构/攻击反方信源/二元对立/认知反差/数据具体化/恐惧→CTA 直译中选），每种至少 2 条时间码证据；
+- chapters：视频 ≥10 分钟至少 8 个章节，3-10 分钟至少 5 个，≤60 秒给 3-5 个并精确到秒；pacing_note 必须给出各章时长占比与重头戏位置（例："重头戏占全片 40%，位于中段"）；
+- 时间码格式 [MM:SS-MM:SS]，超过 1 小时用 [HH:MM:SS]；
+- 引文保真：quote 必须是片中实际说出的完整中文原句，逐字转录，禁止翻译腔、禁止夹杂外文词、禁止改写拼接；
+- 章节占比要与真实时长一致，宁可 N/A 不可编造。
+N/A 纪律：无法确认写“N/A — 原因”；看不到的描述区或置顶评论写 N/A。reusable.keep 只留风格机制，reusable.change 写必须替换的内容与表达，禁止 carbon copy。报告之后不要附加说明。"""
+
+TEXT_ANALYZE_PROMPT = r"""你是财经视频文本分析师。根据下方字幕或元数据，先输出一个且仅一个 ```json 代码块（JSON 必须在报告之前），顶层 10 字段及结构必须为：theme:{one_liner,title_formula,topics[2-5],audience,format}；hook:{categories,sequence,opening_line,evidence:[{timestamp,quote}]}；structure:{arc,chapters:[{t,label,role}],pacing_note(必须含量化占比)}；devices:[{device,evidence:[]}]（至少 3 种装置，每种 ≥2 条证据）；voice:{persona,address,tone}；cta:{mode,action,touchpoints:[]}；reusable:{keep,change,script_seeds:[]}；visuals；tier_note。随后输出供人阅读的 Markdown 三段报告：一、内容设计分析；二、视频设计分析；三、商业化链路。证据必须来自输入；没有时间轴时 evidence.timestamp 写“N/A — 文本通道”，quote 加“[文本]”前缀且必须是输入中出现的原句，禁止夹杂外文。所有画面类维度以及 visuals 一律写“N/A — 文本通道”，禁止从文本猜画面。无法确认写“N/A — 原因”，禁止编造；reusable 只提炼机制，禁止 carbon copy。
+
+输入材料：
+"""
+
+GEN_SYSTEM = r"""你是财经口播脚本主编。只输出一个 ```json 代码块，不要解释。
+写作前逐句扫描九类禁令：
+①二元对比壳（不是A而是B）；②命令模板开头（别急着）；③伪洞察标记（真正、其实、本质上、说白了）；④冒号讲义腔；⑤模糊指代（这一点、它）；⑥时态错位（曾经…如今）；⑦没有参照物的空泛比较级（更、明显）；⑧抽象施压（很多人都没意识到）；⑨隐喻口号收尾（起航、破浪）。
+另禁：narration 中出现 Markdown、角色前缀、镜头/舞台指示（镜头切到、画面给出）、元话语（接下来我们看）。数字写成可念形式，例如“百分之十八”，代码和专名保留。on_screen 每条不超过 6 个词。全片只能有一个 CTA。
+输出 wb-video-script/v1：
+{"schema":"wb-video-script/v1","title":"不超过30字","format":"horizontal|vertical","style_id":"风格ID","duration_est_s":0,"word_count":0,"hook":{"type":"主钩子类型","variants":[{"type":"互异类型","text":"钩子"},{"type":"互异类型","text":"钩子"},{"type":"互异类型","text":"钩子"}]},"beats":[{"id":"b1","role":"hook|setup|move|gives|payoff|cta","duration_est_s":0,"narration":"纯口播","on_screen":[],"visual_hint":"画面建议","subtitle":"字幕"}],"cta":{"action":"动作","line":"唯一CTA原句"},"warnings":[]}
+必须恰好给 3 个类型互异的 hook variants；满足指定字数预算。
+带参考分析时：套用其开场时序与至少 2 种话术装置机制，章节推进节奏对齐其 chapters 骨架；只学机制，严禁复写参考中的原文、事实与标的。"""
+
+
+def _now() -> str:
+    return time.strftime("%Y-%m-%d %H:%M:%S")
+
+
+def _id(prefix: str) -> str:
+    # 秒级时间戳 + 毫秒尾数: 同秒内多次写入不撞 id
+    return prefix + time.strftime("%m%d%H%M%S") + f"{int(time.time() * 1000) % 1000:03d}"
+
+
+def _atomic_json(path: Path, value) -> None:
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=str(DATA_DIR), suffix=".tmp")
+    with os.fdopen(fd, "w", encoding="utf-8") as f:
+        json.dump(value, f, ensure_ascii=False, indent=2)
+    os.replace(tmp, path)
+
+
+def parse_video_input(text: str) -> dict | None:
+    """识别常见 YouTube 视频输入，统一为 watch URL；识别失败返回 None。"""
+    s = (text or "").strip()
+    if not s:
+        return None
+    if re.fullmatch(r"[A-Za-z0-9_-]{11}", s):
+        vid = s
+    else:
+        patterns = (
+            r"(?:https?://)?(?:www\.)?youtube\.com/watch\?[^\s#]*?\bv=([A-Za-z0-9_-]{11})",
+            r"(?:https?://)?(?:www\.)?youtu\.be/([A-Za-z0-9_-]{11})(?:[?/#]|$)",
+            r"(?:https?://)?(?:www\.)?youtube\.com/(?:shorts|live)/([A-Za-z0-9_-]{11})(?:[?/#]|$)",
+        )
+        vid = ""
+        for pattern in patterns:
+            m = re.search(pattern, s, re.I)
+            if m:
+                vid = m.group(1)
+                break
+        if not vid:
+            return None
+    return {"video_id": vid, "url": f"https://www.youtube.com/watch?v={vid}"}
+
+
+def analysis_key_of(video_id: str, url: str) -> str:
+    return video_id or "u" + hashlib.sha1((url or "").encode()).hexdigest()[:12]
+
+
+def _word_count(text: str) -> int:
+    return len(re.sub(r"\s+", "", text or ""))
+
+
+def validate_script(script: dict, style: dict) -> list[str]:
+    """返回脚本契约警告，不因模型格式瑕疵抛异常。"""
+    warnings = []
+    if not isinstance(script, dict):
+        return ["脚本不是 JSON 对象"]
+    beats = script.get("beats") if isinstance(script.get("beats"), list) else []
+    minimum = 5 if style.get("format") == "vertical" else 4
+    if len(beats) < minimum:
+        warnings.append(f"beats 不足：{len(beats)}，至少需要 {minimum}")
+    hook_obj = script.get("hook") if isinstance(script.get("hook"), dict) else {}
+    variants = hook_obj.get("variants")
+    variants = variants if isinstance(variants, list) else []
+    types = [v.get("type") if isinstance(v, dict) else None for v in variants]
+    if len(variants) != 3 or any(not t for t in types) or len(set(types)) != 3:
+        warnings.append("hook.variants 必须恰好 3 条且 type 互异")
+    narrations = []
+    for i, beat in enumerate(beats, 1):
+        narration = str(beat.get("narration") or "") if isinstance(beat, dict) else ""
+        narrations.append(narration)
+        if ("**" in narration or re.search(r"^\s*#", narration, re.M)
+                or "旁白：" in narration or "voiceover:" in narration.lower()):
+            warnings.append(f"beat {i} narration 含禁用标记")
+    count = _word_count("".join(narrations))
+    lo, hi = style.get("wc", (0, 10**9))
+    if count < lo * 0.8 or count > hi * 1.2:
+        warnings.append(f"口播字数 {count} 超出预算 {lo}—{hi} 的 ±20% 容差")
+    cta_beats = [b for b in beats if isinstance(b, dict) and b.get("role") == "cta"]
+    cta = script.get("cta") if isinstance(script.get("cta"), dict) else {}
+    if len(cta_beats) != 1 or not cta.get("action") or not cta.get("line"):
+        warnings.append("CTA 必须唯一，且 cta.action/cta.line 均非空")
+    return warnings
+
+
+def _tc_s(ts: str) -> float:
+    """[MM:SS] 或 [HH:MM:SS] 时间戳 → 秒。"""
+    p = str(ts).split(":")
+    if len(p) == 3:
+        return int(p[0]) * 3600 + int(p[1]) * 60 + int(p[2])
+    return int(p[0]) * 60 + int(p[1])
+
+
+def seed_from_analysis(record: dict) -> dict:
+    """把分析缓存确定性转换为可编辑脚本种子，不调用 LLM。"""
+    semantic = record.get("semantic") if isinstance(record.get("semantic"), dict) else {}
+    hook = semantic.get("hook") if isinstance(semantic.get("hook"), dict) else {}
+    categories = hook.get("categories") if isinstance(hook.get("categories"), list) else []
+    category = str(categories[0]) if categories else "事实recap"
+    # 真钩子文本: opening_line / script_seeds 改写, 不再用类别标签当变体
+    reusable = semantic.get("reusable") if isinstance(semantic.get("reusable"), dict) else {}
+    seeds = [str(x) for x in (reusable.get("script_seeds") or []) if str(x).strip()]
+    opening = str(hook.get("opening_line") or "").strip()
+    variants = [x for x in [opening] + seeds[:2] if x][:3] or \
+               [str(record.get("title") or "未命名视频")[:30]]
+    structure = semantic.get("structure") if isinstance(semantic.get("structure"), dict) else {}
+    chapters = structure.get("chapters") if isinstance(structure.get("chapters"), list) else []
+    if not chapters:
+        chapters = [{"label": f"空拍占位 {i}"} for i in range(1, 6)]
+    # 时长按章节时间码区间占比分拍(评估 P1: 原片节奏配比不再被硬编码 210s 抹平)
+    spans = []
+    for c in chapters:
+        if not isinstance(c, dict):
+            continue
+        nums = [_tc_s(x) for x in re.findall(r"\d{1,2}:\d{2}(?::\d{2})?", str(c.get("t") or ""))]
+        if len(nums) >= 2:
+            spans.append(max(0.0, nums[1] - nums[0]))
+    if spans and sum(spans) > 0:
+        total_s = min(max(int(sum(spans)), 30), 1800)
+        weights = spans
+    else:
+        total_s = 210
+        weights = [1.0] * len(chapters)
+    wsum = sum(weights) or 1.0
+    beats = []
+    for i, (chapter, w) in enumerate(zip(chapters, weights), 1):
+        chapter = chapter if isinstance(chapter, dict) else {}
+        role = "hook" if i == 1 else ("cta" if i == len(chapters) else "setup")
+        beats.append({"id": f"b{i}", "role": role, "duration_est_s": max(1, round(total_s * w / wsum)),
+                      "narration": "", "on_screen": [],
+                      "visual_hint": str(chapter.get("label") or ""), "subtitle": ""})
+    title = str(record.get("title") or "未命名视频")[:30]
+    return {"schema": "wb-video-script/v1", "title": title, "format": "horizontal",
+            "style_id": "from-analysis", "duration_est_s": total_s, "word_count": 0,
+            "hook": {"type": category, "variants": variants},
+            "beats": beats, "cta": {"action": "", "line": ""},
+            "reusable": semantic.get("reusable"),
+            "warnings": ["种子为骨架: 钩子/口播待在脚本生成页以 from-analysis 风格展开"]}
+
+
+def chat_completions(base: str, key: str, model: str, messages: list,
+                     temperature: float, max_tokens: int, timeout: int) -> str | None:
+    """OpenAI 兼容 /chat/completions；仅由 CLI 主流程调用。"""
+    import urllib.request
+    body = json.dumps({"model": model, "temperature": temperature,
+                       "max_tokens": max_tokens, "messages": messages}).encode("utf-8")
+    req = urllib.request.Request(
+        base.rstrip("/") + "/chat/completions", data=body,
+        headers={"Content-Type": "application/json", "Authorization": f"Bearer {key}"})
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as response:
+            data = json.loads(response.read())
+        return (data["choices"][0]["message"]["content"] or "").strip() or None
+    except Exception:
+        return None
+
+
+def gemini_watch_url(url: str, prompt: str, key: str, model: str,
+                     timeout: int = 180) -> tuple[str | None, str | None]:
+    """Gemini URL 看片请求；429/5xx/超时等瞬时失败自动重试 1 次，4xx 证据类失败不重试。"""
+    import urllib.error
+    import urllib.parse
+    import urllib.request
+    import time as _t
+    endpoint = ("https://generativelanguage.googleapis.com/v1beta/models/"
+                + urllib.parse.quote(model, safe="") + ":generateContent")
+    body = json.dumps({"contents": [{"parts": [
+        {"file_data": {"file_uri": url}}, {"text": prompt}]}],
+        "generationConfig": {"temperature": 0.2, "maxOutputTokens": 8192}}).encode("utf-8")
+    req = urllib.request.Request(endpoint, data=body,
+                                 headers={"x-goog-api-key": key,
+                                          "Content-Type": "application/json"})
+    last_evidence = None
+    for attempt in (0, 1):                            # 瞬时失败重试一次
+        if attempt:
+            _t.sleep(3)
+        try:
+            with urllib.request.urlopen(req, timeout=timeout) as response:
+                data = json.loads(response.read())
+            parts = data["candidates"][0]["content"]["parts"]
+            text = "\n".join(str(p.get("text") or "") for p in parts if p.get("text")).strip()
+            return (text or None), None
+        except urllib.error.HTTPError as e:
+            try:
+                evidence = e.read().decode("utf-8", "replace")[:200]
+            except Exception:
+                evidence = f"HTTP {e.code}"
+            last_evidence = evidence
+            if e.code < 500 and e.code != 429:        # 证据类失败(配额尽/参数错)重试无意义
+                return None, evidence
+        except Exception as e:
+            last_evidence = str(e)[:200]
+    return None, last_evidence
+
+
+def _empty_analyses() -> dict:
+    return {"version": 1, "updated_at": None, "analyses": {}}
+
+
+def _load_analyses() -> dict:
+    try:
+        data = json.loads(ANALYSES_FILE.read_text(encoding="utf-8"))
+        if (not isinstance(data, dict) or not isinstance(data.get("analyses"), dict)
+                or not all(isinstance(v, dict) for v in data["analyses"].values())):
+            raise ValueError("bad store")
+        data.setdefault("version", 1)
+        data.setdefault("updated_at", None)
+        return data
+    except Exception:
+        return _empty_analyses()
+
+
+def _save_analyses(store: dict) -> None:
+    analyses = store.get("analyses") or {}
+    if len(analyses) > MAX_ANALYSES:
+        keep = sorted(analyses.items(), key=lambda item: item[1].get("updated_at") or "",
+                      reverse=True)[:MAX_ANALYSES]
+        store["analyses"] = dict(keep)
+    store["version"] = 1
+    store["updated_at"] = _now()
+    _atomic_json(ANALYSES_FILE, store)
+
+
+def _empty_job() -> dict:
+    return {"running": False, "started_at": None, "finished_at": None, "exit": None,
+            "progress": {"stage": "idle", "pct": 0, "message": ""}, "request": {},
+            "error": "", "hint": ""}
+
+
+def _empty_build_result() -> dict:
+    return {"project_id": "", "output": "", "warnings": []}
+
+
+def load_jobs() -> dict:
+    try:
+        data = json.loads(JOBS_FILE.read_text(encoding="utf-8"))
+        if not isinstance(data, dict):
+            raise ValueError("bad jobs")
+    except Exception:
+        data = {}
+    for kind in JOB_KINDS:
+        base = _empty_job()
+        raw = data.get(kind) if isinstance(data.get(kind), dict) else {}
+        base.update(raw)
+        progress = raw.get("progress") if isinstance(raw.get("progress"), dict) else {}
+        base["progress"] = {**_empty_job()["progress"], **progress}
+        if kind == "analyze":
+            base.setdefault("result_key", "")
+        elif kind == "build":
+            base.setdefault("result", _empty_build_result())
+        else:
+            base.setdefault("result", None)
+        data[kind] = base
+    return {kind: data[kind] for kind in JOB_KINDS}
+
+
+def _save_jobs(jobs: dict) -> None:
+    _atomic_json(JOBS_FILE, jobs)
+
+
+def begin_job(kind: str, request: dict) -> None:
+    jobs = load_jobs()
+    job = _empty_job()
+    job.update({"running": True, "started_at": _now(), "request": dict(request or {})})
+    if kind == "analyze":
+        job["result_key"] = ""
+    elif kind == "build":
+        job["result"] = _empty_build_result()
+    else:
+        job["result"] = None
+    jobs[kind] = job
+    _save_jobs(jobs)
+
+
+def tick(kind: str, stage: str, pct: int, msg: str) -> None:
+    jobs = load_jobs()
+    jobs[kind]["progress"] = {"stage": stage, "pct": pct, "message": msg}
+    _save_jobs(jobs)
+
+
+def _set_job_result(kind: str, value) -> None:
+    jobs = load_jobs()
+    jobs[kind]["result_key" if kind == "analyze" else "result"] = value
+    _save_jobs(jobs)
+
+
+def finish_job(kind: str, exit: int, error: str, hint: str = "") -> None:
+    jobs = load_jobs()
+    jobs[kind].update({"running": False, "finished_at": _now(), "exit": exit,
+                       "error": error or "", "hint": hint or ""})
+    if exit == 0:
+        jobs[kind]["progress"] = {"stage": "done", "pct": 100, "message": "完成"}
+    _save_jobs(jobs)
+
+
+def _age_seconds(stamp: str | None) -> float:
+    if not stamp:
+        return float("inf")
+    try:
+        return time.time() - datetime.strptime(stamp, "%Y-%m-%d %H:%M:%S").timestamp()
+    except Exception:
+        return float("inf")
+
+
+def job_running(kind: str) -> bool:
+    job = load_jobs().get(kind) or {}
+    stale = JOB_STALE_S.get(kind, 20 * 60)
+    return bool(job.get("running")) and _age_seconds(job.get("started_at")) <= stale
+
+
+def status_payload() -> dict:
+    jobs = load_jobs()
+    common = ("running", "started_at", "finished_at", "exit", "progress", "error",
+              "hint", "request")
+    out = {kind: {k: jobs[kind].get(k) for k in common} for kind in jobs}
+    out["analyze"]["result_key"] = jobs["analyze"].get("result_key", "")
+    out["generate"]["result"] = jobs["generate"].get("result")
+    out["build"]["result"] = jobs["build"].get("result") or _empty_build_result()
+    return out
+
+
+def _parse_json_reply(text: str) -> tuple[dict | None, str]:
+    raw = text or ""
+    match = re.search(r"```json\s*([\s\S]*?)```", raw, re.I)
+    candidate = match.group(1).strip() if match else raw
+    start, end = candidate.find("{"), candidate.rfind("}")
+    if start < 0 or end <= start:
+        return None, raw.strip()
+    try:
+        parsed = json.loads(candidate[start:end + 1])
+        if not isinstance(parsed, dict):
+            return None, raw.strip()
+    except Exception:
+        return None, raw.strip()
+    if match:
+        report = (raw[:match.start()] + raw[match.end():]).strip()
+    else:
+        report = (raw[:start] + raw[end + 1:]).strip()
+    return parsed, report
+
+
+def _normalize_semantic(value: dict | None, tier_note: str, text_only: bool = False) -> dict:
+    semantic = dict(value or {})
+    visuals_missing = semantic.get("visuals") in (None, "", [])
+    missing = "N/A — 模型未输出该字段"
+    for key in SEMANTIC_KEYS:
+        semantic.setdefault(key, missing)
+    theme = semantic.get("theme")
+    if isinstance(theme, dict):
+        theme.setdefault("title_formula", missing)   # 10 字段: 标题公式(评估 P1 增补)
+    if text_only:
+        semantic["visuals"] = "N/A — 文本通道"
+    elif visuals_missing:
+        semantic["visuals"] = "N/A — 未观看画面"
+    semantic["tier_note"] = tier_note
+    return semantic
+
+
+def _vtt_text(paths: list[Path]) -> str:
+    lines, last = [], None
+    for path in paths:
+        try:
+            raw_lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
+        except Exception:
+            continue
+        for line in raw_lines:
+            line = line.strip()
+            if (not line or line == "WEBVTT" or line.startswith(("Kind:", "Language:"))
+                    or "-->" in line or re.fullmatch(r"\d+", line)):
+                continue
+            line = re.sub(r"<[^>]+>", "", line).strip()
+            line = re.sub(r"&nbsp;", " ", line)
+            if line and line != last:
+                lines.append(line)
+                last = line
+    return "\n".join(lines)[:12000]
+
+
+def _yt_meta_of(video_id: str) -> dict:
+    """从热点库补展示元数据(标题/频道/时长/竖版标记), 缺库返回空。"""
+    if not video_id:
+        return {}
+    v = (yt_track.load_store().get("videos") or {}).get(video_id) or {}
+    chs = {c.get("channel_id"): c for c in config.load_yt_channels()}
+    return {"title": v.get("title") or "", "channel_title": (chs.get(v.get("channel_id")) or {}).get("title") or "",
+            "duration_s": v.get("duration_s"), "is_short": v.get("is_short")}
+
+
+def _target(request: dict) -> tuple[dict | None, dict | None]:
+    if request.get("pool_id"):
+        row = next((r for r in config.load_video_pool()
+                    if r.get("id") == request.get("pool_id")), None)
+        if not row:
+            return None, {"error": "pool_not_found", "hint": "视频池中未找到该条目"}
+        t = {"video_id": row.get("video_id") or "", "url": row.get("url") or "",
+             "title": row.get("title") or "", "channel_title": row.get("channel_title") or ""}
+        if not t["title"]:                          # 池行快照缺失时从热点库兜底补齐
+            t.update({k: v for k, v in _yt_meta_of(t["video_id"]).items()
+                      if k in ("title", "channel_title") and v})
+        return t, None
+    parsed = parse_video_input(str(request.get("url") or ""))
+    if not parsed:
+        return None, {"error": "bad_video_input", "hint": "请输入 YouTube 视频链接或 11 位视频 ID"}
+    parsed.update({"title": "", "channel_title": ""})
+    meta = _yt_meta_of(parsed.get("video_id") or "")
+    parsed["title"] = meta.get("title") or ""
+    parsed["channel_title"] = meta.get("channel_title") or ""
+    return parsed, None
+
+
+def _analysis_record(target: dict, key: str, attempted: list, status: str,
+                     tier: str, report_md: str, semantic: dict, model: str = "",
+                     text_model: str = "", error: str = "") -> dict:
+    old = (_load_analyses().get("analyses") or {}).get(key) or {}
+    now = _now()
+    return {"key": key, "video_id": target.get("video_id") or "",
+            "url": target.get("url") or "", "title": target.get("title") or "",
+            "channel_title": target.get("channel_title") or "", "status": status,
+            "tier_used": tier, "tiers_attempted": attempted, "report_md": report_md,
+            "semantic": semantic, "model": model, "text_model": text_model,
+            "created_at": old.get("created_at") or now, "updated_at": now,
+            "error": error or ""}
+
+
+def _save_analysis(record: dict) -> None:
+    store = _load_analyses()
+    store["analyses"][record["key"]] = record
+    _save_analyses(store)
+
+
+def _translate_cfg(cfg: dict) -> tuple[str, str, str] | None:
+    t = cfg.get("translate") or {}
+    values = (str(t.get("base_url") or ""), str(t.get("api_key") or ""),
+              str(t.get("model") or ""))
+    return values if all(values) else None
+
+
+def run_analyze(request: dict) -> tuple[dict, int]:
+    """执行 G0/G1/G2 分析链；本函数只由 CLI 进程调用。"""
+    target, err = _target(request or {})
+    if err:
+        return err, 4
+    key = analysis_key_of(target["video_id"], target["url"])
+    cached = (_load_analyses().get("analyses") or {}).get(key)
+    if cached and cached.get("status") in ("ok", "partial") and not request.get("force"):
+        return {**cached, "skipped_cache": True}, 0
+
+    cfg = config.load()
+    gem = cfg.get("gemini") or {}
+    gem_key = str(gem.get("api_key") or "")
+    gem_model = str(gem.get("model") or "gemini-3.6-flash")
+    translate = _translate_cfg(cfg)
+    if not gem_key and not translate:
+        return {"error": "no_llm_config", "hint": "到设置页配置 Gemini 或翻译模型"}, 4
+
+    attempted = []
+    last_evidence = ""
+
+    # G0：Gemini 直接观看 YouTube URL。
+    if gem_key and target.get("video_id"):
+        tick("analyze", "gemini", 5, "Gemini 看片分析中…")
+        prompt = ANALYZE_PROMPT
+        # 时长自适应粒度: 短片重精确, 长片重覆盖面
+        meta_of = _yt_meta_of(target.get("video_id") or "")
+        dur_s = meta_of.get("duration_s")
+        try:
+            dur_s = int(dur_s) if dur_s else None
+        except Exception:
+            dur_s = None
+        if dur_s and dur_s <= 90:
+            prompt += f"\n本片约 {dur_s} 秒: chapters 给 3-5 个并精确到秒, devices 至少 2 种。"
+        elif dur_s and dur_s >= 600:
+            prompt += f"\n本片约 {dur_s // 60} 分钟: chapters 至少 8 个, devices 至少 4 种, 开场逐句还原前 60 秒。"
+        # 描述区/标签材料(平台数据, 非画面内容): 填掉商业化链路的 N/A 洞
+        if meta_of.get("description_head"):
+            prompt += ("\n\n[来自平台数据的已知材料, 供交叉印证, 非画面内容]\n描述区开头: "
+                       + meta_of["description_head"])
+        raw, evidence = gemini_watch_url(target["url"], prompt, gem_key, gem_model)
+        if raw:
+            attempted.append({"tier": "gemini", "result": "success", "evidence": gem_model})
+            tick("analyze", "parse", 80, "解析语义字段")
+            parsed, report_md = _parse_json_reply(raw)
+            status = "ok" if parsed else "partial"
+            semantic = _normalize_semantic(parsed or {"raw_saved": True},
+                                           f"G0 {gem_model} 看片")
+            record = _analysis_record(target, key, attempted, status, "gemini",
+                                      report_md or raw, semantic, model=gem_model,
+                                      error="" if parsed else "semantic_json_parse_failed")
+            tick("analyze", "save", 95, "落盘")
+            _save_analysis(record)
+            return record, 0
+        last_evidence = evidence or "Gemini 未返回内容"
+        attempted.append({"tier": "gemini", "result": "failed",
+                          "evidence": last_evidence[:200]})
+    else:
+        attempted.append({"tier": "gemini", "result": "skipped",
+                          "evidence": "未配置 Gemini 或非 YouTube URL"})
+
+    # G1：yt-dlp 获取字幕，再交给文本模型分析。
+    if translate:
+        tick("analyze", "ytdlp", 20, "提取字幕中…")
+        base, tkey, tmodel = translate
+        with tempfile.TemporaryDirectory() as tmp:
+            cmd = ["py", "-3.12", "-m", "yt_dlp", "--skip-download", "--write-subs",
+                   "--write-auto-subs", "--sub-langs", "zh-Hans,zh-Hant,zh,en",
+                   "--js-runtimes", "node",   # 新版 yt-dlp 抽 YouTube 需 JS 运行时, 默认只认 deno
+                   "--print", "after_filter:%(title)s|%(channel)s|%(duration)s"]
+            cookies = Path(os.environ.get("USERPROFILE", "")) / ".config" / "yt-dlp" / "cookies.txt"
+            if cookies.is_file():
+                cmd += ["--cookies", str(cookies)]
+            cmd.append(target["url"])
+            try:
+                proc = subprocess.run(cmd, cwd=tmp, capture_output=True, text=True,
+                                      encoding="utf-8", errors="replace", timeout=60)
+                vtt = _vtt_text(list(Path(tmp).glob("*.vtt")))
+                meta_line = next((line for line in reversed((proc.stdout or "").splitlines())
+                                  if line.count("|") >= 2), "")
+                if proc.returncode != 0 or not vtt:
+                    raise RuntimeError((proc.stderr or "未获取到字幕")[:200])
+                title, channel, duration = (meta_line.split("|", 2) + ["", "", ""])[:3]
+                target["title"] = target.get("title") or title
+                target["channel_title"] = target.get("channel_title") or channel
+                material = f"标题: {title}\n频道: {channel}\n时长: {duration}\n字幕:\n{vtt}"
+                raw = chat_completions(base, tkey, tmodel,
+                                       [{"role": "system", "content": TEXT_ANALYZE_PROMPT},
+                                        {"role": "user", "content": material}],
+                                       0.3, 3000, 120)
+                if not raw:
+                    raise RuntimeError("文本模型未返回内容")
+                attempted.append({"tier": "ytdlp", "result": "success",
+                                  "evidence": f"字幕 {len(vtt)} 字"})
+                tick("analyze", "parse", 80, "解析语义字段")
+                parsed, report_md = _parse_json_reply(raw)
+                status = "ok" if parsed else "partial"
+                semantic = _normalize_semantic(parsed or {"raw_saved": True},
+                                               f"G1 {tmodel} 字幕文本", text_only=True)
+                record = _analysis_record(target, key, attempted, status, "ytdlp",
+                                          report_md or raw, semantic, text_model=tmodel,
+                                          error="" if parsed else "semantic_json_parse_failed")
+                tick("analyze", "save", 95, "落盘")
+                _save_analysis(record)
+                return record, 0
+            except Exception as e:
+                last_evidence = (str(e) or type(e).__name__)[:200]
+                attempted.append({"tier": "ytdlp", "result": "failed",
+                                  "evidence": last_evidence})
+    else:
+        attempted.append({"tier": "ytdlp", "result": "skipped",
+                          "evidence": "翻译模型未完整配置"})
+
+    # G2：仅使用热点追踪缓存元数据，不从 app.py 端点外呼。
+    if translate:
+        tick("analyze", "meta", 55, "使用元数据分析…")
+        base, tkey, tmodel = translate
+        video = (yt_track.load_store().get("videos") or {}).get(target.get("video_id"))
+        if video:
+            series = video.get("series") or []
+            latest = series[-1] if series else {}
+            target["title"] = target.get("title") or str(video.get("title") or "")
+            target["channel_title"] = target.get("channel_title") or str(video.get("channel_title") or "")
+            material = json.dumps({
+                "title": video.get("title"), "tags": video.get("tags"),
+                "description_head": video.get("description_head"),
+                "summary": (video.get("insight") or {}).get("summary"),
+                "duration_s": video.get("duration_s"), "is_short": video.get("is_short"),
+                "latest": {"views": latest.get("v"), "likes": latest.get("l"),
+                           "comments": latest.get("c")}}, ensure_ascii=False)
+            raw = chat_completions(base, tkey, tmodel,
+                                   [{"role": "system", "content": TEXT_ANALYZE_PROMPT},
+                                    {"role": "user", "content": material}],
+                                   0.3, 3000, 120)
+            if raw:
+                attempted.append({"tier": "meta", "result": "success",
+                                  "evidence": "命中 yt_videos 元数据快照"})
+                tick("analyze", "parse", 80, "解析语义字段")
+                parsed, report_md = _parse_json_reply(raw)
+                semantic = _normalize_semantic(parsed or {"raw_saved": True},
+                                               f"G2 {tmodel} 元数据", text_only=True)
+                record = _analysis_record(target, key, attempted, "partial", "meta",
+                                          report_md or raw, semantic, text_model=tmodel,
+                                          error="" if parsed else "semantic_json_parse_failed")
+                tick("analyze", "save", 95, "落盘")
+                _save_analysis(record)
+                return record, 0
+            last_evidence = "元数据文本模型未返回内容"
+        else:
+            last_evidence = "yt_videos 未命中该 video_id"
+        attempted.append({"tier": "meta", "result": "failed", "evidence": last_evidence})
+    else:
+        attempted.append({"tier": "meta", "result": "skipped",
+                          "evidence": "翻译模型未完整配置"})
+
+    record = _analysis_record(target, key, attempted, "failed", "", "", {},
+                              error=last_evidence or "所有分析通道均失败")
+    tick("analyze", "save", 95, "记录失败")
+    _save_analysis(record)
+    return record, 3
+
+
+def _material_for_generate(request: dict) -> tuple[str | None, dict | None]:
+    parts = []
+    brief = str(request.get("brief") or "").strip()
+    if brief:
+        parts.append("一句话简报：\n" + brief)
+    draft_id = str(request.get("draft_id") or "").strip()
+    if draft_id:
+        draft = next((d for d in config.load_drafts() if d.get("id") == draft_id), None)
+        if not draft:
+            return None, {"error": "draft_not_found", "hint": "所选草稿不存在"}
+        parts.append("草稿正文：\n" + str(draft.get("content") or "")[:12000])
+    pasted = str(request.get("pasted") or "").strip()
+    if pasted:
+        parts.append("粘贴材料：\n" + pasted[:20000])
+    if not parts:
+        return None, {"error": "no_input", "hint": "填一句话简报、粘贴文章或选草稿"}
+    return "\n\n".join(parts), None
+
+
+def run_generate(request: dict) -> tuple[dict, int]:
+    """调用文本模型生成 wb-video-script/v1；仅由 CLI 进程调用。"""
+    request = request or {}
+    style_id = str(request.get("style_id") or "")
+    style = _STYLES.get(style_id)
+    if not style:
+        return {"error": "bad_style"}, 4
+    material, err = _material_for_generate(request)
+    if err:
+        return err, 4
+    reference = ""
+    if style_id == "from-analysis":
+        analysis_key = str(request.get("analysis_key") or "")
+        record = (_load_analyses().get("analyses") or {}).get(analysis_key)
+        if not analysis_key or not record:
+            return {"error": "analysis_required",
+                    "hint": "跟随分析风格需要有效 analysis_key"}, 4
+        semantic = record.get("semantic") if isinstance(record.get("semantic"), dict) else {}
+        hook = semantic.get("hook") if isinstance(semantic.get("hook"), dict) else {}
+        structure = semantic.get("structure") if isinstance(structure.get("structure"), dict) else {}
+        # 机制层注入(扩充): 装置名/人设/章节骨架/开场时序/标题公式——引文 evidence 原文仍不注入
+        devices = semantic.get("devices") if isinstance(semantic.get("devices"), list) else []
+        chapters = structure.get("chapters") if isinstance(structure.get("chapters"), list) else []
+        theme = semantic.get("theme") if isinstance(semantic.get("theme"), dict) else {}
+        cta = semantic.get("cta") if isinstance(semantic.get("cta"), dict) else {}
+        safe_ref = {
+            "reusable": semantic.get("reusable"),
+            "hook_categories": hook.get("categories"),
+            "hook_sequence": hook.get("sequence"),
+            "structure_arc": structure.get("arc"),
+            "chapters": [{"label": c.get("label"), "role": c.get("role")}
+                         for c in chapters if isinstance(c, dict)][:14],
+            "devices": [str(d.get("device")) for d in devices if isinstance(d, dict) and d.get("device")],
+            "voice": semantic.get("voice"),
+            "title_formula": theme.get("title_formula"),
+            "cta_action": cta.get("action"),
+        }
+        reference = ("\n参考分析（只可借鉴机制与结构节奏，严禁复写对方原文、事实与标的）：\n"
+                     + json.dumps(safe_ref, ensure_ascii=False))
+    cfg = config.load()
+    translate = _translate_cfg(cfg)
+    if not translate:
+        return {"error": "no_llm_config", "hint": "到设置页配置翻译模型"}, 4
+    base, key, model = translate
+    lo, hi = style["wc"]
+    user = (f"风格：{style['name']}（{style_id}）\n格式：{style['format']}\n"
+            f"目标时长：{style['target_s']} 秒\n口播字数预算：{lo}—{hi} 字\n"
+            f"风格要点：{style['prompt']}\n\n输入材料：\n{material}{reference}")
+    tick("generate", "llm", 15, "生成口播脚本中…")
+    raw = chat_completions(base, key, model,
+                           [{"role": "system", "content": GEN_SYSTEM},
+                            {"role": "user", "content": user}], 0.5, 3500, 90)
+    if not raw:
+        return {"error": "llm_failed", "hint": "模型未返回内容"}, 3
+    tick("generate", "parse", 80, "校验脚本结构")
+    script, _ = _parse_json_reply(raw)
+    if not script:
+        return {"error": "llm_failed", "hint": "模型返回的 JSON 无法解析"}, 3
+    script["schema"] = "wb-video-script/v1"
+    script["style_id"] = style_id
+    script["format"] = style["format"]
+    script["title"] = str(script.get("title") or "未命名脚本")[:30]
+    beats = script.get("beats") if isinstance(script.get("beats"), list) else []
+    count = _word_count("".join(str(b.get("narration") or "")
+                                for b in beats if isinstance(b, dict)))
+    script["word_count"] = count
+    script["duration_est_s"] = min(max(round(count / 4.2), round(lo / 4.2)),
+                                   round(hi / 4.2))
+    warnings = script.get("warnings") if isinstance(script.get("warnings"), list) else []
+    for warning in validate_script(script, style):
+        if warning not in warnings:
+            warnings.append(warning)
+    script["warnings"] = warnings
+    _set_job_result("generate", script)
+    finish_job("generate", 0, "")
+    return {"style_id": style_id, "word_count": count, "warnings": warnings}, 0
+
+
+def pool_view() -> dict:
+    rows = config.load_video_pool()
+    videos = yt_track.load_store().get("videos") or {}
+    analyses = _load_analyses().get("analyses") or {}
+    items = []
+    for row in rows:
+        item = dict(row)
+        video = videos.get(row.get("video_id")) or {}
+        latest = (video.get("series") or [{}])[-1]
+        item.update({"views": latest.get("v"),
+                     "summary": (video.get("insight") or {}).get("summary"),
+                     "duration_s": video.get("duration_s"), "is_short": video.get("is_short")})
+        analysis = analyses.get(analysis_key_of(row.get("video_id") or "", row.get("url") or "")) or {}
+        item.update({"analysis_status": analysis.get("status"),
+                     "analysis_tier_used": analysis.get("tier_used")})
+        items.append(item)
+    return {"items": items,
+            "meta": {"n": len(items),
+                     "analyzed_n": sum(1 for i in items if i.get("analysis_status") in ("ok", "partial"))}}
+
+
+def analyses_index() -> list:
+    rows = [{k: record.get(k) for k in ("key", "title", "status", "tier_used", "updated_at")}
+            for record in (_load_analyses().get("analyses") or {}).values()]
+    return sorted(rows, key=lambda row: row.get("updated_at") or "", reverse=True)
+
+
+def analysis_get(key: str) -> dict | None:
+    return (_load_analyses().get("analyses") or {}).get(key)
+
+
+def scripts_view() -> list:
+    return sorted(config.load_video_scripts(), key=lambda row: row.get("updated_at") or "",
+                  reverse=True)
+
+
+def script_get(sid: str) -> dict | None:
+    return next((row for row in config.load_video_scripts() if row.get("id") == sid), None)
+
+
+def script_add(payload: dict) -> dict:
+    now = _now()
+    row = {"id": _id("vs"), "kind": payload.get("kind") or "generated",
+           "title": payload.get("title") or "未命名脚本",
+           "style_id": payload.get("style_id") or "", "reusable": False,
+           "analysis_key": payload.get("analysis_key") or "",
+           "draft_id": payload.get("draft_id") or "", "brief": payload.get("brief") or "",
+           "script": payload.get("script"), "created_at": now, "updated_at": now}
+    rows = config.load_video_scripts()
+    rows.append(row)
+    rows = sorted(rows, key=lambda item: item.get("updated_at") or "", reverse=True)[:MAX_SCRIPTS]
+    config.save_video_scripts(rows)
+    return row
+
+
+def script_update(sid: str, patch: dict) -> dict | None:
+    rows = config.load_video_scripts()
+    for row in rows:
+        if row.get("id") == sid:
+            if "title" in patch:
+                row["title"] = str(patch.get("title") or "")
+            if "reusable" in patch:
+                row["reusable"] = bool(patch.get("reusable"))
+            row["updated_at"] = _now()
+            config.save_video_scripts(rows)
+            return row
+    return None
+
+
+def script_del(sid: str) -> int:
+    rows = config.load_video_scripts()
+    kept = [row for row in rows if row.get("id") != sid]
+    if len(kept) != len(rows):
+        config.save_video_scripts(kept)
+        return 1
+    return 0
+
+
+def pool_add(payload: dict) -> tuple[dict | None, dict | None]:
+    raw_id = str(payload.get("video_id") or "").strip()
+    parsed = parse_video_input(raw_id) if raw_id else parse_video_input(str(payload.get("url") or ""))
+    if not parsed:
+        return None, {"error": "bad_input"}
+    rows = config.load_video_pool()
+    key = parsed["video_id"] or parsed["url"]
+    if any((row.get("video_id") or row.get("url")) == key for row in rows):
+        return None, {"error": "dup"}
+    now = _now()
+    meta = _yt_meta_of(parsed["video_id"])          # 入池即补热点库展示快照(标题/频道), 缺时留空
+    row = {"id": _id("p"), "video_id": parsed["video_id"], "url": parsed["url"],
+           "title": str(payload.get("title") or "") or meta.get("title", ""),
+           "channel_title": str(payload.get("channel_title") or "") or meta.get("channel_title", ""),
+           "thumb": str(payload.get("thumb") or ""),
+           "source": payload.get("source") if payload.get("source") in ("hot", "manual") else "manual",
+           "note": str(payload.get("note") or ""), "added_at": now}
+    rows.append(row)
+    rows = sorted(rows, key=lambda item: item.get("added_at") or "", reverse=True)[:MAX_POOL]
+    config.save_video_pool(rows)
+    return row, None
+
+
+def pool_del(pid: str) -> int:
+    rows = config.load_video_pool()
+    kept = [row for row in rows if row.get("id") != pid]
+    if len(kept) != len(rows):
+        config.save_video_pool(kept)
+        return 1
+    return 0
+
+
+def run_analyze_cli(args) -> int:
+    request = dict((load_jobs().get("analyze") or {}).get("request") or {})
+    if getattr(args, "url", None):
+        request = {"url": args.url, "force": bool(getattr(args, "force", False))}
+    elif request and getattr(args, "force", False):
+        request["force"] = True
+    if not request:
+        print(json.dumps({"error": "no_request"}, ensure_ascii=False))
+        return 4
+    report, code = {}, 3
+    try:
+        tick("analyze", "start", 1, "准备分析")
+        report, code = run_analyze(request)
+        if report.get("key"):
+            _set_job_result("analyze", report["key"])
+        return code
+    except Exception as e:
+        report, code = {"error": type(e).__name__, "hint": str(e)[:200]}, 3
+        return code
+    finally:
+        finish_job("analyze", code, str(report.get("error") or ""),
+                   str(report.get("hint") or ""))
+        print(json.dumps(report, ensure_ascii=False))
+
+
+def run_generate_cli(args) -> int:
+    request = dict((load_jobs().get("generate") or {}).get("request") or {})
+    if not request:
+        print(json.dumps({"error": "no_request"}, ensure_ascii=False))
+        return 4
+    report, code = {}, 3
+    try:
+        tick("generate", "start", 1, "准备生成")
+        report, code = run_generate(request)
+        return code
+    except Exception as e:
+        report, code = {"error": type(e).__name__, "hint": str(e)[:200]}, 3
+        return code
+    finally:
+        finish_job("generate", code, str(report.get("error") or ""),
+                   str(report.get("hint") or ""))
+        print(json.dumps(report, ensure_ascii=False))
+
+
+# ── 视频制作（build 槽）：转换 → 建项目 → node build.mjs 逐行跟进 ────────────
+
+BUILD_TIMEOUT_S = 3600     # 总超时: 渲染分钟级, 1 小时保底杀树
+
+
+def run_build_cli(args) -> int:
+    """CLI 子进程入口：读 build.request → vmake 转换建项目 → 渲染跟进。
+
+    进度映射：convert 5→15% / create 20% / prepare 25% / tts 30→60% /
+    render 65% → 95% / done 100%。全部构建输出原文追加写
+    data/workbench/video_builds/<project_id>.log（前端「查看日志」读同一文件）。
+    """
+    from . import vmake
+    request = dict((load_jobs().get("build") or {}).get("request") or {})
+    if not request:
+        print(json.dumps({"error": "no_request"}, ensure_ascii=False))
+        return 4
+    project_id = str(request.get("project_id") or "")
+    mode = str(request.get("mode") or "build")
+    script = request.get("script") if isinstance(request.get("script"), dict) else {}
+    settings = request.get("settings") if isinstance(request.get("settings"), dict) else {}
+    hook_index = request.get("hook_index")
+    report, code, hint = {}, 3, ""
+    try:
+        tick("build", "convert", 5, "口播脚本转换为分镜…")
+        story, warnings = vmake.script_to_story(script, settings, hook_index=hook_index)
+        warnings = [str(w) for w in warnings]
+        tick("build", "convert", 15, f"分镜就绪（{len(story['scenes'])} 场）")
+        tick("build", "create", 20, "创建项目目录…")
+        vmake.create_project(project_id, story, request)
+        cmd = ["node", "scripts/build.mjs", project_id] \
+            + (["--estimate"] if mode == "estimate" else [])
+        BUILD_LOG_DIR.mkdir(parents=True, exist_ok=True)
+        log_path = BUILD_LOG_DIR / f"{project_id}.log"
+        code, hint = _run_build_process(cmd, project_id, log_path)
+        # 收尾探测产物
+        out_dir = vmake.VIDEOS_DIR / project_id / "out"
+        mp4s = sorted(p.name for p in out_dir.glob("*.mp4")) if out_dir.is_dir() else []
+        verify_warnings = []
+        verify_file = out_dir / "verify.json"
+        if verify_file.is_file():
+            try:
+                verify_warnings = [str(w) for w in
+                                   (json.loads(verify_file.read_text(encoding="utf-8"))
+                                    .get("warnings") or [])]
+            except Exception:
+                pass
+        result = {"project_id": project_id,
+                  "output": f"out/{mp4s[0]}" if mp4s else "",
+                  "warnings": warnings + verify_warnings}
+        _set_job_result("build", result)
+        report = {"project_id": project_id, "exit": code, "output": result["output"],
+                  "warnings": result["warnings"]}
+        return code
+    except Exception as e:
+        code = 3
+        report = {"error": type(e).__name__, "hint": str(e)[:200], "project_id": project_id}
+        return code
+    finally:
+        error = str(report.get("error") or "") or (f"exit {code}" if code else "")
+        if hint:
+            report["hint"] = hint
+        finish_job("build", code, error, hint or str(report.get("hint") or ""))
+        print(json.dumps(report, ensure_ascii=False))
+
+
+def _run_build_process(cmd: list, project_id: str, log_path: Path) -> tuple[int, str]:
+    """跑 node build.mjs：逐行读输出跟进进度，原文落日志；总超时杀进程树。"""
+    import threading
+    hint = ""
+    timed_out = threading.Event()
+
+    def _kill_tree():
+        timed_out.set()
+        subprocess.run(["taskkill", "/T", "/F", "/PID", str(proc.pid)],
+                       capture_output=True)
+
+    with open(log_path, "a", encoding="utf-8") as log, subprocess.Popen(
+            cmd, cwd=str(Path(__file__).resolve().parents[2] / "ai-workflow" / "video"),
+            stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+            encoding="utf-8", errors="replace") as proc:
+        tick("build", "prepare", 25, "build.mjs 启动…")
+        watchdog = threading.Timer(BUILD_TIMEOUT_S, _kill_tree)
+        watchdog.start()
+        tts_n = 0
+        try:
+            for line in proc.stdout or []:
+                log.write(line)
+                log.flush()
+                if "合成语音" in line:
+                    tts_n += 1
+                    tick("build", "tts", min(60, 30 + tts_n * 3), f"合成语音 {tts_n}")
+                elif ("开始渲染" in line) or ("Rendering" in line):
+                    tick("build", "render", 65, "Remotion 渲染中…")
+                elif ("✅" in line) or ("done" in line):
+                    tick("build", "render", 95, "渲染收尾…")
+            code = proc.wait()
+        finally:
+            watchdog.cancel()
+    if timed_out.is_set():
+        code = 3
+        hint = "渲染超时（超过 60 分钟已终止）；可到项目目录清理 out/ 后重试"
+    return code, hint
+
+
+def build_presets() -> dict:
+    """制作向导预设：音色清单（按 provider 分组）+ 能力探测（只读，不打印密钥内容）。"""
+    from . import vmake
+    voices = [
+        {"id": "zh-CN-XiaoxiaoNeural", "name": "晓晓 · 女声（Edge 免费）", "provider": "edge"},
+        {"id": "zh-CN-YunxiNeural", "name": "云希 · 男声（Edge 免费）", "provider": "edge"},
+        {"id": "zh-CN-YunyangNeural", "name": "云扬 · 男声·新闻（Edge 免费）", "provider": "edge"},
+        {"id": "longanlufeng", "name": "陆锋 · 男声（DashScope）", "provider": "dashscope"},
+        {"id": "longanlingxin", "name": "灵欣 · 女声（DashScope）", "provider": "dashscope"},
+    ]
+    return {"voices": voices,
+            "packs": [{"id": k, "name": v} for k, v in vmake.STYLE_PACKS.items()],
+            "dashscope_key_ok": vmake.dashscope_key_ok(),
+            "llm_ready": bool(_translate_cfg(config.load())),
+            "max_chars": 20000}

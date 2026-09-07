@@ -35,6 +35,20 @@ DEFAULTS = {
     "youtube": {                                    # YouTube 热点追踪(Data API v3, 视频页)
         "api_key": "",                              # 仅存服务端, 打码回显
     },
+    "gemini": {                                     # 视频工坊看片分析(Gemini API, 仅存服务端)
+        "api_key": "",
+        "model": "gemini-3.6-flash",
+    },
+    "compose": {                                    # 内容生成·成稿专用 LLM(2026-09-07 用户拍板:
+        "base_url": "",                             # 独立于翻译链, 用户自填, 不动翻译额度;
+        "api_key": "",                              # 未配置则生成报 no_llm_config, 不回落翻译链)
+        "model": "",
+    },
+    "finnhub": {                                    # 内容生成·聚合分析增强(投行评级/目标价, 仅美股)
+        "api_key": "",                              # 免费档 finnhub.io 注册即得, 仅存服务端打码回显
+    },
+    "market": {"source_pref": "auto"},  # auto=yfinance主力东财兜底 | em_first=东财优先 | yf_only=仅用yfinance
+    "gen_defaults": {"lang": "en", "tier": "free", "template": "catalyst-take"},
     "cloud": {                                      # 云端同步预留(本期后端不消费)
         "endpoint": "", "account": "", "sync_token": "",
         "sync_enabled": False, "last_synced_at": None,
@@ -81,6 +95,18 @@ def public_view(cfg: dict) -> dict:
     v["youtube"]["api_key"] = ""
     v["youtube"]["has_key"] = bool(ykey)
     v["youtube"]["key_tail"] = ykey[-4:] if ykey else ""
+    gkey = (v.get("gemini") or {}).get("api_key") or ""
+    v["gemini"]["api_key"] = ""
+    v["gemini"]["has_key"] = bool(gkey)
+    v["gemini"]["key_tail"] = gkey[-4:] if gkey else ""
+    ckey = (v.get("compose") or {}).get("api_key") or ""
+    v["compose"]["api_key"] = ""
+    v["compose"]["has_key"] = bool(ckey)
+    v["compose"]["key_tail"] = ckey[-4:] if ckey else ""
+    fkey = (v.get("finnhub") or {}).get("api_key") or ""
+    v["finnhub"]["api_key"] = ""
+    v["finnhub"]["has_key"] = bool(fkey)
+    v["finnhub"]["key_tail"] = fkey[-4:] if fkey else ""
     v["cloud"]["sync_token"] = ""
     v["cloud"]["has_token"] = bool(cfg["cloud"].get("sync_token"))
     return v
@@ -89,12 +115,14 @@ def public_view(cfg: dict) -> dict:
 def apply_patch(patch: dict) -> dict:
     """设置页保存: api_key 留空表示保持不变(前端不持有明文)。"""
     patch = dict(patch or {})
-    for sec in ("source", "translate", "youtube"):
+    for sec in ("source", "translate", "youtube", "gemini", "compose", "finnhub"):
         s = dict(patch.get(sec) or {})
         if "api_key" in s and not s["api_key"]:
             s.pop("api_key")
         if s:
             patch[sec] = s
+        else:
+            patch.pop(sec, None)
     return save(_merge(load(), patch))
 
 
@@ -132,6 +160,24 @@ def load_yt_channels() -> list:
 
 def save_yt_channels(rows: list) -> list:
     return save_rows("yt_channels.json", rows)
+
+
+def load_video_pool() -> list:
+    rows = load_rows("video_pool.json")
+    return rows if isinstance(rows, list) and all(isinstance(r, dict) for r in rows) else []
+
+
+def save_video_pool(rows: list) -> list:
+    return save_rows("video_pool.json", rows)
+
+
+def load_video_scripts() -> list:
+    rows = load_rows("video_scripts.json")
+    return rows if isinstance(rows, list) and all(isinstance(r, dict) for r in rows) else []
+
+
+def save_video_scripts(rows: list) -> list:
+    return save_rows("video_scripts.json", rows)
 
 
 def load_drafts() -> list:

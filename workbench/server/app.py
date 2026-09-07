@@ -18,7 +18,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
-from . import config, proxy, stats, views, xaccounts, x_profile_enricher, x_surge, yt_track
+from . import config, gcompose, proxy, retrieve, stats, views, vstudio, xaccounts, x_profile_enricher, x_surge, yt_track
 
 WEB = Path(__file__).resolve().parent.parent / "web"
 
@@ -98,6 +98,27 @@ def create_app() -> FastAPI:
     def videos():
         return {"videos": views.videos()}
 
+    @app.delete("/wb-api/videos/{vid}")
+    def video_delete(vid: str):
+        import re
+        import subprocess
+        if not re.fullmatch(r"[A-Za-z0-9_\-]+", vid):
+            return JSONResponse({"error": "bad_vid"}, status_code=400)
+        cli = Path(__file__).resolve().parents[2] / "cli.py"
+        try:
+            result = subprocess.run(
+                ["py", "-3.11", str(cli), "video", "remove", vid],
+                capture_output=True, text=True, encoding="utf-8", timeout=60)
+        except subprocess.TimeoutExpired:
+            return JSONResponse({"error": "remove_timeout"}, status_code=504)
+        except OSError:
+            return JSONResponse({"error": "remove_failed"}, status_code=500)
+        if result.returncode != 0:
+            return JSONResponse({"error": "remove_failed",
+                                 "hint": (result.stderr or result.stdout or "")[-200:]},
+                                status_code=400)
+        return {"removed": 1}
+
     @app.get("/wb-api/videos/{vid}/file/{name}")
     def video_file(vid: str, name: str):
         p = views.video_file(vid, name)
@@ -120,6 +141,87 @@ def create_app() -> FastAPI:
     @app.get("/wb-api/x-accounts-manage")
     def x_accounts_manage():
         return xaccounts.manage_payload()
+
+    # ── 内容生成·信息检索: 素材回查全文/同簇多源/同标的扩展(纯只读, 零 LLM) ────
+    @app.post("/wb-api/retrieve")
+    async def retrieve_view(request: Request):
+        body = await request.json()
+        try:
+            return retrieve.run(body)
+        except proxy.UpstreamError as e:
+            return JSONResponse({"error": str(e), "hint": "先跑 python cli.py sources serve"},
+                                status_code=e.code or 502)
+
+    # ── 内容生成·成稿编排: 端点零外呼, 只校验 + spawn CLI + 轮询(同 vstudio) ──
+    @app.post("/wb-api/gen-compose")
+    async def gen_compose(request: Request):
+        body = await request.json()
+        if gcompose.job_running():
+            return JSONResponse({"error": "生成任务进行中, 等它跑完再试"}, status_code=409)
+        items = [m for m in (body.get("items") or []) if isinstance(m, dict)][:8]
+        if not items:
+            return JSONResponse({"error": "no_items", "hint": "先勾选参与生成的素材"},
+                                status_code=400)
+        gcompose.begin_job({**body, "items": items})
+        try:
+            gcompose.spawn_cli()
+        except Exception as e:
+            gcompose.finish_job(3, str(e))
+            return JSONResponse({"error": f"生成进程启动失败: {e}"}, status_code=500)
+        return {"started": True}
+
+    @app.post("/wb-api/test-llm")
+    def test_llm():
+        import subprocess
+        cli = Path(__file__).resolve().parents[2] / "cli.py"
+        try:
+            p = subprocess.run(
+                ["py", "-3.11", str(cli), "workbench", "test-llm"],
+                capture_output=True, text=True, encoding="utf-8", timeout=40)
+        except subprocess.TimeoutExpired:
+            return JSONResponse({"ok": False, "model": "", "error": "cli_timeout"}, status_code=504)
+        except OSError:
+            return JSONResponse({"ok": False, "model": "", "error": "cli_start_failed"}, status_code=500)
+        try:
+            out = json.loads(p.stdout)
+            if not isinstance(out, dict) or not isinstance(out.get("ok"), bool) or not all(
+                    isinstance(out.get(k), str) for k in ("model", "error")):
+                raise ValueError("invalid result")
+        except (ValueError, TypeError):
+            return JSONResponse({"ok": False, "model": "", "error": "invalid_cli_response"}, status_code=502)
+        if p.returncode != 0 or not out["ok"]:
+            out["ok"] = False
+            out["error"] = out["error"] or "llm_connection_failed"
+            return JSONResponse(out, status_code=400 if p.returncode == 4 else 502)
+        return out
+
+    @app.get("/wb-api/gen-jobs")
+    def gen_jobs():
+        return gcompose.status_payload()
+
+    @app.get("/wb-api/gen-posts")
+    def gen_posts():
+        return {"posts": gcompose.post_list()}
+
+    @app.delete("/wb-api/gen-posts/{pid}")
+    def gen_post_delete(pid: str):
+        if not gcompose.post_delete(pid):
+            return JSONResponse({"error": "post_not_found"}, status_code=404)
+        return {"ok": True}
+
+    @app.get("/wb-api/gen-posts/{pid}")
+    def gen_post_get(pid: str):
+        post = gcompose.post_get(pid)
+        if not post:
+            return JSONResponse({"error": "post_not_found"}, status_code=404)
+        return post
+
+    @app.get("/wb-api/gen-assets/{pid}/{name}")
+    def gen_asset(pid: str, name: str):
+        f = gcompose.asset_file(pid, name)
+        if not f:
+            return JSONResponse({"error": "asset_not_found"}, status_code=404)
+        return FileResponse(str(f), media_type="image/png")
 
     @app.post("/wb-api/x-account-pref")
     async def x_account_pref(request: Request):
@@ -324,6 +426,227 @@ def create_app() -> FastAPI:
             return JSONResponse({"error": f"采集进程启动失败: {e}"}, status_code=500)
         return {"started": True}
 
+    # ── 视频工坊: 端点只读/写自有 JSON；分析与生成仅 spawn CLI 外呼 ──────────
+    @app.get("/wb-api/video-pool")
+    def video_pool_list():
+        return vstudio.pool_view()
+
+    @app.post("/wb-api/video-pool")
+    async def video_pool_add(request: Request):
+        body = await request.json()
+        row, err = vstudio.pool_add(body)
+        if err and err.get("error") == "dup":
+            return {"added": False}
+        if err:
+            return JSONResponse(err, status_code=400)
+        return {"added": True, "item": row, "meta": vstudio.pool_view()["meta"]}
+
+    @app.delete("/wb-api/video-pool/{pid}")
+    def video_pool_del(pid: str):
+        removed = vstudio.pool_del(pid)
+        return {"removed": removed, "meta": vstudio.pool_view()["meta"]}
+
+    @app.get("/wb-api/video-analyses")
+    def video_analyses(key: str = ""):
+        if not key:
+            return vstudio.analyses_index()
+        record = vstudio.analysis_get(key)
+        if not record:
+            return JSONResponse({"error": "analysis_not_found"}, status_code=404)
+        return record
+
+    @app.post("/wb-api/video-analyze")
+    async def video_analyze(request: Request):
+        import subprocess
+        body = await request.json()
+        if vstudio.job_running("analyze"):
+            return JSONResponse({"error": "分析任务进行中"}, status_code=409)
+        cfg = config.load()
+        gemini_ok = bool((cfg.get("gemini") or {}).get("api_key"))
+        translate = cfg.get("translate") or {}
+        translate_ok = all(translate.get(k) for k in ("base_url", "api_key", "model"))
+        if not gemini_ok and not translate_ok:
+            return JSONResponse({"error": "no_llm_config",
+                                 "hint": "到设置页配置 Gemini 或翻译模型"}, status_code=400)
+        if body.get("pool_id"):
+            row = next((r for r in config.load_video_pool()
+                        if r.get("id") == body.get("pool_id")), None)
+            if not row:
+                return JSONResponse({"error": "pool_not_found"}, status_code=400)
+            result_key = vstudio.analysis_key_of(row.get("video_id") or "", row.get("url") or "")
+        else:
+            parsed = vstudio.parse_video_input(str(body.get("url") or ""))
+            if not parsed:
+                return JSONResponse({"error": "bad_video_input"}, status_code=400)
+            result_key = vstudio.analysis_key_of(parsed["video_id"], parsed["url"])
+        vstudio.begin_job("analyze", body)
+        cli = Path(__file__).resolve().parents[2] / "cli.py"
+        try:
+            subprocess.Popen(
+                ["py", "-3.11", str(cli), "workbench", "analyze-video", "--json"],
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+        except Exception as e:
+            vstudio.finish_job("analyze", 3, str(e))
+            return JSONResponse({"error": f"分析进程启动失败: {e}"}, status_code=500)
+        return {"started": True, "key": result_key}
+
+    @app.get("/wb-api/video-jobs")
+    def video_jobs():
+        return vstudio.status_payload()
+
+    @app.get("/wb-api/video-script/styles")
+    def video_script_styles():
+        return {"styles": [{k: style[k] for k in ("id", "name", "format", "target_s", "wc", "prompt")}
+                           for style in vstudio.STYLE_PRESETS]}
+
+    @app.post("/wb-api/video-script/generate")
+    async def video_script_generate(request: Request):
+        import subprocess
+        body = await request.json()
+        if vstudio.job_running("generate"):
+            return JSONResponse({"error": "脚本生成任务进行中"}, status_code=409)
+        style_ids = {style["id"] for style in vstudio.STYLE_PRESETS}
+        style_id = str(body.get("style_id") or "")
+        if style_id not in style_ids:
+            return JSONResponse({"error": "bad_style"}, status_code=400)
+        if style_id == "from-analysis" and not body.get("analysis_key"):
+            return JSONResponse({"error": "analysis_required"}, status_code=400)
+        if not any(str(body.get(k) or "").strip() for k in ("brief", "draft_id", "pasted")):
+            return JSONResponse({"error": "no_input",
+                                 "hint": "填一句话简报、粘贴文章或选草稿"}, status_code=400)
+        vstudio.begin_job("generate", body)
+        cli = Path(__file__).resolve().parents[2] / "cli.py"
+        try:
+            subprocess.Popen(
+                ["py", "-3.11", str(cli), "workbench", "gen-script", "--json"],
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+        except Exception as e:
+            vstudio.finish_job("generate", 3, str(e))
+            return JSONResponse({"error": f"生成进程启动失败: {e}"}, status_code=500)
+        return {"started": True}
+
+    @app.get("/wb-api/video-scripts")
+    def video_scripts_list():
+        return {"scripts": vstudio.scripts_view()}
+
+    @app.post("/wb-api/video-scripts")
+    async def video_scripts_add(request: Request):
+        body = await request.json()
+        kind = str(body.get("kind") or "")
+        if kind == "generated" and not isinstance(body.get("script"), dict):
+            return JSONResponse({"error": "generated_requires_script"}, status_code=400)
+        if kind == "analysis_seed" and not isinstance(body.get("script"), dict):
+            key = str(body.get("analysis_key") or "")
+            record = vstudio.analysis_get(key) if key else None
+            if not record:
+                return JSONResponse({"error": "analysis_required"}, status_code=400)
+            body["script"] = vstudio.seed_from_analysis(record)
+            body.setdefault("title", body["script"].get("title"))
+            body.setdefault("style_id", "from-analysis")
+        if kind not in ("generated", "analysis_seed"):
+            return JSONResponse({"error": "bad_kind"}, status_code=400)
+        return {"script": vstudio.script_add(body)}
+
+    @app.get("/wb-api/video-scripts/{sid}")
+    def video_scripts_get(sid: str):
+        row = vstudio.script_get(sid)
+        if not row:
+            return JSONResponse({"error": "script_not_found"}, status_code=404)
+        return row
+
+    @app.post("/wb-api/video-scripts/{sid}")
+    async def video_scripts_update(sid: str, request: Request):
+        row = vstudio.script_update(sid, await request.json())
+        if not row:
+            return JSONResponse({"error": "script_not_found"}, status_code=404)
+        return {"script": row}
+
+    @app.delete("/wb-api/video-scripts/{sid}")
+    def video_scripts_del(sid: str):
+        return {"removed": vstudio.script_del(sid)}
+
+    # ── 视频工坊·制作(build): 零外呼, 唯一动作是 spawn CLI 子进程真渲染(分钟级) ──
+    @app.get("/wb-api/video-presets")
+    def video_presets():
+        return vstudio.build_presets()
+
+    @app.post("/wb-api/video-build")
+    async def video_build(request: Request):
+        import subprocess
+        from .vmake import normalize_style_pack
+        body = await request.json()
+        # 脚本来源: script_id 查脚本仓库, 或 body.script 直接带 beats
+        script = None
+        if body.get("script_id"):
+            row = vstudio.script_get(str(body.get("script_id")))
+            if not row or not isinstance(row.get("script"), dict):
+                return JSONResponse({"error": "script_not_found",
+                                     "hint": "脚本仓库中没有该脚本"}, status_code=400)
+            script = row["script"]
+        elif isinstance(body.get("script"), dict):
+            script = body["script"]
+        if not script or not isinstance(script.get("beats"), list) or not script.get("beats"):
+            return JSONResponse({"error": "no_script",
+                                 "hint": "需要 script_id 或带 beats 的 script"}, status_code=400)
+        if vstudio.job_running("build"):
+            return JSONResponse({"error": "制作任务进行中"}, status_code=409)
+        fmt = str(body.get("format") or script.get("format") or "horizontal")
+        if fmt not in ("horizontal", "vertical"):
+            fmt = "horizontal"
+        tts_provider = str(body.get("tts_provider") or "edge")
+        if tts_provider not in ("edge", "dashscope"):
+            tts_provider = "edge"
+        if tts_provider == "dashscope" and not vstudio.build_presets()["dashscope_key_ok"]:
+            return JSONResponse({"error": "dashscope_key_missing",
+                                 "hint": "DASHSCOPE_API_KEY 未配置（ai-workflow/video/.env）"},
+                                status_code=400)
+        enrich = str(body.get("enrich") or "plain")
+        if enrich not in ("plain", "llm"):
+            enrich = "plain"
+        mode = str(body.get("mode") or "build")
+        if mode not in ("build", "estimate"):
+            mode = "build"
+        try:
+            hook_index = int(body.get("hook_index"))
+        except (TypeError, ValueError):
+            hook_index = None
+        if hook_index is not None and not 0 <= hook_index <= 2:
+            hook_index = None
+        title = str(body.get("title") or "").strip()[:30] \
+            or str(script.get("title") or "").strip()[:30]
+        settings = {"format": fmt, "voice": str(body.get("voice") or ""),
+                    "tts_provider": tts_provider, "enrich": enrich, "title": title}
+        settings["style_pack"] = normalize_style_pack(body.get("style_pack"))
+        project_id = "wb" + time.strftime("%m%d%H%M%S")
+        vstudio.begin_job("build", {"script": script, "settings": settings,
+                                    "project_id": project_id, "mode": mode,
+                                    "hook_index": hook_index,
+                                    "text": str(body.get("text") or "")})
+        cli = Path(__file__).resolve().parents[2] / "cli.py"
+        try:
+            subprocess.Popen(
+                ["py", "-3.11", str(cli), "workbench", "build-video", "--json"],
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+        except Exception as e:
+            vstudio.finish_job("build", 3, str(e))
+            return JSONResponse({"error": f"制作进程启动失败: {e}"}, status_code=500)
+        return {"started": True, "project_id": project_id}
+
+    @app.get("/wb-api/video-builds/{pid}/log")
+    def video_build_log(pid: str, n: int = 100):
+        import re
+        if not re.fullmatch(r"[A-Za-z0-9_\-]+", pid):
+            return JSONResponse({"error": "bad_pid"}, status_code=400)
+        log_file = vstudio.BUILD_LOG_DIR / f"{pid}.log"
+        if not log_file.is_file():
+            return JSONResponse({"error": "log_not_found"}, status_code=404)
+        lines = log_file.read_text(encoding="utf-8", errors="replace").splitlines()
+        n = max(1, min(int(n or 100), 1000))
+        return {"tail": lines[-n:], "truncated": len(lines) > n}
+
 
     # ── 图文页: 草稿真实 CRUD(data/workbench/drafts.json) ────────────────────
     @app.get("/wb-api/drafts")
@@ -342,7 +665,7 @@ def create_app() -> FastAPI:
             for r in rows:
                 if r.get("id") == did:
                     r.update({k: body[k] for k in
-                              ("title", "content", "items", "modules", "template", "publish")
+                              ("title", "content", "items", "modules", "template", "publish", "gen")
                               if k in body})
                     r["updated_at"] = now
                     break
@@ -356,6 +679,7 @@ def create_app() -> FastAPI:
                          "modules": body.get("modules") or [],
                          "template": body.get("template", ""),
                          "publish": body.get("publish") or {},
+                         "gen": body.get("gen") or {},
                          "created_at": now, "updated_at": now})
         return {"drafts": config.save_drafts(rows), "id": did}
 

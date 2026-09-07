@@ -128,6 +128,9 @@ def videos() -> list:
             continue
         proj = _read_json(d / "project.json", {})
         story = _read_json(d / "story.json", {})
+        verify_path = d / "out" / "verify.json"
+        verify = _read_json(verify_path, {}) if verify_path.is_file() else {}
+        verify = verify if isinstance(verify, dict) else {}
         mp4s = sorted(p.name for p in (d / "out").glob("*.mp4")) if (d / "out").exists() else []
         cover = (d / "out" / "cover.png").exists() or (d / "cover.png").exists()
         out.append({"id": d.name,
@@ -135,6 +138,11 @@ def videos() -> list:
                     "status": proj.get("status", "draft"),
                     "date": proj.get("date") or story.get("date") or "",
                     "mp4": mp4s, "cover": cover,
+                    "verify_mode": verify.get("mode") if isinstance(verify.get("mode"), str) else None,
+                    "verify_warnings": [str(x) for x in verify["warnings"]]
+                    if isinstance(verify.get("warnings"), list) else [],
+                    "verify_errors": [str(x) for x in verify["errors"]]
+                    if isinstance(verify.get("errors"), list) else [],
                     "scenes": len(story.get("scenes", [])) if isinstance(story, dict) else 0})
     out.sort(key=lambda v: (v["date"], v["id"]), reverse=True)
     return out
