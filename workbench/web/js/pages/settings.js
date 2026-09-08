@@ -64,7 +64,8 @@ WB.pages.settings = {
           id: p.id, name: p.name, engine: p.engine, enabled: !!p.enabled,
           api_key: "", base_url: p.base_url || "", model: p.model || "",
           style: p.style || "", format: p.format || "",
-          voices: (p.voices || []).map((v) => ({ id: v.id, name: v.name })),
+          voices: (p.voices || []).map((v) => typeof v === "string" ? { id: v, name: v }
+            : { id: v.id, name: v.name || v.id }),
           has_key: !!p.has_key, key_tail: p.key_tail || "", locked: true,
         })),
       };
