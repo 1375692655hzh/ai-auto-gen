@@ -57,10 +57,26 @@ export async function synthDashscope(text, voice, outFile) {
 	writeFileSync(outFile, Buffer.from(await audio.arrayBuffer()));
 }
 
-export async function synthOnce(engine, voice, text, outFile) {
+export async function synthCustom(cfg, voice, text, outFile) {
+	const base = String(cfg.base_url || "").replace(/\/+$/, "");
+	if (!base || !cfg.model) throw new Error("custom 供应商缺 base_url/model");
+	const resp = await fetch(base + "/audio/speech", {
+		method: "POST",
+		headers: { "Content-Type": "application/json", Authorization: `Bearer ${cfg.api_key || ""}` },
+		body: JSON.stringify({ model: cfg.model, voice, input: text, response_format: "mp3" }),
+	});
+	if (!resp.ok) throw new Error(`custom TTS HTTP ${resp.status}: ${(await resp.text()).slice(0, 150)}`);
+	const buf = Buffer.from(await resp.arrayBuffer());
+	if (buf.length < 200) throw new Error(`custom TTS 返回内容过小(${buf.length}B), 疑似非音频`);
+	writeFileSync(outFile, buf);
+}
+
+export async function synthOnce(engine, voice, text, outFile, customCfg) {
 	for (let attempt = 1; attempt <= 8; attempt++) {
 		try {
-			if (engine === "dashscope") {
+			if (engine === "custom") {
+				await synthCustom(customCfg || {}, voice, text, outFile);
+			} else if (engine === "dashscope") {
 				await synthDashscope(text, voice, outFile);
 			} else {
 				await synthEdge(text, voice, outFile);

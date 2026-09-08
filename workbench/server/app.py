@@ -565,6 +565,39 @@ def create_app() -> FastAPI:
     def video_asset_delete(asset_id: str, make_id: str = ""):
         return {"removed": 1, "cleared_overrides": vstudio.asset_del(asset_id, make_id)}
 
+    @app.post("/wb-api/tts-voices-detect")
+    async def tts_voices_detect(request: Request):
+        """自定义供应商: 在线检测支持的预设音色。尝试 GET {base}/audio/voices,
+        兼容多种返回形状; 不支持的端点明确报错, 让用户回手动添加。"""
+        body = await request.json()
+        base = str(body.get("base_url") or "").rstrip("/")
+        key = str(body.get("api_key") or "")
+        if not base:
+            return {"ok": False, "error": "先填接口地址"}
+        url = base + "/audio/voices"
+        try:
+            req = urllib.request.Request(url, headers={"Authorization": f"Bearer {key}"})
+            with urllib.request.urlopen(req, timeout=15) as r:
+                d = json.loads(r.read())
+            raw = d if isinstance(d, list) else (d.get("voices") or d.get("data") or [])
+            voices = []
+            for v in raw:
+                if isinstance(v, str):
+                    voices.append({"id": v, "name": v})
+                elif isinstance(v, dict):
+                    vid = str(v.get("id") or v.get("voice") or v.get("name") or "")
+                    if vid:
+                        voices.append({"id": vid, "name": str(v.get("name") or vid)})
+            if not voices:
+                return {"ok": False, "error": "端点响应为空, 请手动添加音色"}
+            return {"ok": True, "voices": voices}
+        except urllib.error.HTTPError as e:
+            if e.code == 404:
+                return {"ok": False, "error": "端点不支持在线检测(/audio/voices 404), 请手动添加音色"}
+            return {"ok": False, "error": f"HTTP {e.code}: {e.read().decode('utf-8', 'replace')[:120]}"}
+        except Exception as e:
+            return {"ok": False, "error": f"检测失败: {type(e).__name__}: {str(e)[:100]}"}
+
     @app.post("/wb-api/test-tts")
     async def test_tts(request: Request):
         import subprocess

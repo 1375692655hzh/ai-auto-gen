@@ -1021,7 +1021,16 @@ WB.pages.video = {
     </div>
 
     <!-- ═══ 子页2: 视频分析 ═══ -->
-    <div v-show="tab==='analysis'" class="two-col pool-right">
+        <div v-show="tab==='analysis'" class="three-col analysis-cols">
+<div class="card" style="align-self:start">
+        <h3>素材池({{ pool.length }})</h3>
+        <div v-if="!pool.length" class="empty">到【热点追踪】点「＋加入素材池」</div>
+        <div v-for="item in pool" :key="item.id" class="list-item" :class="{sel:poolSel && poolSel.id===item.id}" @click="selectPool(item)">
+          <div class="t"><span>{{ cut(item.title, 25) }}</span><span v-if="item.analysis_status==='ok' || item.analysis_status==='partial'" style="color:var(--green)">●</span><span v-if="(item.analysis_status==='ok'||item.analysis_status==='partial') && item.analysis_tier_used && item.analysis_tier_used!=='gemini'" class="badge yellow" style="font-size:10px;margin-left:4px" title="文本通道分析, 可「重新分析」升级为 Gemini 看片">文本版</span></div>
+          <div class="s">{{ item.channel_title || '未知频道' }} · {{ fmtDur(item.duration_s) }}</div>
+          <a style="font-size:12px" @click.stop.prevent="delPool(item)">移除</a>
+        </div>
+      </div>
       <div>
         <div class="card">
           <h3>分析对象
@@ -1167,15 +1176,6 @@ WB.pages.video = {
         </div>
         <div class="card" style="position:sticky;bottom:10px;z-index:2">
           <button class="btn primary" :disabled="!anRec || (anRec.status!=='ok' && anRec.status!=='partial')" @click="saveSeed">保存到脚本仓库</button>
-        </div>
-      </div>
-      <div class="card" style="align-self:start">
-        <h3>素材池({{ pool.length }})</h3>
-        <div v-if="!pool.length" class="empty">到【热点追踪】点「＋加入素材池」</div>
-        <div v-for="item in pool" :key="item.id" class="list-item" :class="{sel:poolSel && poolSel.id===item.id}" @click="selectPool(item)">
-          <div class="t"><span>{{ cut(item.title, 25) }}</span><span v-if="item.analysis_status==='ok' || item.analysis_status==='partial'" style="color:var(--green)">●</span><span v-if="(item.analysis_status==='ok'||item.analysis_status==='partial') && item.analysis_tier_used && item.analysis_tier_used!=='gemini'" class="badge yellow" style="font-size:10px;margin-left:4px" title="文本通道分析, 可「重新分析」升级为 Gemini 看片">文本版</span></div>
-          <div class="s">{{ item.channel_title || '未知频道' }} · {{ fmtDur(item.duration_s) }}</div>
-          <a style="font-size:12px" @click.stop.prevent="delPool(item)">移除</a>
         </div>
       </div>
       <div class="card">

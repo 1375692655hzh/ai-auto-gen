@@ -1311,7 +1311,7 @@ def _tts_provider(provider_id: str, voice: str, allow_disabled: bool = False):
                      if p.get("id") == provider_id), None)
     if (not provider or not _safe_id(provider_id) or not _safe_id(voice)
             or (not allow_disabled and not provider.get("enabled"))
-            or provider.get("engine") not in ("edge", "dashscope")
+            or provider.get("engine") not in ("edge", "dashscope", "custom")
             or voice not in [v.get("id") for v in provider.get("voices", [])]):
         return None
     return provider
@@ -1324,8 +1324,13 @@ def _tts_node(scenes: list, out_dir: Path, provider: dict, voice: str, progress:
     job_json = out_dir / "_job.json"
     result_json = out_dir / "_result.json"
     result_json.unlink(missing_ok=True)   # 本次失败不能误读上次结果
-    _atomic_json(job_json, {"scenes": scenes, "out_dir": str(out_dir.resolve()),
-                           "provider": provider["engine"], "voice": voice})
+    job = {"scenes": scenes, "out_dir": str(out_dir.resolve()),
+           "provider": provider["engine"], "voice": voice}
+    if provider["engine"] == "custom":              # 自定义 OpenAI 兼容供应商: 全量配置透传 Node
+        job["provider_config"] = {"base_url": provider.get("base_url") or "",
+                                  "api_key": provider.get("api_key") or "",
+                                  "model": provider.get("model") or ""}
+    _atomic_json(job_json, job)
     env = os.environ.copy()
     if provider["engine"] == "dashscope":
         if provider.get("api_key"):

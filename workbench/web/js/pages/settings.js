@@ -62,7 +62,7 @@ WB.pages.settings = {
         default: { provider_id: "edge", voice: "zh-CN-XiaoxiaoNeural", ...(tts.default || {}) },
         providers: (tts.providers || []).map((p) => ({
           id: p.id, name: p.name, engine: p.engine, enabled: !!p.enabled,
-          api_key: "", base_url: p.base_url || "",
+          api_key: "", base_url: p.base_url || "", model: p.model || "",
           voices: (p.voices || []).map((v) => ({ id: v.id, name: v.name })),
           has_key: !!p.has_key, key_tail: p.key_tail || "", locked: true,
         })),
@@ -180,7 +180,7 @@ WB.pages.settings = {
                    voice: this.s.tts.default.voice || "" },
         providers: (this.s.tts.providers || []).map((p) => ({
           id: p.id, name: p.name, engine: p.engine, enabled: !!p.enabled,
-          api_key: p.api_key || "", base_url: p.base_url || "",
+          api_key: p.api_key || "", base_url: p.base_url || "", model: p.model || "",
           voices: (p.voices || []).filter((v) => this.ttsIdOk(v.id))
             .map((v) => ({ id: v.id, name: v.name || v.id })),
         })),
@@ -237,6 +237,20 @@ WB.pages.settings = {
       const v = this.ttsDefaultVoices();
       if (!v.some((x) => x.id === this.s.tts.default.voice))
         this.s.tts.default.voice = (v[0] && v[0].id) || "";
+    },
+    async detectTtsVoices(p) {
+      this.ttsTesting = p.id;
+      try {
+        const d = await WB.api.post("/tts-voices-detect",
+          { base_url: p.base_url, api_key: p.api_key, model: p.model });
+        if (d.ok) {
+          const have = new Set((p.voices || []).map(v => v.id));
+          const add = (d.voices || []).filter(v => v.id && !have.has(v.id));
+          p.voices.push(...add);
+          WB.toast(`检测到 ${d.voices.length} 个音色, 新增 ${add.length} 个(保存后生效)`);
+        } else WB.toast(d.error || "检测失败");
+      } catch (e) { WB.toast(e.error || "检测失败"); }
+      this.ttsTesting = "";
     },
     async testTts(p) {
       const voice = (this.s.tts.default.provider_id === p.id && this.s.tts.default.voice)
@@ -478,7 +492,9 @@ WB.pages.settings = {
         DashScope 走
         <a href="https://dashscope.console.aliyun.com/" target="_blank" rel="noopener">阿里云百炼</a>
         → API-KEY(sk- 开头)。可添加多套同一引擎(例如两把 DashScope Key)。<br>
-        <b>说明:</b> 只服务视频制作「语音」段; 配置仅存本工作台。视频页只列出已启用且至少有一个音色的供应商。
+        <b>说明:</b> 只服务视频制作「语音」段; 配置仅存本工作台。视频页只列出已启用且至少有一个音色的供应商。<br>
+        <b>自定义供应商:</b> 任意 OpenAI 兼容 TTS 端点(POST {base}/audio/speech, {model, voice, input});
+        填 url/api_key/model 后点「检测预设语音」自动拉取音色(端点不支持则手动加音色)。
       </div>
       <div class="form-row"><label>默认供应商</label>
         <select v-model="s.tts.default.provider_id" @change="onTtsDefaultProvider" style="max-width:280px">
@@ -502,6 +518,7 @@ WB.pages.settings = {
           <select v-model="p.engine" @change="onTtsEngine(p)">
             <option value="edge">Edge TTS（免费）</option>
             <option value="dashscope">DashScope（阿里云）</option>
+            <option value="custom">自定义（OpenAI 兼容 /audio/speech）</option>
           </select>
           <label><input type="checkbox" v-model="p.enabled"> 启用</label></div>
         <div class="form-row"><label>API Key</label>
@@ -511,6 +528,12 @@ WB.pages.settings = {
           <span class="muted">仅存本机服务端, 不回显明文</span></div>
         <div class="form-row" v-if="p.engine==='dashscope'"><label>接口地址</label>
           <input type="text" v-model="p.base_url" placeholder="可留空, 默认官方地址" style="width:320px"></div>
+        <div class="form-row" v-if="p.engine==='custom'"><label>接口地址</label>
+          <input type="text" v-model="p.base_url" placeholder="必填, 如 https://api.xxx.com/v1" style="width:320px"></div>
+        <div class="form-row" v-if="p.engine==='custom'"><label>模型</label>
+          <input type="text" v-model="p.model" placeholder="必填, 如 gpt-4o-mini-tts / ark tts 模型" style="width:280px">
+          <button class="btn" :disabled="ttsTesting===p.id || !p.base_url" @click="detectTtsVoices(p)">
+            {{ ttsTesting===p.id ? '检测中…' : '检测预设语音' }}</button></div>
         <p class="muted" style="margin:6px 0 4px">音色清单</p>
         <div v-for="(v,i) in p.voices" :key="i" class="form-row">
           <label>音色 {{ i+1 }}</label>

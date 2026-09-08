@@ -11,7 +11,7 @@ async function main() {
 	if (!jobFile || !path.isAbsolute(jobFile))
 		throw new Error("用法: node scripts/tts-scenes.mjs <job.json 绝对路径>");
 	const job = JSON.parse(readFileSync(jobFile, "utf-8"));
-	if (!Array.isArray(job.scenes) || !["edge", "dashscope"].includes(job.provider) ||
+	if (!Array.isArray(job.scenes) || !["edge", "dashscope", "custom"].includes(job.provider) ||
 		typeof job.voice !== "string" || !job.voice.trim() ||
 		typeof job.out_dir !== "string" || !job.out_dir.trim())
 		throw new Error("job 必须包含 scenes、out_dir、provider(edge|dashscope) 和 voice");
@@ -32,6 +32,7 @@ async function main() {
 	rmSync(resultPath, { force: true });
 	const saveManifest = () => writeFileSync(manifestPath, JSON.stringify(manifest, null, 2));
 	async function synthAll(engine, voice) {
+		const customCfg = engine === "custom" ? (job.provider_config || {}) : undefined;
 		const made = [];
 		for (const s of job.scenes) {
 			const outFile = path.join(outDir, `${s.id}.mp3`);
@@ -41,7 +42,7 @@ async function main() {
 			delete manifest[s.id];
 			saveManifest();
 			process.stdout.write(`合成语音: ${s.id} ... `);
-			if (await synthOnce(engine, voice, s.narration, outFile)) {
+			if (await synthOnce(engine, voice, s.narration, outFile, customCfg)) {
 				console.log("ok");
 				manifest[s.id] = hash;
 				saveManifest();

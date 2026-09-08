@@ -480,3 +480,7 @@ input[type=radio], input[type=checkbox] { accent-color: var(--accent); }
 .key-guide a:hover { text-decoration: underline; }
 .key-guide b { color: var(--text-dim); }
 .key-guide code { font-size: 10.5px; }
+
+/* 视频分析页三列: 素材池 | 分析对象+结果(最宽) | 历史分析 */
+.analysis-cols { grid-template-columns: 260px minmax(0, 1fr) 300px; }
+@media (max-width: 1100px) { .analysis-cols { grid-template-columns: 1fr; } }
