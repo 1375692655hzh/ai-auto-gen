@@ -4,10 +4,11 @@ refresh 轮末对非中文条目批量翻译成简体中文(工作台/早报全�
 - 模型链: config.yaml sources.translate.models 依次尝试, 前一个失败自动切下一个
   (成功后粘性沿用); 每项可自填 base_url/api_key/model, 留空继承全局 secret 配置
   (实测矩阵见 docs/翻译模型实测与推荐.md: 主力 deepseek-v4-flash, 备胎 muse-spark/glm-5.3-flash)
-- 批量 10/截断 1500/temperature 0
+- 批量 10/截断 1500/temperature 0; 长文单条整翻至 5000; 超限不译保原文(残疾翻译废弃,
+  2026-09-08 用户裁决——宁要原文不要半截译文, partial 状态退役)
 - 判定: lang 字段为主, lang 空(X池)走 CJK 占比检测; 繁体 zh 不翻(可直接读)
-- 幂等三层: zh_status 状态机(''/skip/ok/partial/fail) + zh_attempts<3 熔断
-  + zh_cache 哈希缓存(跨源同文/重跑零消耗); 簇成员 skip_dup(默认只展示代表条)
+- 幂等三层: zh_status 状态机(''/skip/ok/fail) + zh_attempts<3 熔断
+  + zh_cache 哈希缓存(跨源同文/重跑零消耗; 长文 key 带 'L' 前缀); 簇成员 skip_dup
 - 失败不阻塞 refresh, 保留原文, 下轮自动重试
 - 关闭: config.yaml sources.translate.enabled: false
 """
@@ -21,7 +22,8 @@ from sources import store as _store
 
 DEFAULT_MODEL = "deepseek-v4-flash"
 BATCH = 10
-MAX_CHARS = 1500
+MAX_CHARS = 1500          # 批量翻译单条截断线(10条×1500 字符一批)
+LONG_CHARS = 5000         # 长文单条整翻上限; 超限不译保原文(残疾翻译废弃 2026-09-08)
 MAX_ATTEMPTS = 3
 ROUND_CAP = 120
 SLEEP = 0.3
@@ -134,7 +136,11 @@ def _chat(base: str, key: str, model: str, prompt: str) -> str:
 
 
 def run(since_fetched_at: str) -> dict:
-    """翻译本轮新条目(不足 round_cap 时顺带回填存量 fail/未处理)。返回报告。"""
+    """翻译本轮新条目(不足 round_cap 时顺带回填存量 fail/未处理)。返回报告。
+
+    长文策略(2026-09-08 用户裁决"残疾翻译就废弃"): ≤max_chars 批量翻;
+    max_chars~LONG_CHARS 单条整翻(无截断); >LONG_CHARS 不译保原文(skip-toolong)。
+    partial 状态退役; 长文缓存 key 加 'L' 前缀, 与 partial 时代的整条截断缓存隔离。"""
     conf = _conf()
     rep = {"enabled": conf["enabled"], "translated": 0, "skipped": 0,
            "cached": 0, "batches": 0, "model_used": "", "errors": []}
@@ -157,7 +163,7 @@ def run(since_fetched_at: str) -> dict:
     finally:
         conn.close()
 
-    todo, updates = [], []
+    todo_short, todo_long, updates = [], [], []
     for rid, text, title, lang, cid, st, att in rows:
         need, det = _need_zh(lang, text)
         if not need:
@@ -169,15 +175,22 @@ def run(since_fetched_at: str) -> dict:
             updates.append(("skip", "", "", "", rid))
             rep["skipped"] += 1
             continue
-        todo.append((rid, text, title, det))
+        if len(text or "") > LONG_CHARS:                # 超长: 宁可不翻也不给半截译文
+            updates.append(("skip", "", "", "skip-toolong", rid))
+            rep["skipped"] += 1
+            continue
+        (todo_long if len(text or "") > conf["max_chars"] else todo_short).append(
+            (rid, text, title, det))
 
-    # 哈希缓存先吃一轮
-    remain = []
-    if todo:
+    # 哈希缓存先吃一轮(长文 'L' 前缀 key: 旧 partial 截断缓存永不命中)
+    def _cache_pass(todo, prefix):
+        remain = []
+        if not todo:
+            return remain
         conn = _store._connect()
         try:
             for rid, text, title, det in todo:
-                h = _text_hash(text)
+                h = prefix + _text_hash(text)
                 hit = conn.execute(
                     "SELECT text_zh, title_zh FROM zh_cache WHERE text_hash=?",
                     (h,)).fetchone()
@@ -188,87 +201,95 @@ def run(since_fetched_at: str) -> dict:
                     remain.append((rid, text, title, det, h))
         finally:
             conn.close()
+        return remain
 
-    bs = conf["batch"]
-    chain_pos = 0                                   # 粘性: 成功后沿用同一链位
-    for off in range(0, len(remain), bs):
-        chunk = remain[off:off + bs]
-        parts = []
-        for n, t in enumerate(chunk):
-            head = f"标题: {t[2]}\n" if t[2] else ""
-            parts.append(f"[{n}] {head}{(t[1] or '')[:conf['max_chars']]}")
-        prompt = "\n\n".join(parts)
-        out, used = None, None
-        chain_errs = []
-        for step in range(len(chain)):              # 从粘性位起逐链位尝试
-            pos = (chain_pos + step) % len(chain)
-            b, k, m, tag = chain[pos]
-            try:
-                out = _chat(b, k, m, prompt)
-                used = tag
-                chain_pos = pos
-                break
-            except Exception as ex:
-                chain_errs.append(f"{tag}: {type(ex).__name__}: {str(ex)[:60]}")
-        if out is None:
-            rep["errors"].append(f"batch{off} 全链失败(共{len(chain)}模型): "
-                                 + " | ".join(chain_errs))
-            conn = _store._connect()
-            try:
-                for rid, *_ in chunk:
-                    conn.execute("UPDATE items SET zh_attempts=zh_attempts+1, "
-                                 "zh_status=CASE WHEN zh_attempts+1>=? THEN 'fail' ELSE '' END "
-                                 "WHERE id=?", (MAX_ATTEMPTS, rid))
-                conn.commit()
-            finally:
-                conn.close()
-            continue
-        rep["model_used"] = used
-        try:
-            m2 = re.search(r"\[.*\]", out, re.S)
-            arr = json.loads(m2.group(0)) if m2 else []
-        except Exception as ex:
-            rep["errors"].append(f"batch{off}: JSON解析失败: {type(ex).__name__}: {str(ex)[:80]}")
-            conn = _store._connect()
-            try:
-                for rid, *_ in chunk:
-                    conn.execute("UPDATE items SET zh_attempts=zh_attempts+1, "
-                                 "zh_status=CASE WHEN zh_attempts+1>=? THEN 'fail' ELSE '' END "
-                                 "WHERE id=?", (MAX_ATTEMPTS, rid))
-                conn.commit()
-            finally:
-                conn.close()
-            continue
-        got_i = set()
-        conn = _store._connect()
-        try:
-            for d in arr:
+    def _translate(remain, bs, label, chain_pos):
+        """分块翻译并写缓存(long 文 bs=1 整条进 prompt 无截断)。返回新粘性链位。"""
+        limit = conf["max_chars"] if bs > 1 else LONG_CHARS
+        for off in range(0, len(remain), bs):
+            chunk = remain[off:off + bs]
+            parts = []
+            for n, t in enumerate(chunk):
+                head = f"标题: {t[2]}\n" if t[2] else ""
+                parts.append(f"[{n}] {head}{(t[1] or '')[:limit]}")
+            prompt = "\n\n".join(parts)
+            out, used = None, None
+            chain_errs = []
+            for step in range(len(chain)):              # 从粘性位起逐链位尝试
+                pos = (chain_pos + step) % len(chain)
+                b, k, m, tag = chain[pos]
                 try:
-                    i = int(d.get("i", -1))
-                    if not (0 <= i < len(chunk)):
+                    out = _chat(b, k, m, prompt)
+                    used = tag
+                    chain_pos = pos
+                    break
+                except Exception as ex:
+                    chain_errs.append(f"{tag}: {type(ex).__name__}: {str(ex)[:60]}")
+            if out is None:
+                rep["errors"].append(f"{label}{off} 全链失败(共{len(chain)}模型): "
+                                     + " | ".join(chain_errs))
+                conn = _store._connect()
+                try:
+                    for rid, *_ in chunk:
+                        conn.execute("UPDATE items SET zh_attempts=zh_attempts+1, "
+                                     "zh_status=CASE WHEN zh_attempts+1>=? THEN 'fail' ELSE '' END "
+                                     "WHERE id=?", (MAX_ATTEMPTS, rid))
+                    conn.commit()
+                finally:
+                    conn.close()
+                continue
+            rep["model_used"] = used
+            try:
+                m2 = re.search(r"\[.*\]", out, re.S)
+                arr = json.loads(m2.group(0)) if m2 else []
+            except Exception as ex:
+                rep["errors"].append(f"{label}{off}: JSON解析失败: "
+                                     f"{type(ex).__name__}: {str(ex)[:80]}")
+                conn = _store._connect()
+                try:
+                    for rid, *_ in chunk:
+                        conn.execute("UPDATE items SET zh_attempts=zh_attempts+1, "
+                                     "zh_status=CASE WHEN zh_attempts+1>=? THEN 'fail' ELSE '' END "
+                                     "WHERE id=?", (MAX_ATTEMPTS, rid))
+                    conn.commit()
+                finally:
+                    conn.close()
+                continue
+            got_i = set()
+            conn = _store._connect()
+            try:
+                for d in arr:
+                    try:
+                        i = int(d.get("i", -1))
+                        if not (0 <= i < len(chunk)):
+                            continue
+                        rid, text, title, det, h = chunk[i]
+                        zh = (d.get("zh") or "").strip()
+                        tzh = (d.get("title_zh") or "").strip()
+                        if not zh:
+                            continue
+                        updates.append(("ok", zh, tzh, det, rid))
+                        conn.execute("INSERT OR IGNORE INTO zh_cache VALUES(?,?,?,?,?)",
+                                     (h, zh, tzh, conf["model"] if used == "" else used,
+                                      time.strftime("%Y-%m-%d %H:%M:%S")))
+                        got_i.add(i)
+                        rep["translated"] += 1
+                    except Exception:
                         continue
-                    rid, text, title, det, h = chunk[i]
-                    zh = (d.get("zh") or "").strip()
-                    tzh = (d.get("title_zh") or "").strip()
-                    if not zh:
-                        continue
-                    partial = len(text or "") > conf["max_chars"]
-                    if partial:
-                        zh += " …(译文有删减,原文见长)"
-                    status = "partial" if partial else "ok"
-                    updates.append((status, zh, tzh, det, rid))
-                    conn.execute("INSERT OR IGNORE INTO zh_cache VALUES(?,?,?,?,?)",
-                                 (h, zh, tzh, conf["model"] if used == "" else used,
-                                  time.strftime("%Y-%m-%d %H:%M:%S")))
-                    got_i.add(i)
-                    rep["translated"] += 1
-                except Exception:
-                    continue
-            conn.commit()
-        finally:
-            conn.close()
-        rep["batches"] += 1
-        time.sleep(SLEEP)
+                conn.commit()
+            finally:
+                conn.close()
+            rep["batches"] += 1
+            time.sleep(SLEEP)
+        return chain_pos
+
+    pos = 0
+    remain_short = _cache_pass(todo_short, "")
+    remain_long = _cache_pass(todo_long, "L")
+    if remain_short:
+        pos = _translate(remain_short, conf["batch"], "batch", pos)
+    if remain_long:
+        pos = _translate(remain_long, 1, "long", pos)
 
     if updates:
         conn = _store._connect()
