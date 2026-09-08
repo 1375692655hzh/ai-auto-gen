@@ -1,5 +1,6 @@
 """wb-video-script/v1 口播脚本 → Remotion story.json 转换器（纯函数为主）。
 
+支持四档画幅与 30/60 fps，主题 theme 与编排 layout 独立选择；仅 9:16 使用竖版模板族。
 职责：把视频工坊生成的口播脚本确定性转成 story.json（旁白逐字冻结，模板/on_screen
 按角色确定性映射）；可选 LLM 编排增强（settings.enrich=="llm" 且翻译模型已配），
 LLM 输出不过闸门（逐场景 narration 与输入逐字一致 + 模板白名单）即整单回退骨架。
@@ -16,9 +17,19 @@ REPO = Path(__file__).resolve().parents[2]          # workbench/server/vmake.py 
 VIDEO_DIR = REPO / "ai-workflow" / "video"
 VIDEOS_DIR = VIDEO_DIR / "videos"
 
-FPS = 30
 PAD_SECONDS = 0.8
-DIMS = {"horizontal": (1920, 1080), "vertical": (1080, 1920)}
+FAST_CUT_PAD_SECONDS = 0.5      # 快切微场景密度高，收紧场间停顿
+FAST_CUT_MIN_SENT_CHARS = 8
+FAST_CUT_ROLES = ("setup", "move", "gives", "payoff")
+FAST_CUT_ROTATION = {
+    "setup": ("event", "bars", "cards"),
+    "move": ("stacked", "bars", "compare", "cards"),
+    "gives": ("rows", "checklist", "cards", "bars"),
+    "payoff": ("stacked", "versus", "cards"),
+}
+ASPECTS = {"16:9": (1920, 1080), "9:16": (1080, 1920),
+           "1:1": (1080, 1080), "4:5": (1080, 1350)}
+FORMAT_ALIASES = {"horizontal": "16:9", "vertical": "9:16"}
 DEFAULT_EDGE_VOICE = "zh-CN-XiaoxiaoNeural"
 DEFAULT_DASHSCOPE_VOICE = "longanlufeng"
 
@@ -33,25 +44,68 @@ H_TEMPLATE_BY_ROLE = {"hook": "title", "setup": "event", "move": "stacked",
 # 竖版：hook→vtitle，中段 vstat/vpoints 交替，cta→vpoints
 V_TEMPLATE_MIDDLE = ("vstat", "vpoints")
 
-STYLE_PACKS = {
-    "auto": "AI 自动（LLM 按内容选型）",
-    "data-dense": "数据密集（move/gives 优先 bars/compare/rows 类数据版式）",
-    "quote-big": "金句大字（payoff/cta 优先 stacked/versus 大字对照，弱化罗列）",
+THEMES = {
+    "terminal-dark": "午夜科技（默认）",
+    "paper-light": "素白简报",
+    "ocean-blue": "深海蓝调",
+    "vox-collage": "纸拼贴档案（VOX，仅 16:9）",
 }
-H_TEMPLATE_BY_PACK = {
+LAYOUTS = {
+    "auto": "AI 自动",
+    "data-dense": "数据密集",
+    "quote-big": "金句大字",
+    "fast-cut": "快节奏快切（仅 16:9）",
+}
+LEGACY_PACK_MAP = {
+    "auto": ("terminal-dark", "auto"),
+    "data-dense": ("terminal-dark", "data-dense"),
+    "quote-big": ("terminal-dark", "quote-big"),
+    "fast-cut": ("terminal-dark", "fast-cut"),
+    "vox-collage": ("vox-collage", "auto"),
+}
+H_TEMPLATE_BY_LAYOUT = {
     "data-dense": {"hook": "title", "setup": "event", "move": "bars",
                    "gives": "rows", "payoff": "compare", "cta": "conclusion"},
     "quote-big": {"hook": "title", "setup": "event", "move": "stacked",
                   "gives": "versus", "payoff": "stacked", "cta": "conclusion"},
 }
 
+# VOX 纸拼贴固定风格块(源自用户 VOX ANIMATIONS 引擎提示词, 与 seedream 实测验证)
+COLLAGE_STYLE_BLOCK = ("编辑风格纸拼贴海报：{subject}。黑白银色网点照片剪纸、撕纸边缘、"
+                       "透明胶带贴角、打字机纸条、红色橡皮印章、红线与铜钉固定、"
+                       "褪色档案米黄色纸板背景带一抹红色。非数字插画、非卡通、非3D渲染，纪实档案感")
+
 
 def normalize_style_pack(value) -> str:
-    return value if isinstance(value, str) and value in STYLE_PACKS else "auto"
+    return value if isinstance(value, str) and value in LEGACY_PACK_MAP else "auto"
+
+
+def normalize_aspect(value) -> str:
+    return value if isinstance(value, str) and value in ASPECTS else "16:9"
+
+
+def normalize_fps(value) -> int:
+    try:
+        fps = int(value)
+    except (TypeError, ValueError, OverflowError):
+        return 30
+    return fps if fps in (30, 60) else 30
+
+
+def normalize_theme(value) -> str:
+    return value if isinstance(value, str) and value in THEMES else "terminal-dark"
+
+
+def normalize_layout(value) -> str:
+    return value if isinstance(value, str) and value in LAYOUTS else "auto"
 
 
 def dashscope_key_ok() -> bool:
     """只读探测 ai-workflow/video/.env 是否配置了非空 DASHSCOPE_API_KEY（不回显内容）。"""
+    from . import config
+    if any(p.get("engine") == "dashscope" and p.get("enabled") and p.get("api_key")
+           for p in (config.load().get("tts") or {}).get("providers", [])):
+        return True
     env = VIDEO_DIR / ".env"
     try:
         for line in env.read_text(encoding="utf-8", errors="replace").splitlines():
@@ -84,8 +138,8 @@ def _fallback_head(beat: dict, narration: str) -> str:
     return s or (narration or "").strip()[:14]
 
 
-def _build_meta(script: dict, settings: dict, fmt: str) -> dict:
-    width, height = DIMS.get(fmt, DIMS["horizontal"])
+def _build_meta(script: dict, settings: dict, fmt: str, fps: int, theme: str, layout: str) -> dict:
+    width, height = ASPECTS[fmt]
     title = str(settings.get("title") or script.get("title") or "未命名视频").strip()[:30]
     provider = str(settings.get("tts_provider") or "edge")
     use_dash = provider == "dashscope" and dashscope_key_ok()
@@ -98,8 +152,9 @@ def _build_meta(script: dict, settings: dict, fmt: str) -> dict:
         voice = settings.get("voice") or DEFAULT_EDGE_VOICE
         meta_voice = voice if str(voice).startswith("zh-CN") else DEFAULT_EDGE_VOICE
         tts = None
-    meta = {"title": title, "voice": meta_voice, "fps": FPS,
+    meta = {"title": title, "voice": meta_voice, "fps": fps,
             "width": width, "height": height, "format": fmt,
+            "theme": theme, "layout": layout,
             "padSeconds": PAD_SECONDS}
     if tts:
         meta["tts"] = tts
@@ -113,7 +168,20 @@ def _data_for(template: str, beat: dict, narration: str, script: dict,
     head = _fallback_head(beat, narration)
     cta = script.get("cta") if isinstance(script.get("cta"), dict) else {}
     cta_line = str(cta.get("line") or "").strip() or narration
-    if fmt == "vertical":
+    if template == "paper-board":
+        # VOX 纸拼贴: 图路径约定 input/collage/<scene>.jpeg(编排 CLI 据 image_prompt 生成);
+        # label=首个 on_screen(档案标签), stamp=第二个(≤6 字); 无图时模板回退打字机大字
+        sid = re.sub(r"[^\w-]", "", str(beat.get("id") or "s")) or "s"
+        subject = str(beat.get("visual_hint") or "").strip() or narration
+        subject = re.sub(r"\s+", " ", subject)[:80]
+        label = os_items[0][:10] if os_items else head[:10]
+        stamp = os_items[1][:6] if len(os_items) > 1 and len(os_items[1]) <= 6 else ""
+        return {"image": f"input/collage/{sid}.jpeg",
+                "image_prompt": COLLAGE_STYLE_BLOCK.format(subject=subject),
+                **({"label": label} if label else {}),
+                **({"stamp": stamp} if stamp else {}),
+                "fallback_title": str(script.get("title") or "")[:30]}
+    if fmt == "9:16":
         if template == "vtitle":
             return {"title": _rich(os_items[0] if os_items else head or script.get("title")),
                     **({"sub": _rich(os_items[1])} if len(os_items) > 1 else {})}
@@ -175,30 +243,39 @@ def _data_for(template: str, beat: dict, narration: str, script: dict,
         if not rows:
             rows = [{"label": _rich(head), "body": _rich("")}]
         return {"headline": _rich(head), "rows": rows}
+    if template == "checklist":
+        # 快切轮换可达: 必须保 items 字段(模板 d.items.map 缺键即崩)
+        items = [{"tag": t, "body": _rich(head if i == 0 else "")}
+                 for i, t in enumerate(os_items[:4])]
+        if not items:
+            items = [{"tag": head, "body": _rich("")}]
+        return {"headline": _rich(head), "items": items}
     if template == "conclusion":
-        return {"statements": [], "tagline": _rich(cta_line)}
+        stmts = [{"who": "", "body": _rich(cta_line)}]   # 收尾声明非空: 用 CTA 原句
+        return {"statements": stmts, "tagline": _rich(cta_line)}
     # 其余横版模板不在确定性映射里（仅 LLM 白名单可达），保底给 headline 防崩
     return {"headline": _rich(head)}
 
 
-def _template_for(beat: dict, middle_i: int, fmt: str, pack: str = "auto") -> str:
+def _template_for(beat: dict, middle_i: int, is_vertical: bool, layout: str) -> str:
     role = str(beat.get("role") or "")
-    if fmt == "vertical":
+    if is_vertical:
         if role == "hook":
             return "vtitle"
         if role == "cta":
             return "vpoints"
         return V_TEMPLATE_MIDDLE[middle_i % 2]
-    return H_TEMPLATE_BY_PACK.get(pack, H_TEMPLATE_BY_ROLE).get(role, "event")
+    return H_TEMPLATE_BY_LAYOUT.get(layout, H_TEMPLATE_BY_ROLE).get(role, "event")
 
 
 def _deterministic_story(script: dict, settings: dict, beats: list,
-                         narrations: list, fmt: str, pack: str = "auto") -> tuple:
+                         narrations: list, fmt: str, fps: int, theme: str, layout: str) -> tuple:
     scenes = []
     warnings = []
     for i, beat in enumerate(beats):
-        template = _template_for(beat, max(0, i - 1), fmt, pack)   # 中段从 vstat 起交替
-        if fmt == "vertical" and template == "vstat" and not any(
+        template = ("paper-board" if theme == "vox-collage" and fmt == "16:9"
+                    else _template_for(beat, max(0, i - 1), fmt == "9:16", layout))   # 中段从 vstat 起交替
+        if fmt == "9:16" and template == "vstat" and not any(
                 re.search(r"\d", item) for item in _on_screen(beat)):
             template = "vpoints"
             warnings.append(f"场景{i + 1}无数字锚点已改用要点版式")
@@ -210,7 +287,88 @@ def _deterministic_story(script: dict, settings: dict, beats: list,
             "caption": str(beat.get("subtitle") or "").strip() or narration,
             "data": _data_for(template, beat, narration, script, fmt),
         })
-    return {"meta": _build_meta(script, settings, fmt), "scenes": scenes}, warnings
+    return {"meta": _build_meta(script, settings, fmt, fps, theme, layout), "scenes": scenes}, warnings
+
+
+def _split_units(text: str, pattern: str) -> list[str]:
+    """保留句读与原文顺序，短碎片优先并入前句，开头碎片并入后句。"""
+    parts = [part for part in re.split(pattern, text) if part]
+    sentences = []
+    pending = ""
+    for part in parts:
+        sentence = pending + part
+        pending = ""
+        if len(re.sub(r"\s+", "", sentence)) < FAST_CUT_MIN_SENT_CHARS:
+            if sentences:
+                sentences[-1] += sentence
+            else:
+                pending = sentence
+        else:
+            sentences.append(sentence)
+    if pending:
+        sentences.append(pending)
+    return sentences
+
+
+def _split_sentences(text: str) -> list[str]:
+    return _split_units(text, r"(?<=[。！？；])")
+
+
+def _split_clauses(text: str) -> list[str]:
+    return _split_units(text, r"(?<=[。！？；，、])")
+
+
+def _check_narration_integrity(beats, scenes, narrations=None) -> bool:
+    """以已应用 hook 变体的旁白为准，仅豁免空白差异。"""
+    if narrations is None:
+        narrations = [str(b.get("narration") or "") for b in beats]
+    expected = re.sub(r"\s+", "", "".join(narrations))
+    actual = re.sub(r"\s+", "", "".join(str(s.get("narration") or "") for s in scenes))
+    return actual == expected
+
+
+def _fast_cut_scenes(script, settings, beats, narrations) -> tuple:
+    scenes = []
+    warnings = []
+    prev_template = None
+    for i, beat in enumerate(beats):
+        role = str(beat.get("role") or "")
+        beat_id = str(beat.get("id") or f"b{i + 1}")
+        narration = narrations[i]
+        sents = []
+        split_by = "按句号"
+        if role in FAST_CUT_ROLES:
+            sents = _split_sentences(narration)
+            if len(sents) < 2:
+                sents = _split_clauses(narration)
+                split_by = "按语逗"
+        if len(sents) < 2:
+            template = H_TEMPLATE_BY_ROLE.get(role, "event")
+            scenes.append({
+                "id": beat_id, "template": template, "narration": narration,
+                "caption": str(beat.get("subtitle") or "").strip() or narration,
+                "data": _data_for(template, beat, narration, script, "16:9"),
+            })
+            prev_template = template
+            continue
+        beat_id = re.sub(r"[^a-z0-9-]", "", beat_id.lower()) or f"b{i + 1}"
+        seq = FAST_CUT_ROTATION[role]
+        os_items = beat.get("on_screen") or []
+        for n, sentence in enumerate(sents):
+            template = seq[n % len(seq)]
+            if template == prev_template:
+                template = seq[(n + 1) % len(seq)]
+            rotated_beat = dict(beat)
+            offset = n % len(os_items) if os_items else 0
+            rotated_beat["on_screen"] = os_items[offset:] + os_items[:offset]
+            scenes.append({
+                "id": f"{beat_id}-s{n + 1}", "template": template,
+                "narration": sentence, "caption": sentence,
+                "data": _data_for(template, rotated_beat, sentence, script, "16:9"),
+            })
+            prev_template = template
+        warnings.append(f"快切：{beat_id} {split_by}拆为 {len(sents)} 个微场景")
+    return scenes, warnings
 
 
 COMPOSE_SYSTEM = r"""你是财经短视频分镜排版师。只输出一个 ```json 代码块，不要解释。
@@ -218,7 +376,7 @@ COMPOSE_SYSTEM = r"""你是财经短视频分镜排版师。只输出一个 ```j
 1. scenes 数量必须等于 beats 数量，顺序一一对应。
 2. 每个场景的 narration 必须【逐字复制】输入 beat 的 narration，一个字都不能改。
 3. template 只能用白名单：横版 title/event/bars/compare/cards/rows/stacked/versus/checklist/conclusion；
-   竖版 vtitle/vstat/vpoints。vertical 项目只允许竖版模板。
+   竖版 vtitle/vstat/vpoints。9:16 项目只允许竖版模板。
 4. data 最小 schema：
    title: {kicker?, titlePre?, ticker?, titlePost?, subtitle1?, subtitle2?}
    event: {headline, chips?, stat?{value,decimals?,prefix?,suffix?,label}}
@@ -241,7 +399,7 @@ COMPOSE_SYSTEM = r"""你是财经短视频分镜排版师。只输出一个 ```j
 
 
 def _llm_compose_scenes(script: dict, settings: dict, beats: list,
-                        narrations: list, fmt: str, pack: str = "auto"):
+                        narrations: list, fmt: str, fps: int, theme: str, layout: str):
     """LLM 编排增强；返回 (story|None, warnings)。任何闸门不过 → (None, 回退警告)。"""
     warnings = []
     from . import config, vstudio           # 延迟导入: 纯函数场景不背 LLM 依赖
@@ -259,10 +417,10 @@ def _llm_compose_scenes(script: dict, settings: dict, beats: list,
             f"脚本标题：{script.get('title') or ''}\n"
             f"beats 全量（narration 逐字冻结，visual_hint 仅作画面参考）：\n"
             + json.dumps(beats_payload, ensure_ascii=False))
-    if pack == "data-dense":
-        user += "\n视觉风格包：数据密集——中段 move/gives 场景优先选用 bars/compare/rows 类数据版式。"
-    elif pack == "quote-big":
-        user += "\n视觉风格包：金句大字——payoff/cta 场景优先 stacked/versus 大字对照，弱化罗列版式。"
+    if layout == "data-dense":
+        user += "\n编排策略：数据密集——中段 move/gives 场景优先选用 bars/compare/rows 类数据版式。"
+    elif layout == "quote-big":
+        user += "\n编排策略：金句大字——payoff/cta 场景优先 stacked/versus 大字对照，弱化罗列版式。"
     raw = vstudio.chat_completions(base, key, model,
                                    [{"role": "system", "content": COMPOSE_SYSTEM},
                                     {"role": "user", "content": user}], 0.3, 6000, 180)
@@ -272,14 +430,14 @@ def _llm_compose_scenes(script: dict, settings: dict, beats: list,
     scenes = parsed.get("scenes") if isinstance(parsed, dict) else None
     if not isinstance(scenes, list) or len(scenes) != len(beats):
         return None, ["AI 编排回退：scenes 缺失或数量与 beats 不一致，使用确定性版式"]
-    whitelist_fmt = V_TEMPLATE_WHITELIST if fmt == "vertical" else H_TEMPLATE_WHITELIST
+    whitelist_fmt = V_TEMPLATE_WHITELIST if fmt == "9:16" else H_TEMPLATE_WHITELIST
     for i, sc in enumerate(scenes):
         sc = sc if isinstance(sc, dict) else {}
         if str(sc.get("narration") or "") != narrations[i]:
             return None, [f"AI 编排回退：场景 {i + 1} narration 被改写（要求逐字冻结），使用确定性版式"]
         if sc.get("template") not in whitelist_fmt:
             return None, [f"AI 编排回退：场景 {i + 1} 模板 {sc.get('template')!r} 不在白名单，使用确定性版式"]
-    meta = _build_meta(script, settings, fmt)
+    meta = _build_meta(script, settings, fmt, fps, theme, layout)
     out_scenes = []
     for i, sc in enumerate(scenes):
         data = sc.get("data") if isinstance(sc.get("data"), dict) else {}
@@ -294,12 +452,13 @@ def _llm_compose_scenes(script: dict, settings: dict, beats: list,
     return {"meta": meta, "scenes": out_scenes}, warnings
 
 
-def script_to_story(script, settings, hook_index=None):
+def _script_to_story(script, settings, hook_index=None):
     """wb-video-script/v1 → story.json。返回 (story, warnings)。
 
     - 旁白逐字冻结：narration ← beat.narration；hook 场在给出 hook_index 时用
       hook.variants[hook_index].text 覆盖（用户在预览页亲手选的变体）。
-    - settings: {format?, voice?, tts_provider?, enrich?, title?}
+    - settings: {aspect?, fps?, theme?, layout?, voice?, tts_provider?, enrich?, title?}
+    - 四画幅中仅 9:16 使用竖版模板族；format/style_pack 保留为兼容入口。
     """
     warnings = []
     script = script if isinstance(script, dict) else {}
@@ -307,13 +466,25 @@ def script_to_story(script, settings, hook_index=None):
     beats = [b for b in (script.get("beats") or []) if isinstance(b, dict)]
     if not beats:
         raise ValueError("script.beats 为空，无法转换为 story")
-    fmt = str(settings.get("format") or script.get("format") or "horizontal")
-    if fmt not in DIMS:
-        fmt = "horizontal"
-    pack = normalize_style_pack(settings.get("style_pack"))
-    if fmt == "vertical" and pack != "auto":
-        warnings.append("竖版不支持风格包，已忽略")
-        pack = "auto"
+    fmt = "16:9"
+    for i, value in enumerate((settings.get("aspect"),
+                               settings.get("format"), script.get("format"))):
+        if not isinstance(value, str):
+            continue
+        candidate = FORMAT_ALIASES.get(value, value) if i > 0 else value
+        if candidate in ASPECTS:
+            fmt = candidate
+            break
+    fps = normalize_fps(settings.get("fps"))
+    legacy_theme, legacy_layout = LEGACY_PACK_MAP[normalize_style_pack(settings.get("style_pack"))]
+    theme = normalize_theme(settings["theme"]) if settings.get("theme") else legacy_theme
+    layout = normalize_layout(settings["layout"]) if settings.get("layout") else legacy_layout
+    vox_active = theme == "vox-collage" and fmt == "16:9"
+    if theme == "vox-collage" and not vox_active:
+        warnings.append("VOX 纸拼贴主题仅支持 16:9 画幅，已忽略拼贴版式")
+    if layout == "fast-cut" and fmt == "9:16":
+        warnings.append("9:16 竖版不支持快切编排，已忽略")
+        layout = "auto"
     # hook 变体覆盖
     hook = script.get("hook") if isinstance(script.get("hook"), dict) else {}
     variants = hook.get("variants") if isinstance(hook.get("variants"), list) else []
@@ -329,13 +500,89 @@ def script_to_story(script, settings, hook_index=None):
         narrations.append(n)
     if hook_text:
         warnings.append(f"hook 已切换为变体 #{hook_index + 1}")
-    if settings.get("enrich") == "llm":
-        story, llm_warnings = _llm_compose_scenes(script, settings, beats, narrations, fmt, pack)
+    if layout == "fast-cut" and fmt != "9:16" and not vox_active:
+        if settings.get("enrich") == "llm":
+            warnings.append("快切路径暂用确定性版式（AI 编排为 beat 粒度，与句子级微场景暂不兼容）")
+        scenes, fc_warnings = _fast_cut_scenes(script, settings, beats, narrations)
+        warnings.extend(fc_warnings)
+        if not _check_narration_integrity(beats, scenes, narrations):
+            warnings.append("快切拆句完整性校验失败，已回退未拆分版式")
+            story, fallback_warnings = _deterministic_story(
+                script, settings, beats, narrations, fmt, fps, theme, layout)
+            return story, warnings + fallback_warnings
+        meta = _build_meta(script, settings, fmt, fps, theme, layout)
+        meta["padSeconds"] = float(settings.get("pad_seconds") or FAST_CUT_PAD_SECONDS)
+        return {"meta": meta, "scenes": scenes}, warnings
+    if settings.get("enrich") == "llm" and not vox_active:
+        # vox-collage 版式固定(全场景 paper-board), 走确定性派生, 不进 LLM 编排
+        story, llm_warnings = _llm_compose_scenes(script, settings, beats, narrations, fmt, fps, theme, layout)
         warnings.extend(llm_warnings)
         if story is not None:
             return story, warnings
-    story, deterministic_warnings = _deterministic_story(script, settings, beats, narrations, fmt, pack)
+    story, deterministic_warnings = _deterministic_story(script, settings, beats, narrations, fmt, fps, theme, layout)
     warnings.extend(deterministic_warnings)
+    return story, warnings
+
+
+def script_to_story(script, settings, hook_index=None):
+    """统一在各编排路径产出后应用逐拍覆盖；不更改旁白/字幕/id。"""
+    story, warnings = _script_to_story(script, settings, hook_index)
+    return apply_beat_overrides(story, script, settings, warnings)
+
+
+def apply_beat_overrides(story, script, settings, warnings):
+    """对已产出的分镜应用素材层，供 CLI 复制素材后复用，零外呼。"""
+    overrides = (settings or {}).get("beat_overrides") or []
+    if not overrides:
+        return story, warnings
+    if story["meta"]["format"] != "16:9":
+        warnings.append("编辑生成的逐拍覆盖仅支持 16:9，已忽略")
+        return story, warnings
+    scenes = {s["id"]: s for s in story["scenes"]}
+    beats = {str(b.get("id") or f"b{i+1}"): b for i, b in enumerate(script.get("beats") or [])}
+    for override in overrides:
+        if not isinstance(override, dict):
+            continue
+        bid = str(override.get("beat_id") or "")
+        if re.search(r"-s\d+$", bid) or any(s.startswith(bid + "-s") for s in scenes):
+            warnings.append(f"场景 {bid} 为快切微场景，已忽略逐拍覆盖")
+            continue
+        scene, beat = scenes.get(bid), beats.get(bid)
+        if scene is None or beat is None:
+            warnings.append(f"场景 {bid} 不存在，已忽略逐拍覆盖")
+            continue
+        method = override.get("method")
+        os_items = _on_screen(beat)
+        if method == "template":
+            continue
+        if method in ("upload_image", "upload_video"):
+            file = override.get("file")
+            materials = settings.get("materials_dir")
+            valid = isinstance(file, str) and bool(file) and Path(file).name == file and not re.search(r"[\\/:]", file)
+            if valid and materials:
+                root = Path(materials).resolve()
+                path = (root / file).resolve()
+                valid = root in path.parents and path.is_file()
+            if not valid:
+                warnings.append(f"场景 {bid} 素材缺失，回退模板")
+                continue
+            data = {"src": f"materials/{file}", "kind": "image" if method == "upload_image" else "video",
+                    "zoom": override.get("zoom") or 1, "scrim": override.get("scrim") or "bottom",
+                    "headline": _rich(os_items[0] if os_items else _fallback_head(beat, scene["narration"])),
+                    "credit": override.get("credit") or ""}
+            if method == "upload_image":
+                data["kenburns"] = override.get("kenburns") or "in"
+            else:
+                data.update({k: override[k] for k in ("start", "end") if k in override})
+            scene.update(template="clip", data=data)
+        elif method == "ai_image":
+            sid = re.sub(r"[^\w-]", "", bid) or "s"
+            subject = str(beat.get("visual_hint") or scene["narration"][:80])
+            scene.update(template="paper-board", data={
+                "image": f"input/collage/{sid}.jpeg",
+                "image_prompt": override.get("prompt") or COLLAGE_STYLE_BLOCK.format(subject=subject),
+                **({"label": os_items[0][:10]} if os_items else {}),
+                "fallback_title": str(script.get("title") or "")[:30]})
     return story, warnings
 
 

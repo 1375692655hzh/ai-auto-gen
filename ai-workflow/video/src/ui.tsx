@@ -1,4 +1,5 @@
 import React from "react";
+import { ACTIVE } from "./active-story";
 import {
 	AbsoluteFill,
 	Easing,
@@ -10,20 +11,62 @@ import {
 import type { CaptionCue } from "./story-types";
 import type { ColorKey, Rich as RichParts } from "./story-types";
 
-export const COLORS = {
-	bgDeep: "#070B16",
-	text: "#F5F7FA",
-	sub: "#9AA7BD",
-	nvidia: "#76B900",
-	red: "#FF5A5A",
-	green: "#00C896",
-	amber: "#FFB020",
-	blue: "#4D9FFF",
-	purple: "#9B7BFF",
-	panel: "rgba(255,255,255,0.045)",
-	panelStrong: "rgba(255,255,255,0.08)",
-	border: "rgba(255,255,255,0.10)",
+interface Palette {
+	bgDeep: string;
+	text: string;
+	sub: string;
+	nvidia: string;
+	red: string;
+	green: string;
+	amber: string;
+	blue: string;
+	purple: string;
+	panel: string;
+	panelStrong: string;
+	border: string;
+	glow1: string;
+	glow2: string;
+}
+
+const PALETTES: Record<string, Palette> = {
+	"terminal-dark": {
+		bgDeep: "#070B16",
+		text: "#F5F7FA",
+		sub: "#9AA7BD",
+		nvidia: "#76B900",
+		red: "#FF5A5A",
+		green: "#00C896",
+		amber: "#FFB020",
+		blue: "#4D9FFF",
+		purple: "#9B7BFF",
+		panel: "rgba(255,255,255,0.045)",
+		panelStrong: "rgba(255,255,255,0.08)",
+		border: "rgba(255,255,255,0.10)",
+		glow1: "#76B900",
+		glow2: "#4D9FFF",
+	},
+	"paper-light": {
+		bgDeep: "#F7F4EC", text: "#2B2A26", sub: "#7A7466", nvidia: "#C7392B",
+		red: "#B3352C", green: "#1E7F4F", amber: "#B07A18", blue: "#2B5EA7", purple: "#6B4FA3",
+		panel: "rgba(43,42,38,0.05)", panelStrong: "rgba(43,42,38,0.09)", border: "rgba(43,42,38,0.14)",
+		glow1: "#C7392B", glow2: "#2B5EA7",
+	},
+	"ocean-blue": {
+		bgDeep: "#06182E", text: "#EAF4FF", sub: "#8FB3D9", nvidia: "#6FD3FF",
+		red: "#FF5A5A", green: "#00C896", amber: "#FFB020", blue: "#4D9FFF", purple: "#9B7BFF",
+		panel: "rgba(255,255,255,0.045)", panelStrong: "rgba(255,255,255,0.08)", border: "rgba(255,255,255,0.10)",
+		glow1: "#6FD3FF", glow2: "#4D9FFF",
+	},
+	"vox-collage": {
+		bgDeep: "#E9DCC3", text: "#3E2F1D", sub: "#8A7A5F", nvidia: "#B3352C",
+		red: "#B3352C", green: "#4E6E45", amber: "#9C6F1E", blue: "#3D5A80", purple: "#6E4F7E",
+		panel: "rgba(62,47,29,0.05)", panelStrong: "rgba(62,47,29,0.09)", border: "rgba(62,47,29,0.16)",
+		glow1: "#B3352C", glow2: "#8A7A5F",
+	},
 };
+
+const activeTheme = (ACTIVE.story.meta as { theme?: string }).theme ?? "terminal-dark";
+export const COLORS = PALETTES[activeTheme] ?? PALETTES["terminal-dark"];
 
 export const FONT =
 	'"Microsoft YaHei", "PingFang SC", "Noto Sans SC", "Source Han Sans SC", sans-serif';
@@ -80,7 +123,7 @@ export const Backdrop: React.FC = () => {
 			<AbsoluteFill
 				style={{
 					background:
-						"radial-gradient(1300px 750px at 28% 18%, rgba(118,185,0,0.10), transparent 62%), radial-gradient(1100px 650px at 82% 88%, rgba(77,159,255,0.10), transparent 62%)",
+						`radial-gradient(1300px 750px at 28% 18%, ${COLORS.glow1}1A, transparent 62%), radial-gradient(1100px 650px at 82% 88%, ${COLORS.glow2}1A, transparent 62%)`,
 				}}
 			/>
 			<AbsoluteFill

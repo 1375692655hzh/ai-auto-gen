@@ -57,8 +57,8 @@ _X_STYLE = """你是 X(Twitter) 平台财经写手。铁律:
 # 付费档骨架全开; 缺料的节一律省略, 禁止编造。每项 = (中文名, 免费档骨架, 付费档骨架)。
 _TPL_SCAFFOLD = {
     "thread-post": ("串推",
-        "3-5 条串推: 1/ hook(结论+主$cashtag) → 每条一个事实/论点, 独立成帖 → 末条结论+不确定性",
-        "5-10 条串推: 1/ hook → 事实/机制/反方各成条 → 末条结论+风险+不确定性"),
+        "3-5 条串推: 1/ 钩子+最强数字前置(主$cashtag) → 每条一个节拍(自带主语和数字, 禁回指词) → 末条 Bottom line 结论+互动钩子",
+        "5-8 条串推: 1/ 钩子+最强数字前置 → 事实/机制/反方各成条(每条自带主语和数字, 禁回指词) → 末条 Bottom line 结论+风险+互动钩子"),
     "catalyst-take": ("事件快评",
         "Hook(结论+主$cashtag) → 事件详情(谁/何时/关键数字, ≤2句) → 有行情加半句即时定价 → 一句观点(含不确定性)",
         "Hook(结论+主$cashtag) → 事件详情(谁/何时/关键数字) → 即时定价(涨跌/量, 缺行情省) → 机制(为何这样定价) → 市场共识/分歧(缺观点省, 最多2条对立转述) → 技术参考(支撑/阻力, 缺省) → 下一催化(标不确定性)"),
@@ -478,11 +478,12 @@ def _fmt_rows(rows: list, n: int) -> str:
 
 
 def _llm(cfg3, system: str, user: str, max_tokens: int = 2000, timeout: int = 120) -> str | None:
-    base, key, model = cfg3
+    base, key, model = cfg3[:3]
+    extra = cfg3[3] if len(cfg3) > 3 else None     # 厂商私有参数(如推理模型关思考)
     return vstudio.chat_completions(base, key, model,
                                     [{"role": "system", "content": system},
                                      {"role": "user", "content": user}],
-                                    0.4, max_tokens, timeout)
+                                    0.4, max_tokens, timeout, extra=extra)
 
 
 def _parse_json(raw: str) -> dict | None:
@@ -515,13 +516,16 @@ def _compose_prompt(params: dict, materials: list, contexts: list,
                + ("\n分歧: " + opinions["divergence"] if opinions.get("divergence") else ""))
     tech = ("\n[技术面事实]\n" + tech_facts) if tech_facts else ""
     cashtags = " ".join("$" + t.split(".")[0] for t in tickers[:6])
+    manual_hint = ("\n注: 标注「手动录入」的素材由用户本人提供, 事实性由用户担保, "
+                   "正常采用但不得虚构出处。\n"
+                   if any(str(m.get("id") or "").startswith("manual-") for m in materials) else "")
     user = f"""语言: 全文用{lang}写(素材是其它语言也要写成{lang})。
 结构模板: {scaffold}
 字数: X 计权长度不超过 {limit} (CJK 字符每个计 2, 其余计 1)。
 
 [素材原文]
 {mat}
-
+{manual_hint}
 [检索补充]
 {sup}{tech}{agg}
 
@@ -533,8 +537,11 @@ text 标签规则: 每个标的首次出现写成 $TICKER 内联在句中(不要
         user = user[:user.index("只输出 JSON")]
         user += (f'只输出 JSON: {{"tweets": ["1/ ...", "2/ ...", "3/ ..."]}}。'
                  f'输出 3-8 条(免费档 3-5 条, 付费档 5-8 条, 本契约优先于骨架条数)。'
-                 f'每条以连续 N/ 前缀开头, 独立成帖, 含前缀的每条 X 计权长度 ≤{limit}, '
-                 '不是整串合计上限。首条含主 $cashtag; 观点照常用 My take: 或 Bottom line: 标记。')
+                 f'每条以连续 N/ 前缀开头(只写 N/, 不要写 N/M, 后端统一补 M)。'
+                 f'每条独立成帖——单独出现也必须读得懂: 禁用回指词(the beat/also/this/above/as mentioned/it/they 指代上条), '
+                 f'每个数字带主语与单位; 中段每条至多一次 $TICKER 锚点; '
+                 f'首条=钩子+最强数字前置+主 $cashtag; 末条=My take:/Bottom line: 结论+互动钩子(提问或展望)。'
+                 f'含前缀的每条 X 计权长度 ≤{limit}, 不是整串合计上限。')
     return _X_STYLE, user
 
 
@@ -652,6 +659,38 @@ def _hard_truncate(text: str, limit: int) -> str:
     return text
 
 
+_TWEET_NUM_RE = re.compile(r"^(\d{1,2})\s*/\s*(?:(\d{1,2})\s*/?\s*)?")
+_TWEET_BACKREF_RE = re.compile(
+    r"^(the beat|also|this|above|as mentioned|it |they |同上|承上|如前所述|接上文)")
+
+
+def _normalize_tweet(raw: str, i: int, n: int, limit: int, notes: list):
+    """串推单条规范化: 剥链接 → 吞掉 LLM 自带编号(N/、N/M、N/M/ 都吞, 防双重编号;
+    仅当首号等于位置 i 或形如 N/n 才吞, 避免误吞 "9/8 CPI" 这类日期开头)
+    → 确定性重编号 i/n → 超限硬截断。空帖返回 None(调用方报 llm_failed)。
+    中段软警告(疑似回指词开头 / 缺 $cashtag 与数字锚点)只进 notes, 不硬失败。"""
+    if _URL_RE.search(raw or ""):
+        notes.append(f"串推第{i}条: 已剥离外部链接")
+    clean = _strip_urls(raw).strip()
+    mnum = _TWEET_NUM_RE.match(clean)
+    if mnum:
+        a, b = int(mnum.group(1)), int(mnum.group(2) or 0)
+        if a == i or (b == n and a <= 8):
+            clean = clean[mnum.end():].strip()
+    if not clean:
+        return None
+    text = f"{i}/{n} {clean}"
+    if weighted_len(text) > limit:
+        text = _hard_truncate(text, limit)
+        notes.append(f"串推第{i}条: 超字数上限, 已硬截断")
+    if i > 1:
+        if _TWEET_BACKREF_RE.match(clean[:24].lower()):
+            notes.append(f"串推第{i}条: 疑似回指词开头, 单独出现可能读不懂")
+        elif "$" not in clean and not re.search(r"\d", clean):
+            notes.append(f"串推第{i}条: 缺 $cashtag/数字锚点, 单独出现可能读不懂")
+    return text
+
+
 # ── CLI 主流程(仅子进程调用; 端点侧只 spawn) ────────────────────────────────
 def run_compose(request: dict) -> tuple[dict, int]:
     items = [m for m in (request.get("items") or []) if isinstance(m, dict)][:8]
@@ -672,6 +711,7 @@ def run_compose(request: dict) -> tuple[dict, int]:
     if not all(cfg3):
         return {"error": "no_llm_config",
                 "hint": "到设置页配置「成稿模型」(内容生成专用, 独立于翻译链)"}, 4
+    cfg3 = (*cfg3, t.get("extra_body") if isinstance(t.get("extra_body"), dict) else None)
 
     notes, contexts, images, ta = [], [], [], {}
     tick("retrieve", 5, "素材识别与信息补全")
@@ -687,7 +727,7 @@ def run_compose(request: dict) -> tuple[dict, int]:
     for m in items:
         g = gmap.get(m.get("id")) or {}
         hy = g.get("hydrated") or {}
-        text = hy.get("full") or m.get("text") or ""
+        text = hy.get("full") or m.get("body") or m.get("text") or ""
         mats.append({**m, "text": text})
         for t2 in ((g.get("tags") or {}).get("tickers") or []):
             if t2 not in tickers:
@@ -698,7 +738,7 @@ def run_compose(request: dict) -> tuple[dict, int]:
                             f"({'/'.join(h.get('why') or [])})")
     if not tickers:                                  # 检索没跑/没命中 → 直接对原文打标
         for m in items:
-            for t2 in retrieve._enrich((m.get("text") or "") + " " + (m.get("title") or ""))["tickers"]:
+            for t2 in retrieve._enrich((m.get("body") or m.get("text") or "") + " " + (m.get("title") or ""))["tickers"]:
                 if t2 not in tickers:
                     tickers.append(t2)
 
@@ -755,17 +795,11 @@ def run_compose(request: dict) -> tuple[dict, int]:
         if (not isinstance(tweets, list) or not 3 <= len(tweets) <= 8
                 or any(not isinstance(t, str) or not t.strip() for t in tweets)):
             return {"error": "llm_failed", "hint": "串推模型须返回 tweets 数组(3-8 条非空文字)"}, 3
+        n = len(tweets)
         for i, tweet in enumerate(tweets, 1):
-            clean = _strip_urls(tweet).strip()
-            clean = re.sub(r"^\d+\s*/\s*", "", clean).strip()
-            if not clean:
+            text = _normalize_tweet(tweet, i, n, limit, notes)
+            if text is None:
                 return {"error": "llm_failed", "hint": "串推剥离链接后存在空帖, 请重试"}, 3
-            text = f"{i}/ {clean}"
-            if _URL_RE.search(tweet):
-                notes.append(f"串推第{i}条: 已剥离外部链接")
-            if weighted_len(text) > limit:
-                text = _hard_truncate(text, limit)
-                notes.append(f"串推第{i}条: 超字数上限, 已硬截断")
             if i == 1:
                 text, tag_note = _ensure_cashtags(text, tickers, limit)
                 if tag_note:

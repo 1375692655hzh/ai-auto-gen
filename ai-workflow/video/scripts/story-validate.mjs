@@ -2,15 +2,17 @@
 // 导出 validateStory(story) -> { errors: string[], warnings: string[] }
 // 纪律：本仓库已有字段（captions/compact/summary/stat/tags/entrances/silent/durationS 等）
 //       与不认识的 meta/scene 字段一律【警告】不报错——渲染由模板侧兜底，这里只拦硬伤。
-// 硬伤（errors）：模板不在 Video.tsx 注册集合、竖版用了横版模板、scenes 为空、
-//                narration 为空、meta.width/height 与 format 不匹配、缺 data。
+// 硬伤（errors）：模板不在 Video.tsx 注册集合、9:16 与其他画幅混用模板、scenes 为空、
+//                narration 为空、meta.fps/width/height 非正数、缺 data。
+// 画幅支持 16:9/9:16/1:1/4:5；旧别名、未知标注与尺寸不匹配只警告，渲染以 meta 尺寸为准。
 import { TEMPLATE_IDS, VERTICAL_TEMPLATES } from "./template-ids.mjs";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { realpathSync } from "node:fs";
 
 const ID_RE = /^[a-z0-9][a-z0-9-]*$/;
-const DIMS = { horizontal: [1920, 1080], vertical: [1080, 1920] };
+const DIMS = { "16:9": [1920, 1080], "9:16": [1080, 1920], "1:1": [1080, 1080], "4:5": [1080, 1350] };
+const ALIASES = { horizontal: "16:9", vertical: "9:16" };
 
 const isObj = (x) => x !== null && typeof x === "object" && !Array.isArray(x);
 
@@ -30,6 +32,7 @@ export function validateStory(story) {
 		return { errors: ["story 根必须是对象"], warnings };
 	}
 	const meta = story.meta;
+	let aspect = "16:9";
 	if (!isObj(meta)) {
 		err("meta 缺失或不是对象");
 	} else {
@@ -42,27 +45,28 @@ export function validateStory(story) {
 			if (meta[k] !== undefined && (typeof meta[k] !== "number" || meta[k] <= 0))
 				err(`meta.${k} 必须是正数，收到 ${JSON.stringify(meta[k])}`);
 		}
-		const fmt = meta.format === undefined ? "horizontal" : meta.format;
-		if (meta.format !== undefined && !(meta.format in DIMS))
-			err(`meta.format 只能是 horizontal|vertical，收到 ${JSON.stringify(meta.format)}`);
+		const fmt = meta.format === undefined ? "16:9" : meta.format;
+		aspect = typeof fmt === "string" && Object.hasOwn(ALIASES, fmt) ? ALIASES[fmt] : fmt;
+		if (aspect !== fmt)
+			warn(`旧画幅标注 ${fmt}，建议迁移为 ${aspect}`);
+		else if (typeof aspect !== "string" || !Object.hasOwn(DIMS, aspect))
+			warn(`未知画幅标注 ${JSON.stringify(fmt)}（放行，渲染以 meta.width/height 为准）`);
 		if (meta.tts !== undefined) {
 			if (!isObj(meta.tts)) err("meta.tts 必须是对象");
 			else if (meta.tts.provider !== "edge" && meta.tts.provider !== "dashscope")
 				err(`meta.tts.provider 只能是 edge|dashscope，收到 ${JSON.stringify(meta.tts.provider)}`);
 		}
-		// 尺寸与画幅匹配
-		if (fmt in DIMS && typeof meta.width === "number" && typeof meta.height === "number") {
-			const [ew, eh] = DIMS[fmt];
+		// format 只是标注，尺寸不匹配或缺省仅提示。
+		if (typeof meta.width !== "number" || typeof meta.height !== "number") {
+			warn("建议显式声明 meta.width / meta.height，渲染以这两个尺寸为准");
+		} else if (typeof aspect === "string" && Object.hasOwn(DIMS, aspect)) {
+			const [ew, eh] = DIMS[aspect];
 			if (meta.width !== ew || meta.height !== eh) {
-				const msg = `meta 尺寸 ${meta.width}×${meta.height} 与 format=${fmt} 预期 ${ew}×${eh} 不匹配`;
-				if (fmt === "vertical") err(msg);   // 竖版尺寸错会渲染出错误构图，硬拦
-				else warn(msg);                     // 横版尺寸由 Story composition 跟随 meta，放行仅提示
+				warn(`meta 尺寸 ${meta.width}×${meta.height} 与 format=${aspect} 预期 ${ew}×${eh} 不匹配（渲染以 meta.width/height 为准）`);
 			}
-		} else if (fmt === "vertical") {
-			err("meta.format=vertical 时必须显式声明 meta.width=1080 / meta.height=1920");
 		}
 		const knownMeta = new Set(["title", "voice", "tts", "fps", "width", "height",
-			"padSeconds", "format"]);
+			"padSeconds", "format", "theme", "layout"]);
 		const unknownMeta = Object.keys(meta).filter((k) => !knownMeta.has(k));
 		if (unknownMeta.length) warn(`meta 含未知字段（放行）: ${unknownMeta.join(", ")}`);
 	}
@@ -82,10 +86,10 @@ export function validateStory(story) {
 		else seenIds.add(s.id);
 		if (!TEMPLATE_IDS.includes(s.template))
 			err(`${where}.template 必须是 ${TEMPLATE_IDS.join("/")} 之一，收到 ${JSON.stringify(s.template)}`);
-		if (meta?.format === "vertical" && !VERTICAL_TEMPLATES.includes(s.template))
-			err(`${where}.template：vertical 项目只允许 vtitle/vstat/vpoints 三个模板`);
-		if (meta?.format !== "vertical" && VERTICAL_TEMPLATES.includes(s.template))
-			err(`${where}.template：竖版模板只能用于 meta.format=vertical 的项目`);
+		if (aspect === "9:16" && !VERTICAL_TEMPLATES.includes(s.template))
+			err(`${where}.template：9:16 竖版项目只允许 vtitle/vstat/vpoints 三个模板`);
+		if (aspect !== "9:16" && VERTICAL_TEMPLATES.includes(s.template))
+			err(`${where}.template：竖版模板只能用于 9:16 项目`);
 		if (typeof s.narration !== "string" || !s.narration.trim())
 			err(`${where}.narration 必须是非空字符串`);
 		if (s.caption !== undefined && typeof s.caption !== "string")
@@ -93,6 +97,14 @@ export function validateStory(story) {
 		if (s.data === undefined || !isObj(s.data)) {
 			err(`${where}.data 缺失或不是对象（模板渲染会崩）`);
 		} else {
+			if (s.template === "clip") {
+				if (typeof s.data.src !== "string" || !s.data.src.trim())
+					err(`${where}(${s.id}) clip.data.src 必须是非空字符串`);
+				for (const k of ["start", "end", "zoom"]) {
+					if (s.data[k] !== undefined && typeof s.data[k] !== "number")
+						warn(`${where}(${s.id}) clip.data.${k} 建议为数字`);
+				}
+			}
 			// 竖版三模板的最小可渲染字段（warning 级，防白屏不拦流程）
 			if (s.template === "vtitle" && !Array.isArray(s.data.title))
 				warn(`${where}(${s.id}) vtitle.data.title 建议为富文本数组`);
@@ -109,12 +121,12 @@ export function validateStory(story) {
 	// CTA 收尾场（warning 级）
 	const last = story.scenes[story.scenes.length - 1];
 	if (isObj(last)) {
-		const ctaOk = meta?.format === "vertical"
+		const ctaOk = aspect === "9:16"
 			? last.template === "vpoints"
 			: last.template === "conclusion";
 		if (!ctaOk)
 			warn(`最后一场(${last.id || "?"} ${last.template}) 不是 CTA 收尾版式` +
-				(meta?.format === "vertical" ? "（建议 vpoints）" : "（建议 conclusion）"));
+				(aspect === "9:16" ? "（建议 vpoints）" : "（建议 conclusion）"));
 	}
 
 	// 连续同版式提示

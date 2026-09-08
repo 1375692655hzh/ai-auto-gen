@@ -55,7 +55,7 @@ _URL_RE = re.compile(
 _DUR_RE = re.compile(r"PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?")
 _CJK_RE = re.compile(r"[\u4e00-\u9fff]")
 _SORTS = ("views", "delta24h", "delta7d", "rate", "newest")
-_RANGES = {"24h": 24, "48h": 48, "7d": 24 * 7, "28d": 24 * 28}
+_RANGES = {"24h": 24, "48h": 48, "7d": 24 * 7, "28d": 24 * 28, "30d": 24 * 30}
 
 
 # ── 输入解析(纯函数, 离线可测) ───────────────────────────────────────────────
@@ -326,6 +326,16 @@ def _fill_insights(store: dict, report: dict) -> None:
 
 
 # ── 采集一轮(CLI 进程) ───────────────────────────────────────────────────────
+def _merge_enabled(channels: list) -> list:
+    """写回频道前合并最新 enabled 标志(采集窗口 30~120s 内用户可能切开关,
+    直接整存会覆盖用户修改 —— lost-update 防护, 2026-09-08 用户报告 Nomad 复现)。"""
+    fresh = {c.get("id"): c.get("enabled", True) for c in config.load_yt_channels()}
+    for c in channels:
+        if c.get("id") in fresh:
+            c["enabled"] = fresh[c["id"]]
+    return channels
+
+
 def collect(force: bool = False) -> tuple[dict, int]:
     """解析 pending 账号 → 刷频道元数据 → 发现新视频 → 批量刷新统计追加快照。
     返回 (report, exit_code): 0 正常/跳过, 3 配额熔断, 4 无 key。"""
@@ -450,7 +460,7 @@ def collect(force: bool = False) -> tuple[dict, int]:
                 row["resolve_status"] = "failed"
                 row["resolve_error"] = type(e).__name__
                 report["resolve_failed"] += 1
-        config.save_yt_channels(channels)
+        config.save_yt_channels(_merge_enabled(channels))
         if circuit:
             raise _QuotaExceeded()
 
@@ -481,7 +491,7 @@ def collect(force: bool = False) -> tuple[dict, int]:
             except Exception:
                 for c in batch:
                     c["last_error"] = "http_error"
-        config.save_yt_channels(channels)
+        config.save_yt_channels(_merge_enabled(channels))
         if circuit:
             raise _QuotaExceeded()
 
@@ -761,7 +771,7 @@ def build_view(range: str = "24h", sort: str = "views", kind: str = "all",
         })
     tcfg = config.load().get("translate") or {}
     return {"items": rows, "total": total, "insights": insights,
-            "meta": {"range": range, "sort": sort, "kind": kind, "channel": channel,
+            "meta": {"range": range, "sort": sort, "kind": kind, "channel": channel, "tracked": len(store.get("videos") or {}),
                      "configured": bool(api_key()),
                      "insight_configured": bool(tcfg.get("base_url") and tcfg.get("api_key")
                                                 and tcfg.get("model")),

@@ -88,6 +88,50 @@ class TextTests(unittest.TestCase):
         self.assertIsNone(gcompose._parse_json("not json"))
 
 
+class NormalizeTweetTests(unittest.TestCase):
+    def test_renumber_nm_and_swallow_own_numbering(self):
+        notes = []
+        # N/ 与 N/M 两种 LLM 自带编号都要吞掉, 统一转 i/n(防 "1/4 1/4" 双重编号)
+        self.assertEqual(gcompose._normalize_tweet("1/ NVDA beat EPS by 8%", 1, 3, 280, notes),
+                         "1/3 NVDA beat EPS by 8%")
+        self.assertEqual(gcompose._normalize_tweet("2/4 Rev $57B, +62% YoY", 2, 4, 280, notes),
+                         "2/4 Rev $57B, +62% YoY")
+        self.assertEqual(gcompose._normalize_tweet("3/4/ Bottom line: hold", 3, 4, 280, notes),
+                         "3/4 Bottom line: hold")
+
+    def test_date_head_not_swallowed(self):
+        notes = []
+        # "9/8 CPI" 日期开头: 首号≠位置且非 N/n 形 → 不吞
+        self.assertEqual(gcompose._normalize_tweet("9/8 CPI came in at 2.9% YoY", 1, 3, 280, notes),
+                         "1/3 9/8 CPI came in at 2.9% YoY")
+
+    def test_strip_urls_and_empty_guard(self):
+        notes = []
+        out = gcompose._normalize_tweet("2/ details https://x.com/a/status/1 here 123", 2, 3, 280, notes)
+        self.assertEqual(out, "2/3 details  here 123")
+        self.assertTrue(any("剥离" in s for s in notes))
+        self.assertIsNone(gcompose._normalize_tweet("1/ https://x.com/only-link", 1, 3, 280, []))
+
+    def test_soft_warnings(self):
+        notes = []
+        gcompose._normalize_tweet("Also the momentum looks strong", 2, 3, 280, notes)
+        self.assertTrue(any("回指" in s for s in notes))
+        notes.clear()
+        gcompose._normalize_tweet("Margins expanded on pricing power", 2, 3, 280, notes)
+        self.assertTrue(any("锚点" in s for s in notes))
+        notes.clear()
+        gcompose._normalize_tweet("Gross margin hit 78%, up 3pt QoQ", 2, 3, 280, notes)
+        self.assertEqual(notes, [])   # 有数字锚点 → 无警告; 首条不查回指
+        gcompose._normalize_tweet("Also $NVDA printed 1/ ... hook", 1, 3, 280, notes)
+        self.assertFalse(any("回指" in s for s in notes))
+
+    def test_truncate_over_limit(self):
+        notes = []
+        out = gcompose._normalize_tweet("1/ " + "英伟达" * 200, 1, 3, 280, notes)
+        self.assertLessEqual(gcompose.weighted_len(out), 280)
+        self.assertTrue(any("硬截断" in s for s in notes))
+
+
 class TemplateTests(unittest.TestCase):
     def test_templates_complete(self):
         self.assertEqual(len(gcompose.TEMPLATES), 13)   # 12 + thread-post(串推, 批次B)
@@ -127,6 +171,32 @@ class BoundaryTests(unittest.TestCase):
         with patch.object(gcompose.config, "load", return_value={"compose": {}}):
             result, code = gcompose.run_compose({"items": [{"text": "local test"}]})
         self.assertEqual((code, result["error"]), (4, "no_llm_config"))
+
+    def test_llm_extra_body_passthrough(self):
+        # 厂商私有参数(如智谱关思考)须原样透传到 chat_completions
+        seen = {}
+        def fake_cc(base, key, model, messages, temperature, max_tokens, timeout, extra=None):
+            seen["extra"] = extra
+            return '{"text": "ok"}'
+        cfg4 = ("http://x", "k", "m", {"thinking": {"type": "disabled"}})
+        with patch.object(gcompose.vstudio, "chat_completions", fake_cc):
+            self.assertEqual(gcompose._llm(cfg4, "s", "u"), '{"text": "ok"}')
+        self.assertEqual(seen["extra"], {"thinking": {"type": "disabled"}})
+        seen.clear()
+        with patch.object(gcompose.vstudio, "chat_completions", fake_cc):
+            gcompose._llm(("http://x", "k", "m"), "s", "u")
+        self.assertIsNone(seen["extra"])   # 旧 3 元组调用方不受影响
+
+    def test_manual_material_hint(self):
+        mats = [{"id": "manual-ab12", "source": "手动录入", "time": "t", "text": "正文"}]
+        _, user = gcompose._compose_prompt(
+            {"lang": "en", "tier": "free", "template": "news-flash"}, mats, [], "", {}, [])
+        self.assertIn("手动录入", user)
+        self.assertIn("不得虚构出处", user)
+        mats[0]["id"] = "rss-1"
+        _, user2 = gcompose._compose_prompt(
+            {"lang": "en", "tier": "free", "template": "news-flash"}, mats, [], "", {}, [])
+        self.assertNotIn("不得虚构出处", user2)
 
     def test_market_order_and_fallback(self):
         for pref, order in [("auto", ["yf", "em"]), ("em_first", ["em", "yf"]),
@@ -174,8 +244,11 @@ class LlmConnectionTests(unittest.TestCase):
                              {"ok": code == 0, "model": cfg.get("model", ""), "error": error})
             self.assertNotIn("test-secret", output.getvalue())
             if cfg:
+                # max_tokens=512: 推理模型可能先烧 reasoning token, 8 会误判连接失败;
+                # extra 透传 compose.extra_body(厂商私有参数, 如智谱关思考)
                 chat.assert_called_once_with(cfg["base_url"], cfg["api_key"], cfg["model"],
-                    [{"role": "user", "content": "ping"}], temperature=0, max_tokens=8, timeout=25)
+                    [{"role": "user", "content": "ping"}], temperature=0, max_tokens=512,
+                    timeout=25, extra=None)
             else:
                 chat.assert_not_called()
 

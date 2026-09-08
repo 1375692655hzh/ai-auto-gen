@@ -7,6 +7,8 @@ data/workbench/ 自有 JSON。所有自有对象原子落盘，损坏文件按�
 """
 
 import hashlib
+import copy
+import shutil
 import json
 import os
 import re
@@ -25,9 +27,9 @@ BUILD_LOG_DIR = DATA_DIR / "video_builds"
 MAX_POOL = 500
 MAX_ANALYSES = 200
 MAX_SCRIPTS = 300
-JOB_KINDS = ("analyze", "generate", "build")
+JOB_KINDS = ("analyze", "generate", "voice", "build")
 # build 是分钟级真渲染, stale 阈值独立放宽到 60 分钟; analyze/generate 维持 20 分钟
-JOB_STALE_S = {"analyze": 20 * 60, "generate": 20 * 60, "build": 60 * 60}
+JOB_STALE_S = {"analyze": 20 * 60, "generate": 20 * 60, "voice": 20 * 60, "build": 60 * 60}
 SEMANTIC_KEYS = ("theme", "hook", "structure", "devices", "voice", "cta",
                  "reusable", "visuals", "tier_note")
 
@@ -54,6 +56,12 @@ STYLE_PRESETS = [
      "target_s": 210, "wc": (700, 900),
      "prompt": "必须带 analysis_key；只参考 reusable、hook.categories、structure.arc，"
                "严禁注入或复写对方原文。"},
+    {"id": "vox-doc", "name": "VOX 纪录片", "format": "horizontal",
+     "target_s": 120, "wc": (400, 480),
+     "prompt": "纪录片旁白(纸拼贴风)：单一散文连续旁白，节拍化短句每 5-8 字一顿；"
+               "开场必须是精确的日期/地点/数字；冷静克制、悲剧不煽情、无推广内容；"
+               "每句以句号结尾；结尾必须悬念收束(末句不超过12字)，给下集留钩。"
+               "on_screen 用档案标签风格(全大写短词、地点/日期/人名)。"},
 ]
 _STYLES = {s["id"]: s for s in STYLE_PRESETS}
 
@@ -107,8 +115,8 @@ def _id(prefix: str) -> str:
 
 
 def _atomic_json(path: Path, value) -> None:
-    DATA_DIR.mkdir(parents=True, exist_ok=True)
-    fd, tmp = tempfile.mkstemp(dir=str(DATA_DIR), suffix=".tmp")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=str(path.parent), suffix=".tmp")
     with os.fdopen(fd, "w", encoding="utf-8") as f:
         json.dump(value, f, ensure_ascii=False, indent=2)
     os.replace(tmp, path)
@@ -171,7 +179,7 @@ def validate_script(script: dict, style: dict) -> list[str]:
     count = _word_count("".join(narrations))
     lo, hi = style.get("wc", (0, 10**9))
     if count < lo * 0.8 or count > hi * 1.2:
-        warnings.append(f"口播字数 {count} 超出预算 {lo}—{hi} 的 ±20% 容差")
+        warnings.append(f"口播 {count} 字，与该风格写作参考区间 {lo}—{hi} 有偏差（仅写作提示，不影响制作时长）")
     cta_beats = [b for b in beats if isinstance(b, dict) and b.get("role") == "cta"]
     cta = script.get("cta") if isinstance(script.get("cta"), dict) else {}
     if len(cta_beats) != 1 or not cta.get("action") or not cta.get("line"):
@@ -235,11 +243,17 @@ def seed_from_analysis(record: dict) -> dict:
 
 
 def chat_completions(base: str, key: str, model: str, messages: list,
-                     temperature: float, max_tokens: int, timeout: int) -> str | None:
-    """OpenAI 兼容 /chat/completions；仅由 CLI 主流程调用。"""
+                     temperature: float, max_tokens: int, timeout: int,
+                     extra: dict | None = None) -> str | None:
+    """OpenAI 兼容 /chat/completions；仅由 CLI 主流程调用。
+    extra = 厂商私有参数原样合并进请求体(如智谱推理模型 {"thinking": {"type": "disabled"}}
+    防 reasoning_content 吃光 max_tokens 返回空 content); 未配置则行为不变。"""
     import urllib.request
-    body = json.dumps({"model": model, "temperature": temperature,
-                       "max_tokens": max_tokens, "messages": messages}).encode("utf-8")
+    payload = {"model": model, "temperature": temperature,
+               "max_tokens": max_tokens, "messages": messages}
+    if isinstance(extra, dict):
+        payload.update(extra)
+    body = json.dumps(payload).encode("utf-8")
     req = urllib.request.Request(
         base.rstrip("/") + "/chat/completions", data=body,
         headers={"Content-Type": "application/json", "Authorization": f"Bearer {key}"})
@@ -249,6 +263,78 @@ def chat_completions(base: str, key: str, model: str, messages: list,
         return (data["choices"][0]["message"]["content"] or "").strip() or None
     except Exception:
         return None
+
+
+_VIDEO_MIME = {".mp4": "video/mp4", ".m4v": "video/mp4", ".mov": "video/quicktime",
+               ".mkv": "video/x-matroska", ".webm": "video/webm", ".avi": "video/x-msvideo",
+               ".flv": "video/x-flv", ".wmv": "video/x-ms-wmv", ".ts": "video/mp2t"}
+
+
+def gemini_upload_media(path: str, key: str, timeout: int = 600) -> tuple[str | None, str | None]:
+    """本地视频 → Gemini Files API(可恢复两段式上传), 轮询 ACTIVE 后返回 file_uri。
+
+    Gemini 对 file_data.file_uri 一视同仁: YouTube 链接与本地上传的 uri 都能看片。
+    单文件上限 2GB; 上传后服务端转码需要时间, 最长等 5 分钟。仅由 CLI 分析进程调用。
+    """
+    import urllib.error
+    import urllib.parse
+    import urllib.request
+    import time
+    fp = Path(path)
+    size = fp.stat().st_size
+    mime = _VIDEO_MIME.get(fp.suffix.lower(), "video/mp4")
+    try:
+        req = urllib.request.Request(
+            "https://generativelanguage.googleapis.com/upload/v1beta/files",
+            method="POST",
+            data=json.dumps({"file": {"display_name": fp.name}}).encode("utf-8"),
+            headers={"x-goog-api-key": key, "Content-Type": "application/json",
+                     "X-Goog-Upload-Protocol": "resumable",
+                     "X-Goog-Upload-Command": "start",
+                     "X-Goog-Upload-Content-Length": str(size),
+                     "X-Goog-Upload-Content-Type": mime})
+        with urllib.request.urlopen(req, timeout=30) as r:
+            upload_url = r.headers.get("X-Goog-Upload-URL")
+        if not upload_url:
+            return None, "Files API 未返回上传地址"
+        with open(fp, "rb") as f:                    # 流式发送, 不整读进内存
+            req2 = urllib.request.Request(
+                upload_url, method="POST", data=f,
+                headers={"Content-Length": str(size), "Content-Type": mime,
+                         "X-Goog-Upload-Command": "upload, finalize",
+                         "X-Goog-Upload-Offset": "0"})
+            with urllib.request.urlopen(req2, timeout=timeout) as r:
+                meta = json.loads(r.read())
+        info = meta.get("file") or meta
+        fname = (info.get("name") or "").removeprefix("files/")   # name 形如 files/abc, 路径里不能再带前缀
+        uri = info.get("uri") or ""
+        st = info.get("state") or ""
+        for i in range(60):                          # 等服务端转码 ACTIVE(≈5分钟)
+            if st == "ACTIVE" and uri:
+                return uri, None
+            if st == "FAILED":
+                return None, "Gemini 文件转码失败"
+            try:
+                req3 = urllib.request.Request(
+                    f"https://generativelanguage.googleapis.com/v1beta/files/{fname}",
+                    headers={"x-goog-api-key": key})
+                with urllib.request.urlopen(req3, timeout=30) as r:
+                    meta = json.loads(r.read())
+            except urllib.error.HTTPError as e:
+                if e.code == 404 and i < 10:         # 资源刚 finalize 尚未传播到位, 稍后重试
+                    time.sleep(5)
+                    continue
+                return None, f"Files API HTTP {e.code}: {i}"
+            info = meta.get("file") or meta
+            fname = (info.get("name") or fname).removeprefix("files/")
+            uri = info.get("uri") or uri
+            st = info.get("state") or ""
+            time.sleep(5)
+        return (uri, None) if (st == "ACTIVE" and uri) else (None, f"转码未完成(state={st})")
+    except urllib.error.HTTPError as e:
+        return None, f"Files API HTTP {e.code}: {e.read().decode('utf-8', 'replace')[:150]}"
+    except Exception as e:
+        return None, f"上传失败: {type(e).__name__}: {str(e)[:120]}"
 
 
 def gemini_watch_url(url: str, prompt: str, key: str, model: str,
@@ -329,7 +415,7 @@ def _empty_build_result() -> dict:
 
 def load_jobs() -> dict:
     try:
-        data = json.loads(JOBS_FILE.read_text(encoding="utf-8"))
+        data = json.loads(_jobs_file().read_text(encoding="utf-8"))
         if not isinstance(data, dict):
             raise ValueError("bad jobs")
     except Exception:
@@ -351,7 +437,11 @@ def load_jobs() -> dict:
 
 
 def _save_jobs(jobs: dict) -> None:
-    _atomic_json(JOBS_FILE, jobs)
+    _atomic_json(_jobs_file(), jobs)
+
+
+def _jobs_file() -> Path:
+    return config.DATA_DIR / "video_jobs.json" if config.DATA_DIR != config.REPO / "data" / "workbench" else JOBS_FILE
 
 
 def begin_job(kind: str, request: dict) -> None:
@@ -411,6 +501,7 @@ def status_payload() -> dict:
     out = {kind: {k: jobs[kind].get(k) for k in common} for kind in jobs}
     out["analyze"]["result_key"] = jobs["analyze"].get("result_key", "")
     out["generate"]["result"] = jobs["generate"].get("result")
+    out["voice"]["result"] = jobs["voice"].get("result")
     out["build"]["result"] = jobs["build"].get("result") or _empty_build_result()
     return out
 
@@ -494,6 +585,15 @@ def _target(request: dict) -> tuple[dict | None, dict | None]:
             t.update({k: v for k, v in _yt_meta_of(t["video_id"]).items()
                       if k in ("title", "channel_title") and v})
         return t, None
+    lp = str(request.get("local_path") or "")
+    if lp:
+        fp = Path(lp)
+        if not fp.is_file():
+            return None, {"error": "local_file_missing", "hint": f"本地文件不存在: {lp}"}
+        if fp.suffix.lower() not in _VIDEO_MIME:
+            return None, {"error": "bad_video_ext", "hint": f"不支持的扩展名: {fp.suffix}"}
+        return {"video_id": "", "url": f"local:{fp.resolve()}", "title": fp.stem,
+                "channel_title": fp.parent.name, "local_path": str(fp.resolve())}, None
     parsed = parse_video_input(str(request.get("url") or ""))
     if not parsed:
         return None, {"error": "bad_video_input", "hint": "请输入 YouTube 视频链接或 11 位视频 ID"}
@@ -552,8 +652,23 @@ def run_analyze(request: dict) -> tuple[dict, int]:
     attempted = []
     last_evidence = ""
 
-    # G0：Gemini 直接观看 YouTube URL。
-    if gem_key and target.get("video_id"):
+    # G0：Gemini 直接观看 —— YouTube URL 或 本地上传文件(统一走 file_data.file_uri)。
+    watch_uri = None
+    if gem_key and target.get("local_path"):
+        tick("analyze", "upload", 5, "本地文件上传到 Gemini Files API…")
+        watch_uri, up_ev = gemini_upload_media(target["local_path"], gem_key)
+        if not watch_uri:
+            attempted.append({"tier": "gemini-file", "result": "failed",
+                              "evidence": (up_ev or "")[:200]})
+            last_evidence = up_ev or "本地上传失败"
+            record = _analysis_record(target, key, attempted, "failed",
+                                      "gemini-file", "", {}, error=last_evidence)
+            tick("analyze", "save", 95, "记录失败")
+            _save_analysis(record)
+            return record, 3          # 本地文件没有其他通道, 不落 ytdlp/meta 兜底
+    elif gem_key and target.get("video_id"):
+        watch_uri = target["url"]
+    if gem_key and watch_uri:
         tick("analyze", "gemini", 5, "Gemini 看片分析中…")
         prompt = ANALYZE_PROMPT
         # 时长自适应粒度: 短片重精确, 长片重覆盖面
@@ -571,7 +686,7 @@ def run_analyze(request: dict) -> tuple[dict, int]:
         if meta_of.get("description_head"):
             prompt += ("\n\n[来自平台数据的已知材料, 供交叉印证, 非画面内容]\n描述区开头: "
                        + meta_of["description_head"])
-        raw, evidence = gemini_watch_url(target["url"], prompt, gem_key, gem_model)
+        raw, evidence = gemini_watch_url(watch_uri, prompt, gem_key, gem_model)
         if raw:
             attempted.append({"tier": "gemini", "result": "success", "evidence": gem_model})
             tick("analyze", "parse", 80, "解析语义字段")
@@ -758,7 +873,7 @@ def run_generate(request: dict) -> tuple[dict, int]:
     base, key, model = translate
     lo, hi = style["wc"]
     user = (f"风格：{style['name']}（{style_id}）\n格式：{style['format']}\n"
-            f"目标时长：{style['target_s']} 秒\n口播字数预算：{lo}—{hi} 字\n"
+            f"写作引导字数区间：{lo}—{hi} 字\n"
             f"风格要点：{style['prompt']}\n\n输入材料：\n{material}{reference}")
     tick("generate", "llm", 15, "生成口播脚本中…")
     raw = chat_completions(base, key, model,
@@ -778,8 +893,7 @@ def run_generate(request: dict) -> tuple[dict, int]:
     count = _word_count("".join(str(b.get("narration") or "")
                                 for b in beats if isinstance(b, dict)))
     script["word_count"] = count
-    script["duration_est_s"] = min(max(round(count / 4.2), round(lo / 4.2)),
-                                   round(hi / 4.2))
+    script["duration_est_s"] = round(count / 4.2)
     warnings = script.get("warnings") if isinstance(script.get("warnings"), list) else []
     for warning in validate_script(script, style):
         if warning not in warnings:
@@ -788,6 +902,556 @@ def run_generate(request: dict) -> tuple[dict, int]:
     _set_job_result("generate", script)
     finish_job("generate", 0, "")
     return {"style_id": style_id, "word_count": count, "warnings": warnings}, 0
+
+
+def narration_hash(text: str) -> str:
+    return voice_hash(re.sub(r"\s+", "", text))
+
+
+def voice_hash(text: str) -> str:
+    """与 Node hashNarration 完全一致：原文 UTF-8，不修剪空白。"""
+    return hashlib.sha1(text.encode("utf-8")).hexdigest()[:10]
+
+
+def voice_root() -> Path:
+    return config.DATA_DIR / "video_voice"
+
+
+def assets_root() -> Path:
+    return config.DATA_DIR / "video_assets"
+
+
+def _safe_path(root: Path, *parts: str) -> Path:
+    path = root.joinpath(*parts).resolve()
+    if root.resolve() not in path.parents:
+        raise ValueError("path_outside_root")
+    return path
+
+
+def _safe_id(value) -> bool:
+    return isinstance(value, str) and bool(re.fullmatch(r"[\w-]+", value))
+
+
+def make_get(mid: str) -> dict | None:
+    return next((r for r in config.load_video_makes() if r.get("id") == mid), None)
+
+
+def _make_save(row: dict) -> dict:
+    rows = config.load_video_makes()
+    row["updated_at"] = _now()
+    rows = [row if r.get("id") == row["id"] else r for r in rows]
+    if not any(r.get("id") == row["id"] for r in rows):
+        rows.append(row)
+    config.save_video_makes(rows)
+    return row
+
+
+def _new_make_id() -> str:
+    mid = _id("vm")
+    while make_get(mid):
+        time.sleep(0.001)
+        mid = _id("vm")
+    return mid
+
+
+def make_upsert(payload: dict) -> dict | None:
+    mid = payload.get("id")
+    row = make_get(mid) if mid else None
+    if mid and not row:
+        return None
+    if row is None:
+        row = {"id": _new_make_id(), "title": "未命名视频", "status": "editing_narration",
+               "created_at": _now(), "updated_at": _now(), "project_id": "",
+               "narration": {"source": "", "style_id": "", "ref_text": "", "text": "",
+                             "locked": False, "locked_at": None, "hash": ""},
+               "script": None, "script_meta": {"locked": False, "locked_at": None,
+                                                "hash": "", "source_narration_hash": ""},
+               "voice": {"profile_id": "", "voice": "", "voice_key": "", "items": {}},
+               "assets": [],
+               "video": {"mode": "unified", "aspect": "16:9", "fps": 30,
+                         "theme": "terminal-dark", "layout": "auto", "enrich": "plain",
+                         "hook_index": 0, "beat_overrides": []}}
+    if "title" in payload:
+        row["title"] = str(payload["title"])
+    if not row["narration"]["locked"]:
+        for key in ("text", "ref_text", "style_id", "source"):
+            if key in (payload.get("narration") or {}):
+                row["narration"][key] = str(payload["narration"][key] or "")
+    if "script" in payload and not row["script_meta"]["locked"]:
+        row["script"] = copy.deepcopy(payload["script"])
+        row["status"] = "editing_script" if row["narration"]["locked"] else "editing_narration"
+    if isinstance(payload.get("video"), dict):
+        row["video"].update(copy.deepcopy(payload["video"]))
+    for key in ("profile_id", "voice"):
+        if key in (payload.get("voice") or {}):
+            value = str(payload["voice"][key] or "")
+            if row["voice"][key] != value:
+                row["voice"]["items"] = {}
+                row["voice"]["voice_key"] = ""
+                if row["status"] in ("voice_ready", "built"):
+                    row["status"] = "script_locked" if row["script_meta"]["locked"] else "editing_script"
+            row["voice"][key] = value
+    return _make_save(row)
+
+
+def make_view(row: dict) -> dict:
+    row = copy.deepcopy(row)
+    beats = (row.get("script") or {}).get("beats") or []
+    hashes = {b.get("id"): voice_hash(str(b.get("narration") or "")) for b in beats}
+    row["script_stale"] = bool(row.get("script")) and row["script_meta"]["source_narration_hash"] != row["narration"]["hash"]
+    row["voice_bad"] = [bid for bid, item in row["voice"]["items"].items()
+                        if item.get("hash") != hashes.get(bid)]
+    row["script_badge"] = "stale" if row["script_stale"] else ("locked" if row["script_meta"]["locked"] else "draft")
+    row["voice_badge"] = "stale" if row["voice_bad"] else ("ready" if beats and not voice_missing(row) else "missing")
+    return row
+
+
+def makes_view() -> list:
+    return [make_view(row) for row in reversed(config.load_video_makes())]
+
+
+def voice_missing(row: dict) -> list:
+    items = row["voice"]["items"]
+    return [b["id"] for b in (row.get("script") or {}).get("beats", [])
+            if items.get(b["id"], {}).get("hash") != voice_hash(str(b.get("narration") or ""))]
+
+
+def make_del(mid: str) -> int:
+    rows = config.load_video_makes()
+    kept = [r for r in rows if r.get("id") != mid]
+    config.save_video_makes(kept)
+    if len(kept) != len(rows) and _safe_id(mid):
+        for root in (voice_root(), assets_root()):
+            shutil.rmtree(_safe_path(root, mid), ignore_errors=True)
+    return len(rows) - len(kept)
+
+
+def make_duplicate(mid: str) -> dict | None:
+    row = make_get(mid)
+    if not row:
+        return None
+    row = copy.deepcopy(row)
+    row.update(id=_new_make_id(), title=row["title"] + " 副本", project_id="", created_at=_now())
+    row.pop("last_build", None)
+    row["script_meta"].update(locked=False, locked_at=None)
+    row["status"] = "editing_script" if row["narration"]["locked"] and row["script"] else (
+        "narration_locked" if row["narration"]["locked"] else "editing_narration")
+    for root, field in ((voice_root(), "voice"), (assets_root(), "assets")):
+        src, dst = _safe_path(root, mid), _safe_path(root, row["id"])
+        try:
+            if src.is_dir():
+                shutil.copytree(src, dst)
+            elif field == "voice":
+                row["voice"]["items"] = {}
+        except OSError:
+            shutil.rmtree(dst, ignore_errors=True)
+            if field == "voice":
+                row["voice"]["items"] = {}
+            else:
+                row["assets"] = []
+                row["video"]["beat_overrides"] = [o for o in row["video"]["beat_overrides"] if not o.get("asset_id")]
+    return _make_save(row)
+
+
+def lock_narration(mid: str):
+    row = make_get(mid)
+    if not row:
+        return None, {"error": "make_not_found"}
+    if _word_count(row["narration"]["text"]) < 40:
+        return None, {"error": "too_short", "hint": "口播稿去空白至少 40 字"}
+    row["narration"].update(locked=True, locked_at=_now(), hash=narration_hash(row["narration"]["text"]))
+    row["status"] = "narration_locked"
+    return _make_save(row), None
+
+
+def unlock_narration(mid: str):
+    row = make_get(mid)
+    if not row:
+        return None, {"error": "make_not_found"}
+    row["narration"]["locked"] = False
+    row["status"] = "editing_narration"
+    return _make_save(row), None
+
+
+def _storyboard_integrity(script, text: str) -> bool:
+    beats = script.get("beats") if isinstance(script, dict) else None
+    return (isinstance(beats, list) and bool(beats) and all(isinstance(b, dict) for b in beats)
+            and re.sub(r"\s+", "", "".join(str(b.get("narration") or "") for b in beats))
+            == re.sub(r"\s+", "", text))
+
+
+def lock_script(mid: str):
+    row = make_get(mid)
+    if not row:
+        return None, {"error": "make_not_found"}
+    if not row["narration"]["locked"]:
+        return None, {"error": "narration_not_locked", "hint": "先定稿口播稿"}
+    if not _storyboard_integrity(row["script"], row["narration"]["text"]):
+        return None, {"error": "integrity", "hint": "逐拍口播拼接必须与口播稿逐字一致（忽略空白）"}
+    script = row["script"]
+    warnings = script.get("warnings") if isinstance(script.get("warnings"), list) else []
+    script["warnings"] = list(dict.fromkeys(warnings + validate_script(script, _STYLES.get(
+        row["narration"]["style_id"], _STYLES["recap-ask-conclude"]))))
+    row["script_meta"] = {"locked": True, "locked_at": _now(),
+                          "hash": narration_hash("".join(b["narration"] for b in script["beats"])),
+                          "source_narration_hash": row["narration"]["hash"]}
+    row["status"] = "script_locked"
+    return _make_save(row), None
+
+
+def unlock_script(mid: str):
+    row = make_get(mid)
+    if not row:
+        return None, {"error": "make_not_found"}
+    row["script_meta"]["locked"] = False
+    row["status"] = "editing_script"
+    return _make_save(row), None
+
+
+ASSET_EXTS = {"png", "jpg", "jpeg", "webp", "mp4", "webm"}
+
+
+def asset_add(make_id: str, beat_id: str, orig_name: str, body: bytes):
+    row = make_get(make_id)
+    if not row:
+        return None, {"error": "make_not_found"}
+    ext = Path(orig_name).suffix.lower().lstrip(".")
+    if ext not in ASSET_EXTS:
+        return None, {"error": "bad_ext"}
+    if not _safe_id(make_id):
+        return None, {"error": "bad_id"}
+    aid = _id("va")
+    while any(a.get("asset_id") == aid for a in row["assets"]):
+        time.sleep(0.001)
+        aid = _id("va")
+    path = _safe_path(assets_root(), make_id, f"{aid}.{ext}")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(body)
+    asset = {"asset_id": aid, "name": orig_name, "ext": ext, "size": len(body),
+             "beat_id": beat_id, "created_at": _now()}
+    row["assets"].append(asset)
+    _make_save(row)
+    return asset, None
+
+
+def asset_find(asset_id: str, make_id: str = ""):
+    if not _safe_id(asset_id) or (make_id and not _safe_id(make_id)):
+        return None, make_id
+    root = assets_root()
+    paths = (_safe_path(root, make_id).glob(f"{asset_id}.*") if make_id
+             else root.glob(f"*/{asset_id}.*"))
+    for p in paths:
+        if p.is_file() and root.resolve() in p.resolve().parents and p.suffix.lstrip(".") in ASSET_EXTS:
+            return p, p.parent.name
+    return None, make_id
+
+
+def assets_list(make_id: str) -> list:
+    return [{**a, "exists": asset_find(a["asset_id"], make_id)[0] is not None}
+            for a in (make_get(make_id) or {}).get("assets", [])]
+
+
+def asset_del(asset_id: str, make_id: str) -> int:
+    path, make_id = asset_find(asset_id, make_id)
+    row = make_get(make_id)
+    if not row:
+        return 0
+    if path:
+        path.unlink(missing_ok=True)
+    row["assets"] = [a for a in row["assets"] if a.get("asset_id") != asset_id]
+    old = row["video"].get("beat_overrides") or []
+    row["video"]["beat_overrides"] = [o for o in old if o.get("asset_id") != asset_id]
+    _make_save(row)
+    return len(old) - len(row["video"]["beat_overrides"])
+
+
+NARRATION_SYSTEM = r"""你是财经口播稿主编。输出且仅输出一个 ```json 代码块，不要解释。
+输出 wb-narration/v1：
+{"schema":"wb-narration/v1","title":"≤30字","format":"horizontal|vertical","paragraphs":[{"id":"p1","text":"..."}],"word_count":0,"warnings":[]}
+写作前逐句扫描九类禁令：
+①二元对比壳（不是A而是B）；②命令模板开头（别急着）；③伪洞察标记（真正、其实、本质上、说白了）；④冒号讲义腔；⑤模糊指代（这一点、它）；⑥时态错位（曾经…如今）；⑦没有参照物的空泛比较级（更、明显）；⑧抽象施压（很多人都没意识到）；⑨隐喻口号收尾（起航、破浪）。
+数字写成可念形式，例如百分之十八。节拍短句，每5-8字一顿的口播节奏。
+首句必须是“谁+做了什么+带张力的结果”，结尾悬念收束。paragraphs 3-8 段。
+纯口播禁止 Markdown、角色前缀、镜头指示、元话语。"""
+
+STORYBOARD_SYSTEM = r"""你是口播分镜编辑。输入是已定稿口播稿全文，只输出一个 ```json 代码块。
+输出 wb-video-script/v1：
+{"schema":"wb-video-script/v1","title":"≤30字","format":"horizontal|vertical","style_id":"make-storyboard","duration_est_s":0,"word_count":0,"hook":{"type":"事实recap","variants":[{"type":"事实recap","text":"首拍原文"},{"type":"替观众提问","text":"钩子"},{"type":"结论承诺","text":"钩子"}]},"beats":[{"id":"b1","role":"hook|setup|move|gives|payoff|cta","duration_est_s":0,"narration":"原文","on_screen":[],"visual_hint":"画面建议","subtitle":"字幕"}],"cta":{"action":"关注","line":"末拍原文"},"warnings":[]}
+铁律：beats[].narration 按顺序拼接（去空白）必须等于口播稿全文（去空白），一字符不许改。
+role 序列首 hook 尾 cta，中段 setup/move/gives/payoff。on_screen 每条≤6词。
+visual_hint/subtitle 必填。hook.variants 恰好3条，type互异，variant[0].text 默认等于首 beat narration。
+只切分并设计画面，不改写、删减或新增口播。"""
+
+
+def run_narration(request: dict) -> tuple[dict, int]:
+    style_id = request.get("style_id")
+    style = _STYLES.get(style_id)
+    if not style:
+        return {"error": "bad_style"}, 4
+    row = make_get(request.get("make_id")) if request.get("make_id") else None
+    if request.get("make_id") and not row:
+        return {"error": "make_not_found"}, 4
+    if row and row["narration"]["locked"]:
+        return {"error": "narration_locked", "hint": "先解锁口播稿再生成"}, 4
+    material, err = _material_for_generate({**request, "pasted": request.get("ref_text") or request.get("pasted")})
+    if err:
+        return err, 4
+    llm = _translate_cfg(config.load())
+    if not llm:
+        return {"error": "no_llm_config", "hint": "到设置页配置翻译模型"}, 4
+    lo, hi = style["wc"]
+    user = f"风格：{style['name']}；{style['prompt']}\n写作引导字数区间：{lo}—{hi} 字\n输入材料：\n{material}"
+    tick("generate", "llm", 15, "生成口播稿中…")
+    raw = chat_completions(*llm, [{"role": "system", "content": NARRATION_SYSTEM},
+                                  {"role": "user", "content": user}], 0.5, 3500, 90)
+    obj, _ = _parse_json_reply(raw or "")
+    paragraphs = obj.get("paragraphs") if isinstance(obj, dict) else None
+    if not isinstance(paragraphs, list) or not paragraphs or not all(
+            isinstance(p, dict) and isinstance(p.get("text"), str) for p in paragraphs):
+        return {"error": "llm_failed", "hint": "模型未返回有效口播稿 JSON"}, 3
+    text = "\n\n".join(p["text"] for p in paragraphs)
+    obj.update(schema="wb-narration/v1", title=str(obj.get("title") or "未命名口播稿")[:30],
+               format=style["format"], text=text, word_count=_word_count(text))
+    if row:
+        current = make_get(row["id"])
+        if not current or current["narration"]["locked"]:
+            return {"error": "make_changed", "hint": "生成期间口播稿已定稿或项目已删除"}, 4
+        current["narration"].update(source="llm", style_id=style_id,
+                                    ref_text=str(request.get("ref_text") or "")[:2000],
+                                    text=text, locked=False, locked_at=None, hash="")
+        current["status"] = "editing_narration"
+        _make_save(current)
+    _set_job_result("generate", obj)
+    return obj, 0
+
+
+def _storyboard_fallback(text: str, title: str, fmt: str) -> dict:
+    from . import vmake
+    sentences = vmake._split_sentences(text)
+    if len(sentences) < 3:
+        sentences = vmake._split_clauses(text)
+    # 单句/无标点输入也保留首尾角色，原文按字符切分且绝不改字。
+    if len(sentences) < 2:
+        pivot = max(1, len(text) // 2)
+        sentences = [text[:pivot], text[pivot:]]
+    beats = [{"id": f"b{i+1}", "role": "hook" if i == 0 else (
+        "cta" if i == len(sentences)-1 else ("setup", "move", "gives", "payoff")[(i-1) % 4]),
+        "duration_est_s": round(_word_count(s) / 4.2), "narration": s,
+        "on_screen": [], "subtitle": s, "visual_hint": ""} for i, s in enumerate(sentences)]
+    return {"schema": "wb-video-script/v1", "title": title[:30], "format": fmt,
+            "style_id": "make-storyboard", "word_count": _word_count(text),
+            "duration_est_s": round(_word_count(text) / 4.2), "beats": beats,
+            "hook": {"type": "事实recap", "variants": [{"type": t, "text": sentences[0]}
+                    for t in ("事实recap", "替观众提问", "结论承诺")]},
+            "cta": {"action": "关注", "line": sentences[-1]},
+            "warnings": ["LLM 生成失败/校验未过，已用确定性拆句兜底"]}
+
+
+def run_storyboard(request: dict) -> tuple[dict, int]:
+    row = make_get(request.get("make_id"))
+    if not row or not row["narration"]["locked"]:
+        return {"error": "narration_not_locked" if row else "make_not_found"}, 4
+    if row["script_meta"]["locked"]:
+        return {"error": "script_locked", "hint": "先解锁脚本再生成"}, 4
+    text = row["narration"]["text"]
+    fmt = "vertical" if row["video"]["aspect"] == "9:16" else "horizontal"
+    llm = _translate_cfg(config.load())
+    script = None
+    user = ("口播稿全文（逐字冻结）：\n" + text
+            + f"\n字数/时长参考：{_word_count(text)} 字，约 {round(_word_count(text)/4.2)} 秒")
+    tick("generate", "llm", 15, "切分已定稿口播稿…")
+    if llm:
+        for attempt in range(2):
+            try:
+                raw = chat_completions(*llm, [{"role": "system", "content": STORYBOARD_SYSTEM},
+                    {"role": "user", "content": user + ("\n上次校验失败，请逐字保留全文。" if attempt else "")}], 0.5, 3500, 90)
+                candidate, _ = _parse_json_reply(raw or "")
+            except Exception:
+                candidate = None
+            if not candidate:
+                break
+            if _storyboard_integrity(candidate, text):
+                script = candidate
+                break
+    script = script or _storyboard_fallback(text, row["title"], fmt)
+    script.update(schema="wb-video-script/v1", style_id="make-storyboard", format=fmt,
+                  title=str(script.get("title") or row["title"])[:30],
+                  word_count=_word_count(text), duration_est_s=round(_word_count(text)/4.2))
+    warnings = script.get("warnings") if isinstance(script.get("warnings"), list) else []
+    script["warnings"] = list(dict.fromkeys(warnings + validate_script(script, _STYLES.get(
+        row["narration"]["style_id"], _STYLES["recap-ask-conclude"]))))
+    current = make_get(row["id"])
+    if (not current or current["narration"] != row["narration"] or current["script_meta"]["locked"]):
+        return {"error": "make_changed", "hint": "生成期间定稿已变化，请重新生成"}, 4
+    current["script"] = script
+    current["script_meta"] = {"locked": False, "locked_at": None,
+                              "hash": narration_hash(text), "source_narration_hash": row["narration"]["hash"]}
+    current["status"] = "editing_script"
+    _make_save(current)
+    _set_job_result("generate", script)
+    return script, 0
+
+
+def run_narration_cli(args) -> int:
+    report, code = {}, 3
+    try:
+        request = load_jobs()["generate"]["request"]
+        tick("generate", "start", 1, "准备口播稿生成")
+        report, code = run_narration(request) if request else ({"error": "no_request"}, 4)
+    except Exception as e:
+        report = {"error": type(e).__name__, "hint": str(e)[:200]}
+    finally:
+        finish_job("generate", code, report.get("error", ""), report.get("hint", ""))
+        print(json.dumps(report, ensure_ascii=False))
+    return code
+
+
+def _tts_provider(provider_id: str, voice: str, allow_disabled: bool = False):
+    provider = next((p for p in (config.load().get("tts") or {}).get("providers", [])
+                     if p.get("id") == provider_id), None)
+    if (not provider or not _safe_id(provider_id) or not _safe_id(voice)
+            or (not allow_disabled and not provider.get("enabled"))
+            or provider.get("engine") not in ("edge", "dashscope")
+            or voice not in [v.get("id") for v in provider.get("voices", [])]):
+        return None
+    return provider
+
+
+def _tts_node(scenes: list, out_dir: Path, provider: dict, voice: str, progress: bool = False):
+    """CLI 专用。job/result 均留在工作台自有语音目录，Node 仅接受该目录。"""
+    from . import vmake
+    out_dir.mkdir(parents=True, exist_ok=True)
+    job_json = out_dir / "_job.json"
+    result_json = out_dir / "_result.json"
+    result_json.unlink(missing_ok=True)   # 本次失败不能误读上次结果
+    _atomic_json(job_json, {"scenes": scenes, "out_dir": str(out_dir.resolve()),
+                           "provider": provider["engine"], "voice": voice})
+    env = os.environ.copy()
+    if provider["engine"] == "dashscope":
+        if provider.get("api_key"):
+            env["DASHSCOPE_API_KEY"] = provider["api_key"]
+        if provider.get("base_url"):
+            env["DASHSCOPE_BASE_URL"] = provider["base_url"]
+    proc = subprocess.Popen(["node", "scripts/tts-scenes.mjs", str(job_json.resolve())],
+                            cwd=str(vmake.VIDEO_DIR), env=env, stdout=subprocess.PIPE,
+                            stderr=subprocess.STDOUT, text=True, encoding="utf-8", errors="replace",
+                            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+    last, count = "", 0
+    for line in proc.stdout or []:
+        if line.strip():
+            last = line.strip()
+        if progress and "合成语音" in line:
+            count += 1
+            tick("voice", "tts", min(95, count * 90 // max(1, len(scenes))), f"合成语音 {count}")
+    code = proc.wait()
+    if proc.stdout:
+        proc.stdout.close()
+    if code:
+        key = provider.get("api_key") or ""
+        return None, (last.replace(key, "***") if key else last)[-200:] or "tts_failed"
+    try:
+        result = json.loads(result_json.read_text(encoding="utf-8"))
+        if not isinstance(result.get("items"), dict):
+            raise ValueError("bad items")
+        return result["items"], None
+    except (OSError, ValueError, AttributeError):
+        return None, "tts_result_missing"
+
+
+def _voice_file(mid: str, voice_key: str, file: str) -> Path | None:
+    if not _safe_id(mid) or not _safe_id(voice_key) or not isinstance(file, str):
+        return None
+    try:
+        root = _safe_path(voice_root(), mid, voice_key)
+        path = _safe_path(root, file)
+        return path if path.is_file() and path.suffix == ".mp3" else None
+    except (ValueError, OSError):
+        return None
+
+
+def _run_voice(request: dict):
+    row = make_get(request.get("make_id"))
+    if not row or not row["script_meta"]["locked"]:
+        return {"error": "script_not_locked" if row else "make_not_found"}, 4
+    pid, voice = request.get("provider_id"), request.get("voice")
+    provider = _tts_provider(pid, voice)
+    if not provider:
+        return {"error": "bad_provider", "hint": "检查供应商启用状态、引擎与音色"}, 4
+    beats = row["script"].get("beats") or []
+    scope = request.get("scope") or "all"
+    scenes = [{"id": b["id"], "narration": b["narration"]} for b in beats
+              if scope == "all" or b["id"] == scope]
+    if not scenes or any(not _safe_id(s["id"]) for s in scenes):
+        return {"error": "bad_scope"}, 4
+    vkey = re.sub(r"[^\w-]", "", f"{pid}-{voice}")
+    out_dir = _safe_path(voice_root(), row["id"], vkey)
+    items, err = _tts_node(scenes, out_dir, provider, voice, progress=True)
+    if err:
+        return {"error": err}, 3
+    warnings, valid = [], {}
+    for scene in scenes:
+        bid = scene["id"]
+        item = items.get(bid)
+        if not isinstance(item, dict) or item.get("hash") != voice_hash(scene["narration"]):
+            warnings.append(f"场景 {bid} 语音哈希不符或结果缺失，已忽略")
+        elif not _voice_file(row["id"], vkey, item.get("file")):
+            warnings.append(f"场景 {bid} 语音文件缺失，已忽略")
+        else:
+            valid[bid] = item
+    current = make_get(row["id"])
+    if not current or current["script"] != row["script"] or not current["script_meta"]["locked"]:
+        return {"error": "make_changed", "hint": "合成期间脚本变化，请重新合成"}, 4
+    merged = dict(current["voice"]["items"]) if current["voice"]["voice_key"] == vkey else {}
+    for scene in scenes:
+        merged.pop(scene["id"], None)
+    merged.update(valid)
+    current["voice"].update(profile_id=pid, voice=voice, voice_key=vkey, items=merged)
+    current["status"] = "voice_ready" if not voice_missing(current) else "script_locked"
+    _make_save(current)
+    result = {"make_id": row["id"], "voice_key": vkey, "items": merged, "warnings": warnings}
+    _set_job_result("voice", result)
+    return result, 0
+
+
+def run_voice_cli(args) -> int:
+    report, code = {}, 3
+    try:
+        request = load_jobs()["voice"]["request"]
+        tick("voice", "start", 1, "准备合成语音")
+        report, code = _run_voice(request) if request else ({"error": "no_request"}, 4)
+    except Exception as e:
+        report = {"error": type(e).__name__}
+    finally:
+        finish_job("voice", code, report.get("error", ""), report.get("hint", ""))
+        print(json.dumps(report, ensure_ascii=False))
+    return code
+
+
+def run_test_tts_cli(args) -> int:
+    provider = _tts_provider(args.provider, args.voice, allow_disabled=True)
+    if not provider:
+        print(json.dumps({"ok": False, "error": "bad_provider"}))
+        return 4
+    try:
+        from . import vmake
+        if (provider["engine"] == "dashscope" and not provider.get("api_key")
+                and not os.environ.get("DASHSCOPE_API_KEY") and not vmake.dashscope_key_ok()):
+            print(json.dumps({"ok": False, "error": "dashscope_key_missing"}))
+            return 3
+        narration = "各位好，这里是 AI 财经工作台语音合成自检，当前链路工作正常。"
+        out_dir = _safe_path(voice_root(), "_probe", args.provider)
+        # 探测目录按供应商共用，换音色不能命中上一音色的同文缓存。
+        (out_dir / "probe.mp3").unlink(missing_ok=True)
+        items, err = _tts_node([{"id": "probe", "narration": narration}], out_dir, provider, args.voice)
+        item = (items or {}).get("probe") or {}
+        if not err and (item.get("hash") != voice_hash(narration) or not (out_dir / "probe.mp3").is_file()):
+            err = "tts_result_missing"
+        report = {"ok": False, "error": err} if err else {
+            "ok": True, "url": f"/wb-api/video-voice/_probe/{args.provider}/probe.mp3"}
+    except Exception as e:
+        report = {"ok": False, "error": type(e).__name__}
+    print(json.dumps(report, ensure_ascii=False))
+    return 0 if report["ok"] else 3
 
 
 def pool_view() -> dict:
@@ -933,7 +1597,7 @@ def run_generate_cli(args) -> int:
     report, code = {}, 3
     try:
         tick("generate", "start", 1, "准备生成")
-        report, code = run_generate(request)
+        report, code = run_storyboard(request) if request.get("task") == "storyboard" else run_generate(request)
         return code
     except Exception as e:
         report, code = {"error": type(e).__name__, "hint": str(e)[:200]}, 3
@@ -949,6 +1613,57 @@ def run_generate_cli(args) -> int:
 BUILD_TIMEOUT_S = 3600     # 总超时: 渲染分钟级, 1 小时保底杀树
 
 
+def _gen_collage_image(prompt: str, dest: Path, timeout: int = 150) -> None:
+    """seedream 生成一张纸拼贴海报 → 移动到 dest(项目 input/collage/)。
+    arkcli 必须 cmd /c 调用(npm shim); 尺寸 1920x1920(Ark 最低像素门槛), 模板端 cover 裁切。
+    生成失败抛 RuntimeError(调用方回退无图版式)。"""
+    import shutil
+    with tempfile.TemporaryDirectory() as tmp:
+        proc = subprocess.run(
+            ["cmd", "/c", "arkcli", "+gen", "--modality", "image",
+             "--model", "doubao-seedream-5.0-lite", "--size", "1920x1920", prompt],
+            cwd=tmp, capture_output=True, text=True,
+            encoding="utf-8", errors="replace", timeout=timeout)
+        out = (proc.stdout or "") + (proc.stderr or "")
+        m = re.search(r'"local_path"\s*:\s*"([^"]+)"', out)
+        if proc.returncode != 0 or not m:
+            raise RuntimeError((out.strip() or "arkcli 无输出")[:200])
+        src = Path(m.group(1).replace("\\\\", "\\"))
+        if not src.is_file():
+            raise RuntimeError("arkcli 报告生成但文件不存在")
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        shutil.move(str(src), str(dest))
+
+
+def _fill_collage_images(project_id: str, story: dict, warnings: list) -> None:
+    """paper-board 场景的拼贴图补齐(幂等: 已存在跳过, 失败场景回退无图)。仅 CLI 进程调用。"""
+    from . import vmake                     # 局部导入: 与 run_build_cli 同纪律
+    scenes = [s for s in story.get("scenes", [])
+              if isinstance(s, dict) and s.get("template") == "paper-board"
+              and isinstance(s.get("data"), dict) and s["data"].get("image_prompt")]
+    todo = [s for s in scenes
+            if not (vmake.VIDEOS_DIR / project_id / s["data"]["image"]).is_file()]
+    if not scenes:
+        return
+    total = len(todo)
+    for i, s in enumerate(todo):
+        tick("build", "collage", 22 + int(26 * i / max(total, 1)),
+             f"生成纸拼贴图 {i + 1}/{total}…(约 40 秒/张)")
+        dest = vmake.VIDEOS_DIR / project_id / s["data"]["image"]
+        try:
+            _gen_collage_image(s["data"]["image_prompt"], dest)
+        except Exception as e:
+            s["data"]["image"] = None
+            warnings.append(f"场景 {s.get('id')} 拼贴图生成失败, 已回退无图版式: {str(e)[:80]}")
+    # 有回退时把 story.json 刷写回项目目录(模板据 image=null 走打字机大字)
+    if any(s["data"].get("image") is None for s in todo):
+        story_path = vmake.VIDEOS_DIR / project_id / "story.json"
+        try:
+            story_path.write_text(json.dumps(story, ensure_ascii=False, indent=1), encoding="utf-8")
+        except Exception:
+            pass
+
+
 def run_build_cli(args) -> int:
     """CLI 子进程入口：读 build.request → vmake 转换建项目 → 渲染跟进。
 
@@ -962,6 +1677,8 @@ def run_build_cli(args) -> int:
         print(json.dumps({"error": "no_request"}, ensure_ascii=False))
         return 4
     project_id = str(request.get("project_id") or "")
+    if request.get("make_id"):
+        return _run_make_build_cli(request)
     mode = str(request.get("mode") or "build")
     script = request.get("script") if isinstance(request.get("script"), dict) else {}
     settings = request.get("settings") if isinstance(request.get("settings"), dict) else {}
@@ -974,11 +1691,13 @@ def run_build_cli(args) -> int:
         tick("build", "convert", 15, f"分镜就绪（{len(story['scenes'])} 场）")
         tick("build", "create", 20, "创建项目目录…")
         vmake.create_project(project_id, story, request)
+        _fill_collage_images(project_id, story, warnings)   # paper-board 场景生图(幂等, 失败回退无图)
         cmd = ["node", "scripts/build.mjs", project_id] \
             + (["--estimate"] if mode == "estimate" else [])
         BUILD_LOG_DIR.mkdir(parents=True, exist_ok=True)
         log_path = BUILD_LOG_DIR / f"{project_id}.log"
-        code, hint = _run_build_process(cmd, project_id, log_path)
+        timeout_s = BUILD_TIMEOUT_S * (2 if vmake.normalize_fps(settings.get("fps")) == 60 else 1)
+        code, hint = _run_build_process(cmd, project_id, log_path, timeout_s)
         # 收尾探测产物
         out_dir = vmake.VIDEOS_DIR / project_id / "out"
         mp4s = sorted(p.name for p in out_dir.glob("*.mp4")) if out_dir.is_dir() else []
@@ -1010,7 +1729,116 @@ def run_build_cli(args) -> int:
         print(json.dumps(report, ensure_ascii=False))
 
 
-def _run_build_process(cmd: list, project_id: str, log_path: Path) -> tuple[int, str]:
+def _run_make_build_cli(request: dict) -> int:
+    """四段式独立接线；旧直传 script/settings 渲染路径保持原样。"""
+    from . import vmake
+    row = make_get(request.get("make_id"))
+    project_id = str(request.get("project_id") or "")
+    mode = request.get("mode") or "build"
+    report, code, started = {}, 3, False
+    try:
+        if not row or not row["script"] or not row["script_meta"]["locked"]:
+            code = 4
+            report = {"error": "script_not_locked" if row else "make_not_found"}
+            return code
+        if mode == "build" and voice_missing(row):
+            code = 4
+            report = {"error": "voice_missing", "hint": "、".join(voice_missing(row))}
+            return code
+        if not _safe_id(project_id):
+            code, report = 4, {"error": "bad_project_id"}
+            return code
+        row.update(status="rendering", project_id=project_id)
+        _make_save(row)
+        started = True
+        provider = next((p for p in (config.load().get("tts") or {}).get("providers", [])
+                         if p.get("id") == row["voice"]["profile_id"]), {})
+        settings = {k: row["video"].get(k) for k in ("aspect", "fps", "theme", "layout", "enrich")}
+        settings.update(title=row["title"], voice=row["voice"]["voice"],
+                        tts_provider=provider.get("engine") or "edge")
+        warnings, overrides, materials = [], [], []
+        for override in row["video"].get("beat_overrides") or []:
+            override = dict(override)
+            if override.get("method") in ("upload_image", "upload_video"):
+                path, _ = asset_find(override.get("asset_id"), row["id"])
+                if not path:
+                    warnings.append(f"场景 {override.get('beat_id')} 素材缺失，回退模板")
+                    continue
+                override["file"] = path.name
+                materials.append(path)
+            overrides.append(override)
+        # 先转换并创建目录，再复制素材，最后使用真实 materials_dir 验证覆盖。
+        tick("build", "convert", 5, "口播脚本转换为分镜…")
+        story, notes = vmake.script_to_story(row["script"], settings, row["video"].get("hook_index"))
+        warnings.extend(notes)
+        proj = vmake.create_project(project_id, story, {**request, "settings": settings})
+        material_dir = proj / "input" / "materials"
+        material_dir.mkdir(parents=True, exist_ok=True)
+        for path in materials:
+            shutil.copy2(path, material_dir / path.name)
+        settings.update(beat_overrides=overrides, materials_dir=str(material_dir))
+        # 覆盖层复用首次转换的结果，避免 enrich=llm 重复外呼。
+        story, notes = vmake.apply_beat_overrides(story, row["script"], settings, [])
+        warnings.extend(notes)
+        if row["voice"]["voice"]:
+            story["meta"]["voice"] = row["voice"]["voice"]
+        if provider.get("engine") == "dashscope":
+            story["meta"]["tts"] = {"provider": "dashscope", "voice": row["voice"]["voice"]}
+        audio_dir = proj / "audio"
+        audio_dir.mkdir(parents=True, exist_ok=True)
+        manifest = {}
+        for scene in story["scenes"]:
+            item = row["voice"]["items"].get(scene["id"], {})
+            if item.get("hash") != voice_hash(scene["narration"]):
+                continue
+            path = _voice_file(row["id"], row["voice"]["voice_key"], item.get("file"))
+            if path and _safe_id(scene["id"]):
+                shutil.copy2(path, audio_dir / f"{scene['id']}.mp3")
+                manifest[scene["id"]] = item["hash"]
+        _atomic_json(audio_dir / "manifest.json", manifest)
+        _atomic_json(proj / "story.json", story)
+        project = json.loads((proj / "project.json").read_text(encoding="utf-8"))
+        project["settings"] = settings
+        _atomic_json(proj / "project.json", project)
+        _fill_collage_images(project_id, story, warnings)
+        cmd = ["node", "scripts/build.mjs", project_id] + (["--estimate"] if mode == "estimate" else [])
+        logs = config.DATA_DIR / "video_builds"
+        logs.mkdir(parents=True, exist_ok=True)
+        env = os.environ.copy()
+        if provider.get("engine") == "dashscope":
+            if provider.get("api_key"):
+                env["DASHSCOPE_API_KEY"] = provider["api_key"]
+            if provider.get("base_url"):
+                env["DASHSCOPE_BASE_URL"] = provider["base_url"]
+        timeout = BUILD_TIMEOUT_S * (2 if vmake.normalize_fps(settings.get("fps")) == 60 else 1)
+        code, hint = _run_build_process(cmd, project_id, logs / f"{project_id}.log", timeout, env=env)
+        mp4s = sorted((proj / "out").glob("*.mp4"))
+        try:
+            verify = json.loads((proj / "out" / "verify.json").read_text(encoding="utf-8"))
+            warnings.extend(str(w) for w in verify.get("warnings", []))
+        except (OSError, ValueError, AttributeError):
+            pass
+        report = {"project_id": project_id, "exit": code, "output": f"out/{mp4s[0].name}" if mp4s else "",
+                  "warnings": warnings, "hint": hint}
+        _set_job_result("build", report)
+        return code
+    except Exception as e:
+        code = 3
+        report = {"error": type(e).__name__, "hint": str(e)[:200], "project_id": project_id}
+        return code
+    finally:
+        if started:
+            current = make_get(row["id"])
+            if current:
+                current.update(status="built" if code == 0 else "voice_ready",
+                               last_build={"project_id": project_id, "mode": mode, "at": _now()})
+                _make_save(current)
+        finish_job("build", code, report.get("error") or (f"exit {code}" if code else ""), report.get("hint", ""))
+        print(json.dumps(report, ensure_ascii=False))
+
+
+def _run_build_process(cmd: list, project_id: str, log_path: Path,
+                       timeout_s: int = BUILD_TIMEOUT_S, env=None) -> tuple[int, str]:
     """跑 node build.mjs：逐行读输出跟进进度，原文落日志；总超时杀进程树。"""
     import threading
     hint = ""
@@ -1024,9 +1852,9 @@ def _run_build_process(cmd: list, project_id: str, log_path: Path) -> tuple[int,
     with open(log_path, "a", encoding="utf-8") as log, subprocess.Popen(
             cmd, cwd=str(Path(__file__).resolve().parents[2] / "ai-workflow" / "video"),
             stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-            encoding="utf-8", errors="replace") as proc:
+            encoding="utf-8", errors="replace", **({"env": env} if env is not None else {})) as proc:
         tick("build", "prepare", 25, "build.mjs 启动…")
-        watchdog = threading.Timer(BUILD_TIMEOUT_S, _kill_tree)
+        watchdog = threading.Timer(timeout_s, _kill_tree)
         watchdog.start()
         tts_n = 0
         try:
@@ -1045,22 +1873,41 @@ def _run_build_process(cmd: list, project_id: str, log_path: Path) -> tuple[int,
             watchdog.cancel()
     if timed_out.is_set():
         code = 3
-        hint = "渲染超时（超过 60 分钟已终止）；可到项目目录清理 out/ 后重试"
+        hint = f"渲染超时（超过 {timeout_s // 60} 分钟已终止）；可到项目目录清理 out/ 后重试"
     return code, hint
 
 
 def build_presets() -> dict:
     """制作向导预设：音色清单（按 provider 分组）+ 能力探测（只读，不打印密钥内容）。"""
     from . import vmake
-    voices = [
-        {"id": "zh-CN-XiaoxiaoNeural", "name": "晓晓 · 女声（Edge 免费）", "provider": "edge"},
-        {"id": "zh-CN-YunxiNeural", "name": "云希 · 男声（Edge 免费）", "provider": "edge"},
-        {"id": "zh-CN-YunyangNeural", "name": "云扬 · 男声·新闻（Edge 免费）", "provider": "edge"},
-        {"id": "longanlufeng", "name": "陆锋 · 男声（DashScope）", "provider": "dashscope"},
-        {"id": "longanlingxin", "name": "灵欣 · 女声（DashScope）", "provider": "dashscope"},
-    ]
+    tts = config.load().get("tts") or config.DEFAULTS["tts"]
+    voices = [{"id": v["id"], "name": f"{v['name']}（{p['name']}）", "provider": p["id"],
+               "engine": p["engine"]} for p in tts["providers"] if p.get("enabled") for v in p.get("voices", [])]
+    swatches = {
+        "terminal-dark": ["#070B16", "#76B900", "#4D9FFF"],
+        "paper-light": ["#F7F4EC", "#2B2A26", "#C7392B"],
+        "ocean-blue": ["#06182E", "#6FD3FF", "#EAF4FF"],
+        "vox-collage": ["#E9DCC3", "#3E2F1D", "#B3352C"],
+    }
+    aspect_labels = {"16:9": "横版", "9:16": "竖版", "1:1": "方形", "4:5": "4:5 竖构图"}
     return {"voices": voices,
-            "packs": [{"id": k, "name": v} for k, v in vmake.STYLE_PACKS.items()],
+            "tts": {"default": tts["default"], "providers": [
+                {k: p.get(k) for k in ("id", "name", "engine", "enabled", "voices")} for p in tts["providers"]]},
+            "themes": [{"id": k, "name": v, "swatch": swatches[k],
+                        **({"aspect_limit": "16:9"} if k == "vox-collage" else {})}
+                       for k, v in vmake.THEMES.items()],
+            "layouts": [{"id": k, "name": v} for k, v in vmake.LAYOUTS.items()],
+            "aspects": [{"id": k, "label": aspect_labels[k], "dims": list(dims)}
+                        for k, dims in vmake.ASPECTS.items()],
+            "fps_options": [{"id": 30, "label": "30 fps（标准）"},
+                            {"id": 60, "label": "60 fps（渲染约 2 倍时长）"}],
             "dashscope_key_ok": vmake.dashscope_key_ok(),
+            "collage_ready": shutil_which("arkcli"),
             "llm_ready": bool(_translate_cfg(config.load())),
             "max_chars": 20000}
+
+
+def shutil_which(cmd: str) -> bool:
+    """只读探测外部命令是否在 PATH(arkcli 为 npm shim, shutil.which 走 PATHEXT)。"""
+    import shutil
+    return shutil.which(cmd) is not None

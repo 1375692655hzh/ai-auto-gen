@@ -11,6 +11,7 @@ data/ 目录已被 gitignore, 配置永不入库。
 
 import json
 import os
+import re
 import tempfile
 from pathlib import Path
 
@@ -20,6 +21,20 @@ SETTINGS_FILE = DATA_DIR / "settings.json"
 ACCOUNTS_FILE = DATA_DIR / "tracked_accounts.json"
 
 DEFAULTS = {
+    "tts": {
+        "default": {"provider_id": "edge", "voice": "zh-CN-XiaoxiaoNeural"},
+        "providers": [
+            {"id": "edge", "name": "Edge TTS（免费）", "engine": "edge", "enabled": True,
+             "api_key": "", "base_url": "",
+             "voices": [{"id": "zh-CN-XiaoxiaoNeural", "name": "晓晓 · 女声"},
+                        {"id": "zh-CN-YunxiNeural", "name": "云希 · 男声"},
+                        {"id": "zh-CN-YunyangNeural", "name": "云扬 · 男声·新闻"}]},
+            {"id": "dashscope", "name": "DashScope（阿里云）", "engine": "dashscope", "enabled": False,
+             "api_key": "", "base_url": "",
+             "voices": [{"id": "longanlufeng", "name": "陆锋 · 男声"},
+                        {"id": "longanlingxin", "name": "灵欣 · 女声"}]},
+        ],
+    },
     "source": {
         "mode": "local",                            # local=本机 | lan=局域网数据站 | cloud=未来云端
         "base_url": "http://127.0.0.1:8787",
@@ -39,11 +54,16 @@ DEFAULTS = {
         "api_key": "",
         "model": "gemini-3.6-flash",
     },
+    "analysis_paths": {                             # 视频工坊·本地文件分析扫描根(4槽位, 设置页可改)
+        "paths": ["D:/weixininstall/liaotianjilu/xwechat_files/wxid_q17hzc13rz7822_4b98/msg/file/2026-09/copylab/copylab",
+                  "", "", ""],
+    },
     "compose": {                                    # 内容生成·成稿专用 LLM(2026-09-07 用户拍板:
         "base_url": "",                             # 独立于翻译链, 用户自填, 不动翻译额度;
         "api_key": "",                              # 未配置则生成报 no_llm_config, 不回落翻译链)
         "model": "",
-    },
+        "extra_body": {},                           # 厂商私有请求参数(选填), 如智谱推理模型
+    },                                              # {"thinking": {"type": "disabled"}} 防思考吃光 max_tokens
     "finnhub": {                                    # 内容生成·聚合分析增强(投行评级/目标价, 仅美股)
         "api_key": "",                              # 免费档 finnhub.io 注册即得, 仅存服务端打码回显
     },
@@ -65,7 +85,11 @@ def _merge(base: dict, override: dict) -> dict:
 
 def load() -> dict:
     try:
-        return _merge(DEFAULTS, json.loads(SETTINGS_FILE.read_text(encoding="utf-8")))
+        saved = json.loads(_settings_file().read_text(encoding="utf-8"))
+        merged = _merge(DEFAULTS, saved)
+        if isinstance(saved.get("tts"), dict) and "default" in saved["tts"]:
+            merged["tts"]["default"] = saved["tts"]["default"]
+        return merged
     except Exception:
         return json.loads(json.dumps(DEFAULTS))     # 深拷贝出厂默认
 
@@ -73,16 +97,26 @@ def load() -> dict:
 def save(cfg: dict) -> dict:
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     merged = _merge(load(), cfg)
+    if isinstance(cfg.get("tts"), dict) and "default" in cfg["tts"]:
+        merged["tts"]["default"] = cfg["tts"]["default"]
     fd, tmp = tempfile.mkstemp(dir=str(DATA_DIR), suffix=".tmp")   # 原子写, 防半写损坏
     with os.fdopen(fd, "w", encoding="utf-8") as f:
         json.dump(merged, f, ensure_ascii=False, indent=2)
-    os.replace(tmp, SETTINGS_FILE)
+    os.replace(tmp, _settings_file())
     return merged
+
+
+def _settings_file() -> Path:
+    # 保留旧调用方 patch SETTINGS_FILE 的兼容性；DATA_DIR 改写时随之隔离。
+    return DATA_DIR / "settings.json" if DATA_DIR != REPO / "data" / "workbench" else SETTINGS_FILE
 
 
 def public_view(cfg: dict) -> dict:
     """回显给浏览器的视图: api_key/sync_token 打码, 不回明文。"""
     v = json.loads(json.dumps(cfg))
+    for provider in (v.get("tts") or {}).get("providers", []):
+        key = provider.get("api_key") or ""
+        provider.update(api_key="", has_key=bool(key), key_tail=key[-4:] if key else "")
     key = v["source"].get("api_key") or ""
     v["source"]["api_key"] = ""
     v["source"]["has_key"] = bool(key)
@@ -112,9 +146,91 @@ def public_view(cfg: dict) -> dict:
     return v
 
 
+def _tts_id_ok(value) -> bool:
+    return isinstance(value, str) and bool(re.fullmatch(r"[\w-]+", value))
+
+
+def _tts_voices(voices) -> list:
+    out, seen = [], set()
+    for v in voices or []:
+        if not isinstance(v, dict):
+            continue
+        vid = v.get("id")
+        if not _tts_id_ok(vid) or vid in seen:
+            continue
+        seen.add(vid)
+        name = str(v.get("name") or vid).strip()[:40]
+        out.append({"id": vid, "name": name or vid})
+    return out
+
+
+def _tts_provider(prev, incoming: dict) -> dict | None:
+    """白名单合并一条供应商; id 非法则丢弃。api_key 缺省/空串保持原值。"""
+    prev = prev if isinstance(prev, dict) else {}
+    pid = incoming.get("id")
+    if not _tts_id_ok(pid):
+        return None
+    engine = incoming.get("engine", prev.get("engine") or "edge")
+    if engine not in ("edge", "dashscope"):
+        engine = prev.get("engine") if prev.get("engine") in ("edge", "dashscope") else "edge"
+    name = incoming["name"] if "name" in incoming else prev.get("name") or pid
+    enabled = incoming["enabled"] if "enabled" in incoming else prev.get("enabled", True)
+    base_url = incoming["base_url"] if "base_url" in incoming else prev.get("base_url", "")
+    api_key = prev.get("api_key") or ""
+    if incoming.get("api_key"):
+        api_key = str(incoming["api_key"])
+    voices = (_tts_voices(incoming["voices"]) if "voices" in incoming
+              else _tts_voices(prev.get("voices")))
+    return {"id": pid, "name": str(name or pid).strip()[:40] or pid, "engine": engine,
+            "enabled": bool(enabled), "api_key": api_key, "base_url": str(base_url or ""),
+            "voices": voices}
+
+
+def _tts_fix_default(tts: dict) -> dict:
+    """默认供应商被删或不存在时回落到仍在清单里的第一条(优先已启用)。"""
+    default = tts.get("default") if isinstance(tts.get("default"), dict) else {}
+    providers = tts.get("providers") or []
+    ids = {p["id"]: p for p in providers if isinstance(p, dict) and p.get("id")}
+    pid = default.get("provider_id")
+    if pid not in ids:
+        pick = next((p for p in providers if p.get("enabled")), providers[0] if providers else None)
+        if not pick:
+            tts["default"] = {"provider_id": "", "voice": ""}
+            return tts
+        pid = pick["id"]
+        voices = [v.get("id") for v in pick.get("voices") or [] if v.get("id")]
+        tts["default"] = {"provider_id": pid, "voice": voices[0] if voices else ""}
+        return tts
+    tts["default"] = {"provider_id": pid, "voice": str(default.get("voice") or "")}
+    return tts
+
+
 def apply_patch(patch: dict) -> dict:
     """设置页保存: api_key 留空表示保持不变(前端不持有明文)。"""
     patch = dict(patch or {})
+    if isinstance(patch.get("tts"), dict):
+        incoming = patch["tts"]
+        tts = json.loads(json.dumps(load()["tts"]))
+        providers = {p["id"]: p for p in tts["providers"]
+                     if isinstance(p, dict) and p.get("id")}
+        for rid in incoming.get("remove_ids") or []:
+            if isinstance(rid, str):
+                providers.pop(rid, None)
+        for p in incoming.get("providers") or []:
+            if not isinstance(p, dict):
+                continue
+            p = dict(p)
+            p.pop("has_key", None)
+            p.pop("key_tail", None)
+            if p.get("api_key") == "":
+                p.pop("api_key")
+            row = _tts_provider(providers.get(p.get("id")), p)
+            if row:
+                providers[row["id"]] = row
+        tts["providers"] = list(providers.values())
+        if "default" in incoming and isinstance(incoming["default"], dict):
+            tts["default"] = incoming["default"]
+        patch["tts"] = _tts_fix_default(tts)
     for sec in ("source", "translate", "youtube", "gemini", "compose", "finnhub"):
         s = dict(patch.get(sec) or {})
         if "api_key" in s and not s["api_key"]:
@@ -123,7 +239,11 @@ def apply_patch(patch: dict) -> dict:
             patch[sec] = s
         else:
             patch.pop(sec, None)
-    return save(_merge(load(), patch))
+    merged = _merge(load(), patch)
+    if "tts" in patch:
+        merged["tts"] = patch["tts"]
+    result = save(merged)
+    return result
 
 
 # ── 通用 JSON 清单存取(追踪账号/草稿/自动化任务, 全部原子写) ─────────────────
@@ -178,6 +298,15 @@ def load_video_scripts() -> list:
 
 def save_video_scripts(rows: list) -> list:
     return save_rows("video_scripts.json", rows)
+
+
+def load_video_makes() -> list:
+    rows = load_rows("video_makes.json")
+    return rows if isinstance(rows, list) and all(isinstance(r, dict) for r in rows) else []
+
+
+def save_video_makes(rows: list) -> list:
+    return save_rows("video_makes.json", rows)
 
 
 def load_drafts() -> list:

@@ -422,6 +422,11 @@ def sources_cmd(args) -> int:
 
 
 def workbench_cmd(args) -> int:
+    if args.sub in ("gen-narration", "gen-voice", "test-tts"):
+        sys.path.insert(0, str(WB))
+        from server import vstudio
+        return {"gen-narration": vstudio.run_narration_cli,
+                "gen-voice": vstudio.run_voice_cli, "test-tts": vstudio.run_test_tts_cli}[args.sub](args)
     if args.sub == "analyze-video":
         sys.path.insert(0, str(WB))
         from server import vstudio
@@ -449,10 +454,15 @@ def workbench_cmd(args) -> int:
                                     for k in ("base_url", "api_key", "model"))
                 if not all((base, key, model)):
                     code, error = 4, "no_llm_config"
-                elif vstudio.chat_completions(base, key, model,
-                        [{"role": "user", "content": "ping"}],
-                        temperature=0, max_tokens=8, timeout=25):
-                    code, error = 0, ""
+                else:
+                    eb = cfg.get("extra_body")
+                    # max_tokens 给足 512: 推理模型即使关思考也可能先烧百余 reasoning token,
+                    # 8 会被吃光导致误判连接失败
+                    if vstudio.chat_completions(base, key, model,
+                            [{"role": "user", "content": "ping"}],
+                            temperature=0, max_tokens=512, timeout=25,
+                            extra=eb if isinstance(eb, dict) else None):
+                        code, error = 0, ""
         except Exception:
             pass
         print(json.dumps({"ok": code == 0, "model": model, "error": error}))
@@ -750,6 +760,13 @@ def main() -> int:
     pw_va.add_argument("--url", default=None, help="人工补跑时覆盖任务 URL")
     pw_va.add_argument("--force", action="store_true", help="人工补跑时忽略分析缓存")
     pw_vg = wsub.add_parser("gen-script", help="视频工坊口播脚本生成任务(CLI 子进程入口)")
+    for command, desc in (("gen-narration", "视频工坊口播稿生成任务"),
+                          ("gen-voice", "视频工坊逐拍语音合成任务")):
+        wsub.add_parser(command, help=desc).add_argument("--json", action="store_true", help="输出单行 JSON")
+    pw_tt = wsub.add_parser("test-tts", help="测试语音供应商与音色连接")
+    pw_tt.add_argument("--provider", required=True)
+    pw_tt.add_argument("--voice", required=True)
+    pw_tt.add_argument("--json", action="store_true", help="输出单行 JSON（兼容位）")
     pw_vg.add_argument("--json", action="store_true", help="输出单行 JSON")
     pw_vb = wsub.add_parser("build-video", help="视频制作渲染编排(CLI 子进程入口, 真渲染分钟级)")
     pw_vb.add_argument("--json", action="store_true", help="输出单行 JSON")

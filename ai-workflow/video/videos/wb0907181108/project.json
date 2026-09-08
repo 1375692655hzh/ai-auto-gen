@@ -1,0 +1,19 @@
+{
+	"id": "wb0907181108",
+	"title": "一九二九。华尔街崩盘前夜",
+	"status": "built",
+	"note": "向导确认即审核（workbench 创建）；draft=待审 reviewed=可制作 built=已出片",
+	"created": "2026-09-07",
+	"date": "2026-09-07",
+	"origin": "workbench",
+	"settings": {
+		"format": "horizontal",
+		"voice": "",
+		"tts_provider": "edge",
+		"enrich": "plain",
+		"title": "一九二九。华尔街崩盘前夜",
+		"style_pack": "vox-collage"
+	},
+	"builtAt": "2026-09-07",
+	"output": "out/final.mp4 (2.15 min)"
+}

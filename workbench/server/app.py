@@ -427,6 +427,169 @@ def create_app() -> FastAPI:
         return {"started": True}
 
     # ── 视频工坊: 端点只读/写自有 JSON；分析与生成仅 spawn CLI 外呼 ──────────
+    def start_video_job(kind, payload, command):
+        import subprocess
+        if vstudio.job_running(kind):
+            return JSONResponse({"error": "任务进行中"}, status_code=409)
+        vstudio.begin_job(kind, payload)
+        cli = Path(__file__).resolve().parents[2] / "cli.py"
+        try:
+            subprocess.Popen(["py", "-3.11", str(cli), "workbench", command, "--json"],
+                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+        except OSError:
+            vstudio.finish_job(kind, 3, "cli_start_failed")
+            return JSONResponse({"error": "cli_start_failed"}, status_code=500)
+        return {"started": True}
+
+    @app.get("/wb-api/video-makes")
+    def video_makes():
+        return {"makes": vstudio.makes_view()}
+
+    @app.post("/wb-api/video-makes")
+    async def video_make_upsert(request: Request):
+        row = vstudio.make_upsert(await request.json())
+        return {"make": row} if row else JSONResponse({"error": "make_not_found"}, status_code=404)
+
+    @app.get("/wb-api/video-makes/{mid}")
+    def video_make_get(mid: str):
+        row = vstudio.make_get(mid)
+        return {"make": vstudio.make_view(row)} if row else JSONResponse({"error": "make_not_found"}, status_code=404)
+
+    @app.delete("/wb-api/video-makes/{mid}")
+    def video_make_delete(mid: str):
+        return {"removed": vstudio.make_del(mid)}
+
+    @app.post("/wb-api/video-makes/{mid}/duplicate")
+    def video_make_duplicate(mid: str):
+        row = vstudio.make_duplicate(mid)
+        return {"make": row} if row else JSONResponse({"error": "make_not_found"}, status_code=404)
+
+    def make_lock_response(result):
+        row, err = result
+        return JSONResponse(err, status_code=400) if err else {"make": row}
+
+    @app.post("/wb-api/video-makes/{mid}/lock-narration")
+    def video_lock_narration(mid: str):
+        return make_lock_response(vstudio.lock_narration(mid))
+
+    @app.post("/wb-api/video-makes/{mid}/unlock-narration")
+    def video_unlock_narration(mid: str):
+        return make_lock_response(vstudio.unlock_narration(mid))
+
+    @app.post("/wb-api/video-makes/{mid}/lock-script")
+    def video_lock_script(mid: str):
+        return make_lock_response(vstudio.lock_script(mid))
+
+    @app.post("/wb-api/video-makes/{mid}/unlock-script")
+    def video_unlock_script(mid: str):
+        return make_lock_response(vstudio.unlock_script(mid))
+
+    @app.post("/wb-api/video-narration/generate")
+    async def video_narration_generate(request: Request):
+        body = await request.json()
+        if vstudio.job_running("generate"):
+            return JSONResponse({"error": "任务进行中"}, status_code=409)
+        if body.get("style_id") not in vstudio._STYLES:
+            return JSONResponse({"error": "bad_style"}, status_code=400)
+        return start_video_job("generate", {**body, "task": "narration"}, "gen-narration")
+
+    @app.post("/wb-api/video-storyboard/generate")
+    async def video_storyboard_generate(request: Request):
+        body = await request.json()
+        if vstudio.job_running("generate"):
+            return JSONResponse({"error": "任务进行中"}, status_code=409)
+        row = vstudio.make_get(body.get("make_id"))
+        if not row or not row["narration"]["locked"]:
+            return JSONResponse({"error": "narration_not_locked" if row else "make_not_found"}, status_code=400)
+        return start_video_job("generate", {"task": "storyboard", "make_id": row["id"]}, "gen-script")
+
+    @app.post("/wb-api/video-voice/generate")
+    async def video_voice_generate(request: Request):
+        body = await request.json()
+        if vstudio.job_running("voice"):
+            return JSONResponse({"error": "任务进行中"}, status_code=409)
+        row = vstudio.make_get(body.get("make_id"))
+        if not row or not row["script_meta"]["locked"]:
+            return JSONResponse({"error": "script_not_locked"}, status_code=400)
+        if not vstudio._tts_provider(body.get("provider_id"), body.get("voice")):
+            return JSONResponse({"error": "bad_provider"}, status_code=400)
+        return start_video_job("voice", body, "gen-voice")
+
+    @app.get("/wb-api/video-voice/{make_id}/{voice_key}/{beat}.mp3")
+    def video_voice_file(make_id: str, voice_key: str, beat: str):
+        if not all(vstudio._safe_id(x) for x in (make_id, voice_key, beat)):
+            return JSONResponse({"error": "not_found"}, status_code=404)
+        path = vstudio._voice_file(make_id, voice_key, f"{beat}.mp3")
+        return FileResponse(str(path), media_type="audio/mpeg") if path else JSONResponse({"error": "not_found"}, status_code=404)
+
+    @app.put("/wb-api/video-assets")
+    async def video_asset_add(request: Request):
+        name = request.query_params.get("name", "")
+        mid = request.query_params.get("make_id", "")
+        bid = request.query_params.get("beat_id", "")
+        ext = Path(name).suffix.lower().lstrip(".")
+        if ext not in vstudio.ASSET_EXTS:
+            return JSONResponse({"error": "bad_ext"}, status_code=400)
+        if not vstudio.make_get(mid):
+            return JSONResponse({"error": "make_not_found"}, status_code=404)
+        limit = (100 if ext in ("mp4", "webm") else 15) * 1024 * 1024
+        try:
+            length = int(request.headers.get("content-length", "0"))
+        except ValueError:
+            return JSONResponse({"error": "bad_content_length"}, status_code=400)
+        if length > limit:
+            return JSONResponse({"error": "too_large"}, status_code=400)
+        body = await request.body()
+        if not body:
+            return JSONResponse({"error": "empty_body"}, status_code=400)
+        if len(body) > limit:
+            return JSONResponse({"error": "too_large"}, status_code=400)
+        asset, err = vstudio.asset_add(mid, bid, name, body)
+        return JSONResponse(err, status_code=400) if err else {"asset": asset}
+
+    @app.get("/wb-api/video-assets")
+    def video_assets(make_id: str = ""):
+        return {"assets": vstudio.assets_list(make_id)}
+
+    @app.get("/wb-api/video-assets/{asset_id}/file")
+    def video_asset_file(asset_id: str, make_id: str = ""):
+        path, _ = vstudio.asset_find(asset_id, make_id)
+        if not path:
+            return JSONResponse({"error": "not_found"}, status_code=404)
+        mime = {"png": "image/png", "jpg": "image/jpeg", "jpeg": "image/jpeg", "webp": "image/webp",
+                "mp4": "video/mp4", "webm": "video/webm"}[path.suffix.lstrip(".")]
+        return FileResponse(str(path), media_type=mime)
+
+    @app.delete("/wb-api/video-assets/{asset_id}")
+    def video_asset_delete(asset_id: str, make_id: str = ""):
+        return {"removed": 1, "cleared_overrides": vstudio.asset_del(asset_id, make_id)}
+
+    @app.post("/wb-api/test-tts")
+    async def test_tts(request: Request):
+        import subprocess
+        body = await request.json()
+        cli = Path(__file__).resolve().parents[2] / "cli.py"
+        try:
+            proc = subprocess.run(["py", "-3.11", str(cli), "workbench", "test-tts",
+                                   "--provider", str(body.get("provider_id") or ""),
+                                   "--voice", str(body.get("voice") or "")],
+                                  capture_output=True, text=True, encoding="utf-8", timeout=120)
+        except subprocess.TimeoutExpired:
+            return JSONResponse({"ok": False, "error": "cli_timeout"}, status_code=504)
+        except OSError:
+            return JSONResponse({"ok": False, "error": "cli_start_failed"}, status_code=500)
+        try:
+            out = json.loads(proc.stdout.strip().splitlines()[-1])
+            if not isinstance(out, dict):
+                raise ValueError("invalid result")
+        except (ValueError, IndexError, AttributeError):
+            return JSONResponse({"ok": False, "error": "invalid_cli_response"}, status_code=502)
+        if proc.returncode == 0 and out.get("ok") is True and isinstance(out.get("url"), str):
+            return {"ok": True, "url": out["url"]}
+        return JSONResponse({"ok": False, "error": out.get("error") or "tts_failed"},
+                            status_code=400 if proc.returncode == 4 else 502)
+
     @app.get("/wb-api/video-pool")
     def video_pool_list():
         return vstudio.pool_view()
@@ -474,6 +637,17 @@ def create_app() -> FastAPI:
             if not row:
                 return JSONResponse({"error": "pool_not_found"}, status_code=400)
             result_key = vstudio.analysis_key_of(row.get("video_id") or "", row.get("url") or "")
+        elif body.get("local_path"):
+            import os as _os
+            ap = _os.path.abspath(str(body.get("local_path")))
+            roots = [p for p in ((cfg.get("analysis_paths") or {}).get("paths") or []) if p]
+            if not (_os.path.isfile(ap)
+                    and any(ap.startswith(_os.path.abspath(p)) for p in roots)):
+                return JSONResponse({"error": "bad_local_path",
+                                     "hint": "仅允许分析已配置路径下的视频文件(设置→视频分析路径)"},
+                                    status_code=400)
+            fp = Path(ap).resolve()
+            result_key = vstudio.analysis_key_of("", f"local:{fp}")   # 与 CLI 侧 _target 同构, key 一致
         else:
             parsed = vstudio.parse_video_input(str(body.get("url") or ""))
             if not parsed:
@@ -494,6 +668,41 @@ def create_app() -> FastAPI:
     @app.get("/wb-api/video-jobs")
     def video_jobs():
         return vstudio.status_payload()
+
+    # ── 视频分析·本地文件(4个可配置扫描根, 设置页可改) ────────────────────────
+    @app.get("/wb-api/analysis-paths")
+    def analysis_paths():
+        slots = (config.load().get("analysis_paths") or {}).get("paths") or []
+        return {"paths": [{"idx": i, "label": f"路径{i + 1}", "root": p,
+                           "configured": bool(p)} for i, p in enumerate(slots[:4])]}
+
+    @app.get("/wb-api/analysis-files")
+    def analysis_files(idx: int = 0):
+        import os as _os
+        slots = (config.load().get("analysis_paths") or {}).get("paths") or []
+        root = slots[idx] if 0 <= idx < len(slots) else ""
+        files, err = [], ""
+        if not root:
+            err = "该路径未配置(设置 → 视频分析路径)"
+        elif not _os.path.isdir(root):
+            err = f"路径不存在: {root}"
+        else:
+            exts = {e.lower() for e in vstudio._VIDEO_MIME}
+            for base, _dirs, names in _os.walk(root):
+                for nm in names:
+                    if _os.path.splitext(nm)[1].lower() in exts:
+                        fp = _os.path.join(base, nm)
+                        try:
+                            st = _os.stat(fp)
+                        except OSError:
+                            continue
+                        files.append({"name": nm, "path": fp, "size": st.st_size,
+                                      "mtime": int(st.st_mtime)})
+            files.sort(key=lambda x: -x["mtime"])
+            files = files[:200]
+            if not files:
+                err = "该路径下暂无视频文件(mp4/mov/mkv/webm/avi…)"
+        return {"root": root, "files": files, "error": err or None}
 
     @app.get("/wb-api/video-script/styles")
     def video_script_styles():
@@ -575,9 +784,26 @@ def create_app() -> FastAPI:
     @app.post("/wb-api/video-build")
     async def video_build(request: Request):
         import subprocess
-        from .vmake import normalize_style_pack
+        from .vmake import (ASPECTS, FORMAT_ALIASES, THEMES, LAYOUTS, LEGACY_PACK_MAP,
+                            normalize_aspect, normalize_fps, normalize_style_pack)
         body = await request.json()
         # 脚本来源: script_id 查脚本仓库, 或 body.script 直接带 beats
+        if body.get("make_id"):
+            row = vstudio.make_get(body["make_id"])
+            if not row:
+                return JSONResponse({"error": "make_not_found"}, status_code=400)
+            if not row["script"] or not row["script_meta"]["locked"]:
+                return JSONResponse({"error": "script_not_locked"}, status_code=400)
+            mode = body.get("mode") or "build"
+            if mode not in ("build", "estimate"):
+                mode = "build"
+            missing = vstudio.voice_missing(row)
+            if mode == "build" and missing:
+                return JSONResponse({"error": "voice_missing", "hint": "缺少语音：" + "、".join(missing)}, status_code=400)
+            project_id = vstudio._id("wb")
+            result = start_video_job("build", {"make_id": row["id"], "project_id": project_id,
+                "mode": mode, "hook_index": row["video"].get("hook_index")}, "build-video")
+            return {**result, "project_id": project_id} if isinstance(result, dict) else result
         script = None
         if body.get("script_id"):
             row = vstudio.script_get(str(body.get("script_id")))
@@ -592,9 +818,16 @@ def create_app() -> FastAPI:
                                  "hint": "需要 script_id 或带 beats 的 script"}, status_code=400)
         if vstudio.job_running("build"):
             return JSONResponse({"error": "制作任务进行中"}, status_code=409)
-        fmt = str(body.get("format") or script.get("format") or "horizontal")
-        if fmt not in ("horizontal", "vertical"):
-            fmt = "horizontal"
+        aspect = body.get("aspect")
+        if not isinstance(aspect, str) or aspect not in ASPECTS:
+            old_format = body.get("format")
+            aspect = normalize_aspect(FORMAT_ALIASES.get(old_format, old_format)
+                                      if isinstance(old_format, str) else None)
+        fps = normalize_fps(body.get("fps"))
+        sp = normalize_style_pack(body.get("style_pack"))
+        theme, layout = body.get("theme"), body.get("layout")
+        theme = theme if isinstance(theme, str) and theme in THEMES else LEGACY_PACK_MAP[sp][0]
+        layout = layout if isinstance(layout, str) and layout in LAYOUTS else LEGACY_PACK_MAP[sp][1]
         tts_provider = str(body.get("tts_provider") or "edge")
         if tts_provider not in ("edge", "dashscope"):
             tts_provider = "edge"
@@ -616,9 +849,9 @@ def create_app() -> FastAPI:
             hook_index = None
         title = str(body.get("title") or "").strip()[:30] \
             or str(script.get("title") or "").strip()[:30]
-        settings = {"format": fmt, "voice": str(body.get("voice") or ""),
+        settings = {"aspect": aspect, "fps": fps, "theme": theme, "layout": layout,
+                    "voice": str(body.get("voice") or ""),
                     "tts_provider": tts_provider, "enrich": enrich, "title": title}
-        settings["style_pack"] = normalize_style_pack(body.get("style_pack"))
         project_id = "wb" + time.strftime("%m%d%H%M%S")
         vstudio.begin_job("build", {"script": script, "settings": settings,
                                     "project_id": project_id, "mode": mode,

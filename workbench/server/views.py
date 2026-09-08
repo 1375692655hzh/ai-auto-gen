@@ -153,6 +153,8 @@ def videos() -> list:
                     "status": proj.get("status", "draft"),
                     "date": proj.get("date") or story.get("date") or "",
                     "mp4": mp4s, "cover": cover,
+                    "verify_duration_s": verify.get("durationS")
+                    if type(verify.get("durationS")) in (int, float) else None,
                     "verify_mode": verify.get("mode") if isinstance(verify.get("mode"), str) else None,
                     "verify_warnings": [str(x) for x in verify["warnings"]]
                     if isinstance(verify.get("warnings"), list) else [],

@@ -13,14 +13,6 @@ export const MyComposition = () => {
 				width={ACTIVE.meta.width}
 				height={ACTIVE.meta.height}
 			/>
-			<Composition
-				id="VerticalShort"
-				component={Video}
-				durationInFrames={ACTIVE.totalFrames}
-				fps={ACTIVE.meta.fps}
-				width={1080}
-				height={1920}
-			/>
 		</>
 	);
 };

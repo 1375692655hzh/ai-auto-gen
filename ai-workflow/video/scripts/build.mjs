@@ -4,30 +4,13 @@
 //   node scripts/build.mjs <projectId> --force    跳过审核门禁
 //   node scripts/build.mjs <projectId> --estimate 仅按字数估时长出片（无语音预览用）
 //   node scripts/build.mjs <projectId> --no-render 只生成 active-story（配 remotion studio 预览）
-import msedgeTtsPkg from "msedge-tts";
-const { MsEdgeTTS, OUTPUT_FORMAT } = msedgeTtsPkg;
 import { execFileSync } from "node:child_process";
-import { existsSync, readFileSync, writeFileSync, mkdirSync, rmSync, statSync } from "node:fs";
-import { createHash } from "node:crypto";
+import { existsSync, readFileSync, writeFileSync, mkdirSync, rmSync, statSync, copyFileSync, readdirSync } from "node:fs";
 import path from "node:path";
 import { validateStory } from "./story-validate.mjs";
 import { TEMPLATE_IDS } from "./template-ids.mjs";
+import { synthOnce, hashNarration, loadEnv, FFPROBE } from "./tts-engines.mjs";
 
-const COMPOSITOR_PKG = {
-	win32: ["compositor-win32-x64-msvc", "ffprobe.exe"],
-	darwin: ["compositor-darwin-arm64-x64", "ffprobe"],
-	linux: ["compositor-linux-x64-gnu", "ffprobe"],
-}[process.platform] || ["compositor-win32-x64-msvc", "ffprobe.exe"];
-const FFPROBE = path.join("node_modules", "@remotion", COMPOSITOR_PKG[0], COMPOSITOR_PKG[1]);
-
-/** 读取 .env（KEY=VALUE，等号后原样），不覆盖已有环境变量 */
-const loadEnv = () => {
-	if (!existsSync(".env")) return;
-	for (const line of readFileSync(".env", "utf-8").split(/\r?\n/)) {
-		const m = line.match(/^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)\s*$/);
-		if (m && !(m[1] in process.env)) process.env[m[1]] = m[2].replace(/^["']|["']$/g, "");
-	}
-};
 loadEnv();
 
 const args = process.argv.slice(2);
@@ -51,7 +34,7 @@ for (const f of [projFile, storyFile]) {
 }
 const project = JSON.parse(readFileSync(projFile, "utf-8"));
 const story = JSON.parse(readFileSync(storyFile, "utf-8"));
-const compositionId = story.meta?.format === "vertical" ? "VerticalShort" : "Story";
+const compositionId = "Story";
 
 /* ---- story.json 结构校验（TTS/渲染之前的前置门禁） ---- */
 {
@@ -83,69 +66,46 @@ const LEAD_S = 0.7;                    // 音频前置静默: 语音开始时画
 const audioDir = path.join(projDir, "audio");
 mkdirSync(audioDir, { recursive: true });
 
-/* ---- TTS：补齐缺失音频 ---- */
-
-/** 引擎一：Edge TTS（免费，voice 如 zh-CN-XiaoxiaoNeural） */
-async function synthEdge(text, voice, outFile) {
-	const tts = new MsEdgeTTS();
-	await tts.setMetadata(voice, OUTPUT_FORMAT.AUDIO_24KHZ_48KBITRATE_MONO_MP3);
-	const { audioStream } = tts.toStream(text);
-	const chunks = [];
-	await new Promise((resolve, reject) => {
-		audioStream.on("data", (c) => chunks.push(c));
-		audioStream.on("end", resolve);
-		audioStream.on("error", reject);
-	});
-	writeFileSync(outFile, Buffer.concat(chunks));
-}
-
-/** 引擎二：阿里云 DashScope Qwen TTS（原生 SpeechSynthesizer 接口） */
-async function synthDashscope(text, voice, outFile) {
-	const key = process.env.DASHSCOPE_API_KEY;
-	if (!key) throw new Error("缺少 DASHSCOPE_API_KEY（写入引擎根目录 .env）");
-	const base = process.env.DASHSCOPE_BASE_URL ?? "https://dashscope.aliyuncs.com/compatible-mode/v1";
-	const endpoint = `${new URL(base).origin}/api/v1/services/audio/tts/SpeechSynthesizer`;
-	const res = await fetch(endpoint, {
-		method: "POST",
-		headers: { "Content-Type": "application/json", Authorization: `Bearer ${key}` },
-		body: JSON.stringify({
-			model: "qwen-audio-3.0-tts-plus",
-			input: { text, voice, format: "mp3", sample_rate: 24000 },
-		}),
-	});
-	if (!res.ok) {
-		throw new Error(`dashscope HTTP ${res.status}: ${(await res.text()).slice(0, 200)}`);
+/* ---- 素材同步：本期仅原样拷贝，不转码 ---- */
+function syncMaterials() {
+	const srcDir = path.join(projDir, "input", "materials");
+	const dstDir = path.join(projDir, "materials");
+	if (!existsSync(srcDir)) return;
+	mkdirSync(dstDir, { recursive: true });
+	for (const name of readdirSync(srcDir)) {
+		const src = path.join(srcDir, name);
+		if (!statSync(src).isFile()) continue;
+		const dst = path.join(dstDir, name);
+		if (existsSync(dst) && statSync(dst).mtimeMs >= statSync(src).mtimeMs) continue;
+		process.stdout.write(`素材规范化: input/materials/${name} -> materials/${name} ... `);
+		copyFileSync(src, dst);
+		console.log("ok（直接拷贝）");
 	}
-	const json = await res.json();
-	const url = json?.output?.audio?.url?.replace("http://", "https://");
-	if (!url) throw new Error(`dashscope 未返回音频: ${JSON.stringify(json).slice(0, 200)}`);
-	const audio = await fetch(url);
-	if (!audio.ok) throw new Error(`音频下载失败 HTTP ${audio.status}`);
-	writeFileSync(outFile, Buffer.from(await audio.arrayBuffer()));
 }
+syncMaterials();
+
+/* ---- 素材存在性硬检查 ---- */
+{
+	const missing = [];
+	for (const s of story.scenes) {
+		if (s.template === "clip" && typeof s.data?.src === "string" && s.data.src.trim() &&
+			!existsSync(path.join(projDir, s.data.src))) {
+			missing.push(`场景 ${s.id}: ${s.data.src}（原始素材放 videos/${projectId}/input/materials/ 后重跑）`);
+		}
+	}
+	if (missing.length > 0) {
+		for (const m of missing) console.error(`✗ 素材缺失: ${m}`);
+		process.exit(1);
+	}
+}
+
+/* ---- TTS：补齐缺失音频 ---- */
 
 /** 按项目配置分发引擎（story.json meta.tts，缺省用 edge + meta.voice） */
 const ttsConf =
 	story.meta.tts && story.meta.tts.provider === "dashscope"
 		? { engine: "dashscope", voice: story.meta.tts.voice ?? "longanlufeng" }
 		: { engine: "edge", voice: story.meta.voice ?? "zh-CN-XiaoxiaoNeural" };
-
-async function synthOnce(engine, voice, text, outFile) {
-	for (let attempt = 1; attempt <= 8; attempt++) {
-		try {
-			if (engine === "dashscope") {
-				await synthDashscope(text, voice, outFile);
-			} else {
-				await synthEdge(text, voice, outFile);
-			}
-			return true;
-		} catch (e) {
-			console.error(`  TTS 重试 ${attempt}/8: ${e.message}`);
-			await new Promise((r) => setTimeout(r, 2500 * attempt));
-		}
-	}
-	return false;
-}
 
 /** 用指定引擎补齐全部缺失音频；返回 {ok, made[], failedId} */
 async function synthAll(engine, voice) {
@@ -174,7 +134,7 @@ if (!ESTIMATE) {
 		: {};
 	for (const s of story.scenes) {
 		// 音频缓存按 narration 内容哈希失效: 改稿后复用旧音频会音画错位
-		const hash = createHash("sha1").update(s.narration).digest("hex").slice(0, 10);
+		const hash = hashNarration(s.narration);
 		const outFile = path.join(audioDir, `${s.id}.mp3`);
 		if (existsSync(outFile) && manifest[s.id] !== hash) {
 			rmSync(outFile);
@@ -242,7 +202,8 @@ for (const s of story.scenes) {
 
 /* ---- 生成 src/active-story.ts ---- */
 const active = {
-	meta: { fps, width: meta.width ?? 1920, height: meta.height ?? 1080, voice: meta.voice },
+	meta: { fps, width: meta.width ?? 1920, height: meta.height ?? 1080, voice: meta.voice,
+		theme: meta.theme, layout: meta.layout },
 	story,
 	frames,
 	totalFrames,
@@ -259,7 +220,7 @@ export interface ActiveFrame {
 	audioDuration: number;
 	durationInFrames: number;
 }
-export const ACTIVE: { meta: { fps: number; width: number; height: number; voice: string }; story: Story; frames: ActiveFrame[]; totalFrames: number } = ${JSON.stringify(active, null, "\t")};
+export const ACTIVE: { meta: { fps: number; width: number; height: number; voice: string; theme?: string; layout?: string }; story: Story; frames: ActiveFrame[]; totalFrames: number } = ${JSON.stringify(active, null, "\t")};
 `;
 writeFileSync(path.join("src", "active-story.ts"), ts);
 
@@ -289,12 +250,12 @@ execFileSync(
 );
 console.log(`\n✅ 完成，耗时 ${((Date.now() - t0) / 1000 / 60).toFixed(1)} 分钟`);
 
-/* ---- 封面: 渲染开场标题帧(约0.7s处, 动画已稳定) 作为当期封面 ---- */
+/* ---- 封面: 渲染开场标题帧（0.7 秒处动画已稳定，随 fps 缩放）作为当期封面 ---- */
 const coverFile = path.join(projDir, "out", "cover.png");
 try {
 	execFileSync(
 		"npx",
-		["remotion", "still", compositionId, coverFile, "--frame=20", "--public-dir", projDir],
+		["remotion", "still", compositionId, coverFile, `--frame=${Math.round(0.7 * fps)}`, "--public-dir", projDir],
 		{ stdio: "inherit", shell: true },
 	);
 	console.log(`🖼 封面已生成 -> ${coverFile}(与视频开场同款视觉)`);
@@ -307,7 +268,8 @@ try {
 {
 	console.log("\nQA 自检:");
 	const qa = { file: path.relative(projDir, outFile), composition: compositionId,
-		mode: ESTIMATE ? "estimate" : "build", checks: [], warnings: [], errors: [],
+		mode: ESTIMATE ? "estimate" : "build", durationS: totalFrames / fps,
+		checks: [], warnings: [], errors: [],
 		builtAt: new Date().toISOString() };
 	if (!existsSync(outFile)) qa.errors.push(`产物缺失: ${outFile}`);
 	else qa.checks.push(`产物存在（${(statSync(outFile).size / 1024 / 1024).toFixed(1)} MB）`);

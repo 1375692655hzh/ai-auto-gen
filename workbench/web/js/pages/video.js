@@ -8,13 +8,16 @@ WB.pages.video = {
       tab: "hot",
       /* ── 热点追踪 ── */
       hotItems: [], hotTotal: 0, hotMeta: null, hotInsights: [],
-      f: { range: "24h", sort: "views", kind: "all", channel: "", q: "" },
+      f: { range: "7d", sort: "views", kind: "all", channel: "", q: "" },   // 默认7d: 低活跃日24h窗口天然为空
       hotLoading: false, hotErr: null,
+      /* ── 视频分析·本地文件方式 + 历史结果 ── */
+      anMode: "url", anPaths: [], anPathIdx: null, anFiles: [], anFile: "",
+      anHistory: [], anHistoryLoading: false,
       collecting: false, collectPoll: null,
       /* ── 视频工坊 ── */
       pool: [], poolMeta: null, poolIds: {}, poolSel: null,
       anUrl: '', anRec: null, anBusy: false, anErr: null, anProgress: null,
-      jobPolls: { analyze: null, generate: null, build: null },
+      jobPolls: { analyze: null, generate: null, voice: null, build: null },
       styles: [], drafts: [],
       sg: { brief: '', articleMode: 'none', pasted: '', draftId: '',
             styleId: 'recap-ask-conclude', analysisKey: '' },
@@ -25,16 +28,14 @@ WB.pages.video = {
       chForm: { input: "", note: "" }, showChForm: false, adding: false, chBusyId: "",
       /* ── 视频制作(原视频页内容) ── */
       videos: [], sel: null, error: null,
-      /* ── 创建视频向导(三步状态机) ── */
-      mk: {
-        open: false, step: 1,
-        source: 'repo', repoId: '', pasted: '', fileName: '',
-        styleId: 'recap-ask-conclude', hookSel: 0, script: null,
-        title: '', format: 'horizontal', voice: '', ttsProvider: 'edge',
-        enrich: 'plain', mode: 'build', stylePack: 'auto', presets: null,
-        busy: false, progress: null, err: null, jobPid: '', warn: [],
-        logOpen: false, logLines: [], logTruncated: false,
-      },
+      /* 四段制作：草稿持久化，任务槽独立恢复。 */
+      makes: [], cur: null, presets: null, narTab: 'a', narBrief: '', narDraftId: '', importId: '',
+      narBusy: false, narProgress: null, storyBusy: false, storyProgress: null,
+      voiceBusy: false, voiceProgress: null, makeErr: '', narErr: '', scriptErr: '', voiceErr: '',
+      buildBusy: false, buildProgress: null, buildErr: '', buildPid: '', buildMakeId: '',
+      buildMode: 'build', buildLogOpen: false, buildLogLines: [], buildLogTruncated: false, buildWarnings: [],
+      assetUploadBusy: {}, makeActionBusy: false, saveTimers: {}, savePending: {}, saveChains: {},
+      saveVersions: {}, saveState: {}, beatCursors: {}, makeJobIds: {}, disposed: false,
       phTitles: { templates: "模板仓库", materials: "素材仓库" },
     };
   },
@@ -74,43 +75,16 @@ WB.pages.video = {
     analyzedPool() {
       return (this.pool || []).filter((r) => r.analysis_status === 'ok' || r.analysis_status === 'partial');
     },
-    /* ── 创建视频向导 ── */
-    mkRepoScripts() {
-      return (this.scripts || []).filter((r) => r.kind === 'generated' && r.script
-        && Array.isArray(r.script.beats) && r.script.beats.length);
-    },
-    mkRepoScript() {
-      const r = (this.scripts || []).find((x) => x.id === this.mk.repoId);
-      return r && r.script ? r.script : null;
-    },
-    mkBeats() {
-      return this.mk.script && Array.isArray(this.mk.script.beats) ? this.mk.script.beats : [];
-    },
-    mkWords() {
-      return this.mkBeats.reduce((n, b) => n + String(b.narration || '').replace(/\s+/g, '').length, 0);
-    },
-    mkEmptyNarrs() {
-      return this.mkBeats.reduce((ns, b, i) => {
-        if (!String(b.narration || '').trim()) ns.push(i + 1);
-        return ns;
-      }, []);
-    },
-    mkEstSeconds() {
-      return Math.round(this.mkWords / 4.2 + this.mkBeats.length * 1.5);
-    },
-    mkVoiceGroups() {
-      const vs = (this.mk.presets && this.mk.presets.voices) || [];
-      return {
-        edge: vs.filter((v) => v.provider === 'edge'),
-        dashscope: vs.filter((v) => v.provider === 'dashscope'),
-      };
-    },
-    mkDashOk() {
-      return !!(this.mk.presets && this.mk.presets.dashscope_key_ok);
-    },
-    mkLlmReady() {
-      return !!(this.mk.presets && this.mk.presets.llm_ready);
-    },
+    curMake() { return this.makes.find((m) => m.id === this.cur) || null; },
+    makeBeats() { return (this.curMake && this.curMake.script && this.curMake.script.beats) || []; },
+    narrationWords() { return [...String(this.curMake && this.curMake.narration.text || '').replace(/\s+/g, '')].length; },
+    importScripts() { return this.scripts.filter((r) => r.kind === 'generated' && r.script && r.script.beats && r.script.beats.length); },
+    ttsProviders() { return ((this.presets && this.presets.tts && this.presets.tts.providers) || []).filter((p) => p.enabled && (p.voices || []).length); },
+    makeVoices() { const p = this.ttsProviders.find((p) => this.curMake && p.id === this.curMake.voice.profile_id); return p ? p.voices || [] : []; },
+    makeTheme() { return ((this.presets && this.presets.themes) || []).find((t) => this.curMake && t.id === this.curMake.video.theme); },
+    makeBusy() { return this.makeActionBusy || Object.values(this.makeJobIds).includes(this.cur) || Object.keys(this.assetUploadBusy).some((k) => k.startsWith(this.cur + ':') && this.assetUploadBusy[k]); },
+    makeVoiceReady() { return this.segBadge(3).cls === 'green'; },
+
   },
   methods: {
     gateClass(s) { return s === "built" ? "green" : s === "reviewed" ? "yellow" : ""; },
@@ -136,7 +110,7 @@ WB.pages.video = {
           onPick: () => { this.tab = 'scripts'; } },
         { id: "make", title: "视频制作", cnt: this.videos.length || "",
           icon: I('<rect x="2" y="2" width="20" height="20" rx="2.18"/><line x1="7" y1="2" x2="7" y2="22"/><line x1="17" y1="2" x2="17" y2="22"/><line x1="2" y1="12" x2="22" y2="12"/><line x1="2" y1="7" x2="7" y2="7"/><line x1="2" y1="17" x2="7" y2="17"/><line x1="17" y1="17" x2="22" y2="17"/><line x1="17" y1="7" x2="22" y2="7"/>'),
-          onPick: () => { this.tab = "make"; } },
+          onPick: () => { this.tab = "make"; this.loadMakePresets().then(() => { if (this.curMake) this.setMakeDefaults(this.curMake); }); } },
         { id: "templates", title: "模板仓库",
           icon: I('<rect x="3" y="3" width="18" height="18" rx="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="9" y1="21" x2="9" y2="9"/>'),
           onPick: () => { this.tab = "templates"; } },
@@ -279,6 +253,7 @@ WB.pages.video = {
     pollCollect() {                       // 采集为异步 spawn, 每 3s 轮询状态直到收尾
       clearTimeout(this.collectPoll);
       const tick = async () => {
+        if (this.disposed) return;
         let st = null;
         try { st = await WB.api.get("/yt/status"); } catch (e) {}
         if (st && !st.running) {
@@ -385,6 +360,50 @@ WB.pages.video = {
         } catch (e) { if (e.status !== 404) this.anErr = e; }
       }
     },
+    /* ── 分析方式: 本地文件(可配置扫描根) ── */
+    async loadAnPaths() {
+      try {
+        const d = await WB.api.get("/analysis-paths");
+        this.anPaths = (d.paths || []).filter(p => p.configured);
+        if (this.anPaths.length && this.anPathIdx == null) {
+          this.anPathIdx = this.anPaths[0].idx;
+          this.loadAnFiles();
+        }
+      } catch (e) {}
+    },
+    async loadAnFiles() {
+      if (this.anPathIdx == null) return;
+      this.anLoadingFile = true;
+      try {
+        const d = await WB.api.get("/analysis-files?idx=" + this.anPathIdx);
+        this.anFiles = d.files || [];
+        this.anFile = "";
+        if (d.error) WB.toast(d.error);
+      } catch (e) { this.anFiles = []; }
+      this.anLoadingFile = false;
+    },
+    async loadAnHistory() {
+      this.anHistoryLoading = true;
+      try { this.anHistory = await WB.api.get("/video-analyses"); }
+      catch (e) { this.anHistory = []; }
+      this.anHistoryLoading = false;
+    },
+    async openAnalysis(key) {
+      try {
+        this.anRec = await WB.api.get("/video-analyses?key=" + encodeURIComponent(key));
+      } catch (e) { WB.toast(e.error || "记录载入失败"); }
+    },
+    async startAnalyzeLocal(force) {
+      if (!this.anFile) { WB.toast("先选择要分析的视频文件"); return; }
+      this.anErr = null;
+      try {
+        await WB.api.post("/video-analyze", { local_path: this.anFile, force: !!force });
+        this.anBusy = true; this.pollJob('analyze');
+      } catch (e) {
+        if (e.status === 409) { WB.toast("分析进行中"); this.anBusy = true; this.pollJob('analyze'); }
+        else WB.toast(e.error + (e.hint ? " — " + e.hint : ""));
+      }
+    },
     async startAnalyze(force) {
       const url = (this.anUrl || '').trim();
       if (!url && !this.poolSel) { WB.toast('请选择素材或粘贴 YouTube 链接'); return; }
@@ -404,22 +423,30 @@ WB.pages.video = {
     pollJob(kind) {
       clearTimeout(this.jobPolls[kind]);
       const tick = async () => {
+        if (this.disposed) return;
         let jobs;
         try { jobs = await WB.api.get('/video-jobs'); }
         catch (e) {
-          if (kind === 'analyze') this.anBusy = false;
-          else if (kind === 'build') this.mk.busy = false;
-          else this.sgBusy = false;
-          WB.toast(e.error); return;
+          if (this.disposed) return;
+          WB.toast(this.makeError(e) + '，稍后重连任务进度');
+          this.jobPolls[kind] = setTimeout(tick, 5000); return;
         }
-        const job = jobs[kind] || {};
+        if (this.disposed) return;
+        const job = jobs[kind] || {}, task = (job.request || {}).task;
+        this.adoptMakeJob(kind, job);
         if (kind === 'analyze') this.anProgress = job.progress || null;
-        else if (kind === 'build') this.mk.progress = job.progress || null;
+        else if (kind === 'build') this.buildProgress = job.progress || null;
+        else if (kind === 'voice') this.voiceProgress = job.progress || null;
+        else if (task === 'narration') this.narProgress = job.progress || null;
+        else if (task === 'storyboard') this.storyProgress = job.progress || null;
         else this.sgProgress = job.progress || null;
         if (job.running) { this.jobPolls[kind] = setTimeout(tick, 3000); return; }
+        this.jobPolls[kind] = null;
         if (kind === 'analyze') this.anBusy = false;
-        else if (kind === 'build') this.mk.busy = false;
-        else this.sgBusy = false;
+        else if (kind === 'build') this.buildBusy = false;
+        else if (kind === 'voice') this.voiceBusy = false;
+        else { this.sgBusy = false; this.narBusy = false; this.storyBusy = false; }
+        delete this.makeJobIds[kind];
         if (job.exit === 0) {
           if (kind === 'analyze') {
             try {
@@ -427,23 +454,29 @@ WB.pages.video = {
               await this.loadPool(); WB.toast('分析完成');
             } catch (e) { WB.toast(e.error); }
           } else if (kind === 'build') {
-            const pid = (job.request && job.request.project_id) || '';
-            await this.loadVideos();
+            await this.refreshMakeJob(job);
+            const pid = (job.request && job.request.project_id) || this.buildPid;
             const hit = this.videos.find((v) => pid && v.id.indexOf(pid) === 0);
             if (hit) this.sel = hit;
-            this.mk.warn = (job.result && job.result.warnings) || [];
-            this.mk.open = false; this.mk.err = null;
+            this.buildWarnings = (job.result && job.result.warnings) || [];
+            this.buildErr = '';
             WB.toast('视频已生成' + (hit ? ': ' + this.cut(hit.title, 18) : ''));
+          } else if (kind === 'voice' || task === 'narration' || task === 'storyboard') {
+            await this.refreshMakeJob(job);
+            WB.toast(kind === 'voice' ? '语音已生成' : task === 'narration' ? '口播稿已生成' : '分镜脚本已生成');
           } else {
             this.sgPreview = job.result; this.sgHookSel = 0;
-            if (this.mk.open && this.mk.step === 1 && this.mk.source !== 'repo') {
-              this.mk.script = job.result; this.mk.hookSel = 0;   // 向导内生成 → 回填快照
-            }
             WB.toast('脚本已生成，请检查后保存');
           }
-        } else if (kind === 'build') {
-          this.mk.err = (job.error || '制作失败') + (job.hint ? ' — ' + job.hint : '');
-        } else WB.toast((job.error || '任务失败') + (job.hint ? ' — ' + job.hint : ''));
+        } else {
+          const msg = this.makeError(job.error ? job : { error: '任务失败', hint: job.hint });
+          if (kind === 'build') this.buildErr = msg;
+          else if (kind === 'voice') this.voiceErr = msg;
+          else if (task === 'narration') this.narErr = msg;
+          else if (task === 'storyboard') this.scriptErr = msg;
+          else WB.toast(msg);
+          if (kind === 'build' || kind === 'voice' || task === 'narration' || task === 'storyboard') await this.refreshMakeJob(job);
+        }
       };
       this.jobPolls[kind] = setTimeout(tick, 3000);
     },
@@ -530,7 +563,7 @@ WB.pages.video = {
         if (this.scriptSel && this.scriptSel.id === r.id) Object.assign(this.scriptSel, d.script);
       } catch (e) { WB.toast(e.error); }
     },
-    /* ── 创建视频向导 ── */
+    /* ── 视频项目 ── */
     async loadVideos() {
       try { this.videos = (await WB.api.get('/videos')).videos; }
       catch (e) { this.error = e; }
@@ -544,123 +577,309 @@ WB.pages.video = {
         await this.loadVideos();
       } catch (e) { WB.toast(e.error); }
     },
-    copyPubCmd() { WB.copyText(this.pubCmd); WB.toast('投稿命令已复制'); },
-    /* 分镜轻编辑：只修改向导快照 */
-    setOnScreen(b, ev) {
-      if (this.mk.busy) return;
-      b.on_screen = ev.target.value.split(/[、,，]/).map((s) => s.trim()).filter(Boolean);
+    copyPubCmd() { WB.copyText(this.pubCmd); },
+    makeError(e) { return String(e.error || e.message || e || '请求失败') + (e.hint ? ' — ' + e.hint : ''); },
+    normalizeMake(m) {
+      return { ...m, narration: { text: '', ref_text: '', style_id: '', source: '', locked: false, ...m.narration },
+        script_meta: { locked: false, ...m.script_meta }, voice: { profile_id: '', voice: '', voice_key: '', items: {}, ...m.voice },
+        assets: m.assets || [], voice_bad: m.voice_bad || [],
+        video: { mode: 'unified', aspect: '16:9', fps: 30, theme: 'terminal-dark', layout: 'auto',
+          enrich: 'plain', hook_index: 0, beat_overrides: [], ...m.video } };
     },
-    delBeat(i) {
-      if (this.mk.busy) return;
-      const b = this.mkBeats[i];
-      let msg = '删除场景 ' + (i + 1) + '？删除后不可恢复';
-      if (b.role === 'cta') msg += '\n删除后 CTA 唯一性失守，确认？';
-      if (!confirm(msg)) return;
-      this.mk.script.beats.splice(i, 1);
+    putMake(m) {
+      if (!m) throw { error: '未收到制作草稿' };
+      const row = this.normalizeMake(m), i = this.makes.findIndex((r) => r.id === row.id);
+      if (i < 0) this.makes.unshift(row); else this.makes.splice(i, 1, row);
+      return row;
     },
-    openWizard() {
-      this.mk.open = true; this.mk.step = 1; this.mk.err = null; this.mk.script = null;
-      this.mk.source = 'repo'; this.mk.repoId = ''; this.mk.pasted = '';
-      this.mk.fileName = ''; this.mk.hookSel = 0;
-      this.mk.warn = []; this.mk.stylePack = 'auto';
-      this.mk.logOpen = false; this.mk.logLines = [];
-      this.loadPresets();
+    async loadMakePresets() {
+      try { this.presets = await WB.api.get('/video-presets'); }
+      catch (e) { this.makeErr = this.makeError(e); }
     },
-    closeWizard() { this.mk.open = false; },
-    async loadPresets() {
-      try { this.mk.presets = await WB.api.get('/video-presets'); } catch (e) {}
-    },
-    wizardFilePicked(ev) {
-      const file = ev.target.files && ev.target.files[0];
-      if (!file) return;
-      if (file.size > 200 * 1024) { WB.toast('文件超过 200KB 上限'); ev.target.value = ''; return; }
-      const reader = new FileReader();
-      reader.onload = () => {
-        this.mk.pasted = String(reader.result || '');
-        this.mk.fileName = file.name;
-      };
-      reader.readAsText(file);
-    },
-    wizardGenerate() {
-      // 复用脚本生成链: 借 sg 状态走 startGenerate → pollJob('generate'), 完成分支回填 mk.script
-      if (!this.mk.pasted.trim()) { WB.toast('请先粘贴或上传文稿'); return; }
-      this.sg.articleMode = 'paste';
-      this.sg.pasted = this.mk.pasted;
-      this.sg.styleId = this.mk.styleId;
-      this.sg.brief = ''; this.sg.draftId = '';
-      this.startGenerate();
-    },
-    wizardToStep2() {
-      const script = this.mk.source === 'repo' ? this.mkRepoScript : this.mk.script;
-      if (!script) { WB.toast('请先选择或生成脚本'); return; }
-      this.mk.script = JSON.parse(JSON.stringify(script));   // 快照隔离仓库，保留已选 hook 变体
-      this.mk.title = String(script.title || '').slice(0, 30);
-      const style = (this.styles || []).find((s) => s.id === script.style_id);
-      this.mk.format = (script.format === 'vertical' || (style && style.format === 'vertical'))
-        ? 'vertical' : 'horizontal';
-      this.mk.enrich = this.mkLlmReady ? 'llm' : 'plain';
-      this.mk.voice = 'zh-CN-XiaoxiaoNeural';   // 默认 Edge 晓晓(dashscope 音色由用户显式选择)
-      this.mk.mode = 'build';
-      this.mk.step = 2;
-    },
-    isDashscopeVoice(v) {
-      return String(v || '').indexOf('longan') === 0;
-    },
-    async startBuild() {
-      if (!this.mk.script) { WB.toast('脚本快照丢失，请回到第一步'); this.mk.step = 1; return; }
-      this.mk.err = null; this.mk.logOpen = false; this.mk.logLines = [];
-      const body = {
-        script: this.mk.script,
-        title: this.mk.title || undefined,
-        format: this.mk.format,
-        voice: this.mk.voice || undefined,
-        tts_provider: (this.mkDashOk && this.isDashscopeVoice(this.mk.voice)) ? 'dashscope' : 'edge',
-        enrich: this.mk.enrich,
-        style_pack: this.mk.stylePack || 'auto',
-        mode: this.mk.mode,
-        hook_index: this.mk.hookSel || 0,
-      };
-      this.mk.step = 3;
+    async loadMakes() {
       try {
-        const d = await WB.api.post('/video-build', body);
-        this.mk.jobPid = d.project_id;
-        this.mk.busy = true;
-        this.pollJob('build');
-      } catch (e) {
-        if (e.status === 409) {
-          WB.toast('制作任务进行中，已接入进度');
-          this.mk.busy = true;
-          this.pollJob('build');
-        } else {
-          this.mk.err = e.error + (e.hint ? ' — ' + e.hint : '');
+        const rows = (await WB.api.get('/video-makes')).makes || [], local = this.makes;
+        // Other jobs finishing must not erase pending keystrokes in this editor.
+        this.makes = rows.map((m) => (this.saveState[m.id] === 'saving' || this.savePending[m.id])
+          ? local.find((r) => r.id === m.id) || this.normalizeMake(m) : this.normalizeMake(m));
+        this.makeErr = '';
+      } catch (e) { this.makeErr = this.makeError(e); }
+    },
+    async fetchMake(id) { return this.putMake((await WB.api.get('/video-makes/' + encodeURIComponent(id))).make); },
+    async selectMake(id) {
+      if (this.makeActionBusy) return;
+      try {
+        if (this.cur) await this.flushMake(this.cur);
+        const m = await this.fetchMake(id);
+        this.cur = m.id; this.narTab = m.narration.source === 'manual' ? 'b' : 'a';
+        this.narBrief = ''; this.narDraftId = ''; this.importId = ''; this.beatCursors = {};
+        this.narErr = ''; this.scriptErr = ''; this.voiceErr = ''; this.setMakeDefaults(m);
+      } catch (e) { this.makeErr = this.makeError(e); }
+    },
+    setMakeDefaults(m) {
+      let changed = false;
+      if (!m.narration.style_id && this.styles.length) { m.narration.style_id = this.styles[0].id; changed = true; }
+      const def = (this.presets && this.presets.tts && this.presets.tts.default) || {};
+      const current = this.ttsProviders.find((p) => p.id === m.voice.profile_id);
+      const p = current || this.ttsProviders.find((x) => x.id === def.provider_id) || this.ttsProviders[0];
+      if (p) {
+        const voices = p.voices || [];
+        const voiceOk = voices.some((v) => v.id === m.voice.voice);
+        if (!current) {
+          m.voice.profile_id = p.id;
+          m.voice.voice = voices.some((v) => v.id === def.voice) ? def.voice : ((voices[0] || {}).id || '');
+          m.voice.items = {}; m.voice.voice_key = ''; m.voice_bad = [];
+          changed = true;
+        } else if (!voiceOk) {
+          m.voice.voice = voices.some((v) => v.id === def.voice) ? def.voice : ((voices[0] || {}).id || '');
+          m.voice.items = {}; m.voice.voice_key = ''; m.voice_bad = [];
+          changed = true;
         }
       }
+      if (changed) this.saveMake(m);
     },
-    retryBuild() {
-      this.mk.err = null;
-      this.startBuild();
-    },
-    async loadBuildLog() {
-      this.mk.logOpen = !this.mk.logOpen;
-      if (!this.mk.logOpen) return;
-      const pid = this.mk.jobPid;
-      if (!pid) { this.mk.logLines = ['(尚无日志：任务未启动)']; return; }
+    async newMake() {
+      if (this.makeActionBusy) return;
+      this.makeActionBusy = true;
       try {
-        const d = await WB.api.get('/video-builds/' + encodeURIComponent(pid) + '/log?n=200');
-        this.mk.logLines = d.tail || [];
-        this.mk.logTruncated = !!d.truncated;
-      } catch (e) {
-        this.mk.logLines = ['(日志读取失败: ' + (e.error || e) + ')'];
+        if (this.cur) await this.flushMake(this.cur);
+        const m = this.putMake((await WB.api.post('/video-makes', {})).make);
+        this.cur = m.id; this.narTab = 'a'; this.narBrief = ''; this.narDraftId = ''; this.importId = '';
+        this.narErr = ''; this.scriptErr = ''; this.voiceErr = ''; this.setMakeDefaults(m);
+      } catch (e) { this.makeErr = this.makeError(e); }
+      finally { this.makeActionBusy = false; }
+    },
+    async duplicateMake(m) {
+      try {
+        await this.flushMake(m.id);
+        const row = this.putMake((await WB.api.post('/video-makes/' + m.id + '/duplicate', {})).make);
+        await this.selectMake(row.id);
+      } catch (e) { this.makeErr = this.makeError(e); }
+    },
+    async deleteMake(m) {
+      if (Object.values(this.makeJobIds).includes(m.id)) { WB.toast('该草稿正在执行任务，请收尾后删除'); return; }
+      if (!confirm('删除制作草稿「' + m.title + '」及其语音和素材？删除后不可恢复')) return;
+      try {
+        await this.flushMake(m.id); await WB.api.del('/video-makes/' + m.id);
+        this.makes = this.makes.filter((r) => r.id !== m.id); if (this.cur === m.id) this.cur = null;
+      } catch (e) { this.makeErr = this.makeError(e); }
+    },
+    makePayload(m) {
+      const p = { id: m.id, title: m.title, video: m.video, voice: { profile_id: m.voice.profile_id, voice: m.voice.voice } };
+      if (!m.narration.locked) p.narration = { text: m.narration.text, ref_text: m.narration.ref_text, source: m.narration.source, style_id: m.narration.style_id };
+      if (!m.script_meta.locked && m.script) p.script = m.script;
+      return JSON.parse(JSON.stringify(p));
+    },
+    saveMake(m = this.curMake) {
+      if (!m || !m.id) return;
+      this.saveVersions[m.id] = (this.saveVersions[m.id] || 0) + 1;
+      this.savePending[m.id] = { body: this.makePayload(m), version: this.saveVersions[m.id] };
+      this.saveState[m.id] = 'pending'; clearTimeout(this.saveTimers[m.id]);
+      this.saveTimers[m.id] = setTimeout(() => this.flushMake(m.id).catch(() => {}), 2000);
+    },
+    async flushMake(id = this.cur) {
+      if (!id) return;
+      clearTimeout(this.saveTimers[id]);
+      const pending = this.savePending[id];
+      if (!pending) return this.saveChains[id];
+      delete this.savePending[id];
+      const chain = (this.saveChains[id] || Promise.resolve()).catch(() => {}).then(async () => {
+        this.saveState[id] = 'saving';
+        try {
+          const d = await WB.api.post('/video-makes', pending.body);
+          const full = await WB.api.get('/video-makes/' + id);
+          if (this.saveVersions[id] === pending.version) { this.putMake(full.make || d.make); this.saveState[id] = 'saved'; }
+        } catch (e) {
+          if (!this.savePending[id] && this.saveVersions[id] === pending.version) this.savePending[id] = pending;
+          this.saveState[id] = 'error'; this.makeErr = '自动保存失败：' + this.makeError(e); throw e;
+        }
+      });
+      this.saveChains[id] = chain; return chain;
+    },
+    segBadge(stage, m = this.curMake) {
+      const badge = (cls, text) => ({ cls, text });
+      if (!m) return badge('', '未开始');
+      const beats = (m.script || {}).beats || [], items = (m.voice || {}).items || {};
+      const covered = beats.length && beats.every((b) => items[b.id]);
+      if (stage === 1) return m.narration.locked ? badge('green', '已定稿') : m.narration.text || m.narration.ref_text ? badge('blue', '编辑中') : badge('', '未开始');
+      if (stage === 2) return m.script_stale ? badge('yellow', '待刷新') : m.script_meta.locked ? badge('green', '已定稿') : m.script ? badge('blue', '编辑中') : badge('', '未开始');
+      if (stage === 3) return (m.voice_bad || []).length || (Object.keys(items).length && m.script_stale) ? badge('yellow', '待刷新') : covered ? badge('green', '已就绪') : Object.keys(items).length || m.voice.voice_key ? badge('blue', '编辑中') : badge('', '未开始');
+      if (m.status === 'rendering') return badge('blue', '制作中');
+      if (m.last_build && (m.script_stale || (m.voice_bad || []).length || m.status !== 'built')) return badge('yellow', '待刷新');
+      return m.status === 'built' || m.last_build ? badge('green', '已完成') : badge('', '未开始');
+    },
+    segColor(stage, m) { return { green: 'var(--green)', yellow: 'var(--yellow)', blue: 'var(--accent)' }[this.segBadge(stage, m).cls] || 'var(--text-mute)'; },
+    narrationInput() { this.curMake.narration.source = this.narTab === 'b' ? 'manual' : 'generated'; this.saveMake(); },
+    pickNarrationDraft() {
+      const d = this.drafts.find((d) => d.id === this.narDraftId);
+      if (d) { this.curMake.narration.ref_text = d.content || ''; this.saveMake(); }
+    },
+    readNarrationFile(ev) {
+      const file = ev.target.files && ev.target.files[0], id = this.cur; ev.target.value = '';
+      if (!file) return;
+      if (file.size > 200 * 1024 || !/\.(txt|md)$/i.test(file.name)) { WB.toast('仅支持 .txt/.md，文件不能超过 200KB'); return; }
+      const reader = new FileReader();
+      reader.onload = () => {
+        const m = this.makes.find((m) => m.id === id);
+        if (m && !m.narration.locked && !Object.values(this.makeJobIds).includes(id)) { m.narration.ref_text = String(reader.result || ''); this.saveMake(m); }
+      };
+      reader.onerror = () => WB.toast('文稿文件读取失败'); reader.readAsText(file);
+    },
+    async makeLock(stage, unlock = false) {
+      if (!this.curMake || this.makeBusy) return;
+      if (unlock && stage === 'narration' && !confirm('解锁重定稿后，下游脚本/语音将标记待刷新')) return;
+      this.makeActionBusy = true;
+      const key = stage === 'narration' ? 'narErr' : 'scriptErr', id = this.cur; this[key] = '';
+      try {
+        await this.flushMake(id);
+        await WB.api.post('/video-makes/' + id + '/' + (unlock ? 'unlock-' : 'lock-') + stage, {}); await this.fetchMake(id);
+      } catch (e) { this[key] = this.makeError(e); }
+      finally { this.makeActionBusy = false; }
+    },
+    async importMakeScript() {
+      const r = this.importScripts.find((r) => r.id === this.importId);
+      if (!r || this.makeBusy) return;
+      if (!confirm('导入会用脚本逐拍口播替换并定稿当前口播稿，继续？')) { this.importId = ''; return; }
+      this.makeActionBusy = true; this.scriptErr = '';
+      const id = this.cur, script = JSON.parse(JSON.stringify(r.script));
+      try {
+        await this.flushMake(id); await WB.api.post('/video-makes/' + id + '/unlock-narration', {});
+        await WB.api.post('/video-makes', { id, title: script.title || r.title,
+          narration: { text: script.beats.map((b) => b.narration || '').join(''), source: 'import', style_id: r.style_id || script.style_id || '' } });
+        await WB.api.post('/video-makes/' + id + '/lock-narration', {});
+        if (this.curMake.script_meta.locked) await WB.api.post('/video-makes/' + id + '/unlock-script', {});
+        await WB.api.post('/video-makes', { id, script });
+      } catch (e) { this.scriptErr = this.makeError(e); }
+      finally {
+        try { await this.fetchMake(id); } catch (e) { this.scriptErr = this.makeError(e); }
+        this.makeActionBusy = false;
       }
     },
+    changeBeatScreen(b, ev) { b.on_screen = ev.target.value.split(/[、,，]/).map((s) => s.trim()).filter(Boolean); this.saveMake(); },
+    splitMakeBeat(i) {
+      const b = this.makeBeats[i], n = this.beatCursors[b.id], text = b.narration || '';
+      if (!n || !text.slice(0, n).trim() || !text.slice(n).trim()) { WB.toast('先在该拍口播文字中点击拆分位置，两半均须非空'); return; }
+      let id = b.id + 'b'; while (this.makeBeats.some((b) => b.id === id)) id += 'b';
+      const next = { ...JSON.parse(JSON.stringify(b)), id, narration: text.slice(n) };
+      b.narration = text.slice(0, n); this.makeBeats.splice(i + 1, 0, next); this.afterBeatEdit();
+    },
+    mergeMakeBeat(i) {
+      if (i >= this.makeBeats.length - 1) return;
+      const b = this.makeBeats[i], next = this.makeBeats[i + 1];
+      b.narration += next.narration || ''; b.subtitle = (b.subtitle || '') + (next.subtitle || '');
+      b.on_screen = [...(b.on_screen || []), ...(next.on_screen || [])]; this.makeBeats.splice(i + 1, 1); this.afterBeatEdit();
+    },
+    removeMakeBeat(i) {
+      const b = this.makeBeats[i];
+      const warning = b.role === 'cta' && this.makeBeats.filter((b) => b.role === 'cta').length === 1 ? '\n删除后 CTA 唯一性失守' : '';
+      if (!confirm('删除第 ' + (i + 1) + ' 拍？' + warning)) return;
+      this.makeBeats.splice(i, 1); this.afterBeatEdit();
+    },
+    afterBeatEdit() {
+      const m = this.curMake;
+      m.video.beat_overrides = m.video.beat_overrides.filter((o) => this.makeBeats.some((b) => b.id === o.beat_id));
+      this.makeBeats.forEach((b) => { b.duration_est_s = Math.round(String(b.narration || '').replace(/\s+/g, '').length / 4.2); });
+      m.script.word_count = this.makeBeats.reduce((n, b) => n + String(b.narration || '').replace(/\s+/g, '').length, 0);
+      m.script.duration_est_s = this.makeBeats.reduce((n, b) => n + b.duration_est_s, 0); this.saveMake();
+    },
+    changeMakeProvider() { this.curMake.voice.voice = (this.makeVoices[0] || {}).id || ''; this.changeMakeVoice(); },
+    changeMakeVoice() { this.curMake.voice.items = {}; this.curMake.voice.voice_key = ''; this.curMake.voice_bad = []; this.saveMake(); },
+    voiceUrl(b) {
+      const m = this.curMake, item = m.voice.items[b.id] || {};
+      return '/wb-api/video-voice/' + encodeURIComponent(m.id) + '/' + encodeURIComponent(m.voice.voice_key) + '/' + encodeURIComponent(b.id) + '.mp3?v=' + encodeURIComponent(item.hash || '') + '-' + encodeURIComponent(m.updated_at || '');
+    },
+    adoptMakeJob(kind, job) {
+      const req = job.request || {};
+      if (job.running && req.make_id) this.makeJobIds[kind] = req.make_id;
+      if (kind === 'generate') {
+        this.narBusy = !!job.running && req.task === 'narration'; this.storyBusy = !!job.running && req.task === 'storyboard';
+        this.sgBusy = !!job.running && !this.narBusy && !this.storyBusy;
+      } else if (kind === 'voice') this.voiceBusy = !!job.running;
+      else if (kind === 'build') { this.buildBusy = !!job.running; this.buildPid = req.project_id || this.buildPid; this.buildMakeId = req.make_id || ''; }
+    },
+    async refreshMakeJob(job) {
+      await Promise.all([this.loadMakes(), this.loadVideos()]);
+      const id = (job.request || {}).make_id || (job.result || {}).make_id;
+      if (id && !this.savePending[id] && this.saveState[id] !== 'saving') {
+        try { await this.fetchMake(id); } catch (e) { this.makeErr = this.makeError(e); }
+      }
+    },
+    async runMakeJob(task, scope = 'all') {
+      if (this.makeBusy) return;
+      if (!this.curMake) await this.newMake(); if (!this.curMake) return;
+      const id = this.cur, kind = task === 'voice' ? 'voice' : task === 'build' ? 'build' : 'generate';
+      const errKey = { voice: 'voiceErr', build: 'buildErr', narration: 'narErr', storyboard: 'scriptErr' }[task];
+      this[errKey] = ''; this.makeActionBusy = true;
+      try {
+        await this.flushMake(id); const m = this.curMake;
+        const payload = task === 'narration' ? { make_id: id, brief: this.narBrief, ref_text: m.narration.ref_text, style_id: m.narration.style_id }
+          : task === 'voice' ? { make_id: id, provider_id: m.voice.profile_id, voice: m.voice.voice, scope }
+          : task === 'build' ? { make_id: id, mode: this.buildMode } : { make_id: id };
+        const d = await WB.api.post(task === 'build' ? '/video-build' : '/video-' + task + '/generate', payload);
+        if (task === 'build') { this.buildPid = d.project_id || ''; this.buildLogOpen = false; this.buildLogLines = []; this.buildWarnings = []; }
+        this.adoptMakeJob(kind, { running: true, request: { ...payload, task, project_id: d.project_id } }); this.pollJob(kind);
+      } catch (e) {
+        if (e.status === 409) {
+          try {
+            const jobs = await WB.api.get('/video-jobs'); this.adoptMakeJob(kind, jobs[kind] || {}); this.pollJob(kind);
+            WB.toast('任务槽已占用，已接入现有任务进度；本次请求未新建任务');
+          } catch (err) { this[errKey] = this.makeError(err); }
+        } else this[errKey] = this.makeError(e);
+      } finally { this.makeActionBusy = false; }
+    },
+    changeMakeAspect() {
+      const v = this.curMake.video;
+      if (v.aspect !== '16:9') { v.mode = 'unified'; if (v.layout === 'fast-cut') v.layout = 'auto'; if (v.theme === 'vox-collage') v.theme = 'terminal-dark'; }
+      this.saveMake();
+    },
+    beatOverride(b) { return this.curMake.video.beat_overrides.find((o) => o.beat_id === b.id) || { beat_id: b.id, method: 'template', kenburns: 'in', credit: '', start: 0, end: '' }; },
+    setBeatOverride(b, key, value) {
+      const list = this.curMake.video.beat_overrides; let o = list.find((o) => o.beat_id === b.id);
+      if (!o) { o = { ...this.beatOverride(b) }; list.push(o); }
+      if (key === 'method' && o.method !== value) o.asset_id = '';
+      if ((key === 'start' || key === 'end') && value === '') delete o[key]; else o[key] = value;
+      this.saveMake();
+    },
+    beatAssets(b) {
+      const video = this.beatOverride(b).method === 'upload_video';
+      return this.curMake.assets.filter((a) => a.beat_id === b.id && (video ? /^(mp4|webm)$/i : /^(png|jpg|jpeg|webp)$/i).test(String(a.ext).replace(/^\./, '')));
+    },
+    async uploadBeatAsset(b, ev) {
+      const file = ev.target.files && ev.target.files[0], id = this.cur, method = this.beatOverride(b).method; ev.target.value = '';
+      if (!file) return;
+      if (!(method === 'upload_video' ? /\.(mp4|webm)$/i : /\.(png|jpg|jpeg|webp)$/i).test(file.name)) { WB.toast('素材格式与当前方法不符'); return; }
+      const key = id + ':' + b.id; this.assetUploadBusy[key] = true;
+      try {
+        await this.flushMake(id);
+        const q = new URLSearchParams({ name: file.name, make_id: id, beat_id: b.id });
+        const resp = await fetch('/wb-api/video-assets?' + q, { method: 'PUT', body: file });
+        const d = await resp.json(); if (!resp.ok) throw d;
+        const m = this.makes.find((m) => m.id === id);
+        if (m) {
+          m.assets.push(d.asset); let o = m.video.beat_overrides.find((o) => o.beat_id === b.id);
+          if (!o) { o = { beat_id: b.id, method }; m.video.beat_overrides.push(o); }
+          o.asset_id = d.asset.asset_id; this.saveMake(m); await this.flushMake(id);
+        }
+      } catch (e) { this.makeErr = this.makeError(e); }
+      finally { this.assetUploadBusy[key] = false; }
+    },
+    async showMakeBuildLog() {
+      this.buildLogOpen = !this.buildLogOpen; if (!this.buildLogOpen) return;
+      if (!this.buildPid) { this.buildLogLines = ['(尚无日志：任务未启动)']; return; }
+      try {
+        const d = await WB.api.get('/video-builds/' + encodeURIComponent(this.buildPid) + '/log?n=200');
+        this.buildLogLines = d.tail || []; this.buildLogTruncated = !!d.truncated;
+      } catch (e) { this.buildLogLines = ['(日志读取失败: ' + this.makeError(e) + ')']; }
+    },
+
   },
   async mounted() {
     this.registerSubs();
     await Promise.all([
       this.loadPool(), this.loadScripts(), this.loadStyles(), this.loadDrafts(),
-      this.loadVideos(),
+      this.loadVideos(), this.loadMakePresets(), this.loadMakes(),
     ]);
-    this.loadChannels();
+    this.loadChannels(); this.loadAnPaths(); this.loadAnHistory();
     this.loadHot();
     try {                            // 已有采集在跑(如计划任务刚触发)则同步按钮态
       const st = await WB.api.get("/yt/status");
@@ -669,16 +888,19 @@ WB.pages.video = {
     try {
       const jobs = await WB.api.get('/video-jobs');
       if (jobs.analyze && jobs.analyze.running) { this.anBusy = true; this.pollJob('analyze'); }
-      if (jobs.generate && jobs.generate.running) { this.sgBusy = true; this.pollJob('generate'); }
-      if (jobs.build && jobs.build.running) {       // 刷新/重进页面恢复制作进度
-        this.mk.open = true; this.mk.step = 3; this.mk.busy = true;
-        this.mk.jobPid = (jobs.build.request && jobs.build.request.project_id) || '';
-        this.loadPresets();
-        this.pollJob('build');
+      for (const kind of ['generate', 'voice', 'build']) {
+        if (jobs[kind] && jobs[kind].running) {
+          this.adoptMakeJob(kind, jobs[kind]);
+          if (!this.cur && (jobs[kind].request || {}).make_id) await this.selectMake(jobs[kind].request.make_id);
+          this.pollJob(kind);
+        }
       }
     } catch (e) {}
   },
   unmounted() {
+    this.disposed = true;
+    Object.keys(this.savePending).forEach((id) => { this.flushMake(id).catch(() => {}); });
+    Object.values(this.saveTimers).forEach(clearTimeout);
     clearTimeout(this.collectPoll);
     Object.values(this.jobPolls).forEach(clearTimeout);
     if (WB.shell) WB.shell.setSubs([]);   // 离开视频页清空左菜单
@@ -707,15 +929,16 @@ WB.pages.video = {
           未配置解读模型(设置 → 翻译模型), 暂无 AI 简介/标签</div>
         <table class="tbl">
           <thead><tr>
-            <th>标题</th><th>类型</th><th>发布</th><th>播放</th><th>赞</th><th>评</th>
+            <th>标题</th><th>素材</th><th>频道</th><th>类型</th><th>发布</th><th>播放</th><th>赞</th><th>评</th>
             <th>内容简介</th><th>内容标签</th>
           </tr></thead>
           <tbody>
             <tr v-for="r in hotInsights" :key="r.video_id">
               <td style="max-width:200px"><a :href="r.url" target="_blank" rel="noopener"
-                   :title="r.channel_title + ' · ' + r.title">{{ cut(r.title, 20) }}</a>
-                <div><span v-if="poolIds[r.video_id]" class="act-done">已加入 ✓</span>
-                  <a v-else style="font-size:12px" @click.stop.prevent="addToPool(r)">＋加入素材池</a></div></td>
+                   :title="r.channel_title + ' · ' + r.title">{{ cut(r.title, 20) }}</a></td>
+              <td><span v-if="poolIds[r.video_id]" class="act-done">已加入 ✓</span>
+                <a v-else style="font-size:12px" @click.stop.prevent="addToPool(r)">＋加入素材池</a></td>
+              <td class="muted">{{ r.channel_title }}</td>
               <td><span class="badge" :class="r.is_short ? 'yellow' : ''">{{ r.is_short ? 'Shorts' : '长视频' }}</span></td>
               <td class="mono">{{ r.published_at }}</td>
               <td class="mono">{{ fmtNum(r.views) }}</td>
@@ -768,19 +991,19 @@ WB.pages.video = {
         <div v-if="hotErr" class="err-box">{{ hotErr.error || hotErr }}</div>
         <div v-else-if="!hotLoading && !hotItems.length" class="empty">
           {{ hotMeta && hotMeta.configured && enabledChannels.length
-            ? '窗口内暂无启用频道的视频 —— 点「立即采集」或等下一轮计划任务' : '添加并启用频道后, 这里是它们的热播榜' }}</div>
+            ? '该时间窗口内启用频道没有新发布视频 —— 数据已采集到 ' + (hotMeta.tracked || '—') + ' 条, 把时间范围切到「近 7 天/28 天」即可看到' : '添加并启用频道后, 这里是它们的热播榜' }}</div>
         <table v-else class="tbl">
           <thead><tr>
-            <th>视频</th><th>频道</th><th>类型</th><th>发布</th>
+            <th>视频</th><th>素材</th><th>频道</th><th>类型</th><th>发布</th>
             <th>播放</th><th>Δ24h</th><th>Δ7d</th><th>日速</th><th>赞</th><th>评</th>
           </tr></thead>
           <tbody>
             <tr v-for="r in hotItems" :key="r.video_id" :class="{stale: r.cold}">
               <td style="max-width:220px">
                 <a :href="r.url" target="_blank" rel="noopener"
-                   :title="r.channel_title + ' · ' + r.title">{{ cut(r.title, 20) }}</a>
-                <div><span v-if="poolIds[r.video_id]" class="act-done">已加入 ✓</span>
-                  <a v-else style="font-size:12px" @click.stop.prevent="addToPool(r)">＋加入素材池</a></div></td>
+                   :title="r.channel_title + ' · ' + r.title">{{ cut(r.title, 20) }}</a></td>
+              <td><span v-if="poolIds[r.video_id]" class="act-done">已加入 ✓</span>
+                <a v-else style="font-size:12px" @click.stop.prevent="addToPool(r)">＋加入素材池</a></td>
               <td class="muted">{{ r.channel_title }}</td>
               <td><span class="badge" :class="r.is_short ? 'yellow' : ''">{{ r.is_short ? 'Shorts' : '长视频' }}</span></td>
               <td class="mono" :title="'发布已 ' + r.age_h + 'h'">{{ r.published_at }}</td>
@@ -801,21 +1024,45 @@ WB.pages.video = {
     <div v-show="tab==='analysis'" class="two-col pool-right">
       <div>
         <div class="card">
-          <h3>分析对象</h3>
-          <div v-if="poolSel" style="margin-bottom:10px">
-            <strong>{{ poolSel.title }}</strong>
-            <div class="muted">{{ poolSel.channel_title || '未知频道' }} · {{ fmtDur(poolSel.duration_s) }} · {{ fmtNum(poolSel.views) }} 播放</div>
-          </div>
-          <div v-else class="muted" style="margin-bottom:10px">从左侧素材池选择一个视频，或直接粘贴链接</div>
-          <div class="form-row">
-            <input type="text" v-model="anUrl" style="min-width:420px;flex:1"
-                   placeholder="粘贴任意 watch / youtu.be / shorts 链接或 11 位视频 ID"
-                   @keyup.enter="startAnalyze(false)">
-            <button class="btn primary" :disabled="anBusy" @click="startAnalyze(false)">
-              {{ anBusy ? '分析中…' + (anProgress && anProgress.message ? ' ' + anProgress.message : '') : '开始分析' }}</button>
-            <button v-if="poolSel && (poolSel.analysis_status==='ok' || poolSel.analysis_status==='partial')"
-                    class="btn" :disabled="anBusy" @click="startAnalyze(true)">重新分析</button>
-          </div>
+          <h3>分析对象
+            <span class="radio-group" style="margin-left:10px">
+              <label><input type="radio" value="url" v-model="anMode"> YouTube 链接</label>
+              <label><input type="radio" value="file" v-model="anMode"> 本地文件</label>
+            </span></h3>
+          <template v-if="anMode==='file'">
+            <div class="form-row"><label>路径</label>
+              <select v-model.number="anPathIdx" @change="loadAnFiles" style="min-width:420px">
+                <option v-for="p in anPaths" :key="p.idx" :value="p.idx">{{ p.label }}: {{ p.root }}</option>
+              </select></div>
+            <div class="form-row"><label>视频文件</label>
+              <select v-model="anFile" style="min-width:420px">
+                <option value="" disabled>{{ anFiles.length ? '选择视频文件(' + anFiles.length + ')' : '该路径下暂无视频文件' }}</option>
+                <option v-for="f2 in anFiles" :key="f2.path" :value="f2.path">{{ f2.name }} ({{ fmtNum(f2.size) }} B)</option>
+              </select>
+              <button class="btn" :disabled="anLoadingFile" @click="loadAnFiles">{{ anLoadingFile ? '扫描中…' : '重新扫描' }}</button></div>
+            <div class="form-row">
+              <button class="btn primary" :disabled="anBusy || !anFile" @click="startAnalyzeLocal(false)">
+                {{ anBusy ? '分析中…' + (anProgress && anProgress.message ? ' ' + anProgress.message : '') : '开始分析' }}</button>
+              <button v-if="anFile" class="btn" :disabled="anBusy" @click="startAnalyzeLocal(true)">重新分析</button>
+            </div>
+            <p class="muted">本地文件先上传到 Gemini Files API(≤2GB), 转码完成后再看片分析, 大文件请耐心等待</p>
+          </template>
+          <template v-else>
+            <div v-if="poolSel" style="margin-bottom:10px">
+              <strong>{{ poolSel.title }}</strong>
+              <div class="muted">{{ poolSel.channel_title || '未知频道' }} · {{ fmtDur(poolSel.duration_s) }} · {{ fmtNum(poolSel.views) }} 播放</div>
+            </div>
+            <div v-else class="muted" style="margin-bottom:10px">从左侧素材池选择一个视频，或直接粘贴链接</div>
+            <div class="form-row">
+              <input type="text" v-model="anUrl" style="min-width:420px;flex:1"
+                     placeholder="粘贴任意 watch / youtu.be / shorts 链接或 11 位视频 ID"
+                     @keyup.enter="startAnalyze(false)">
+              <button class="btn primary" :disabled="anBusy" @click="startAnalyze(false)">
+                {{ anBusy ? '分析中…' + (anProgress && anProgress.message ? ' ' + anProgress.message : '') : '开始分析' }}</button>
+              <button v-if="poolSel && (poolSel.analysis_status==='ok' || poolSel.analysis_status==='partial')"
+                      class="btn" :disabled="anBusy" @click="startAnalyze(true)">重新分析</button>
+            </div>
+          </template>
           <div v-if="anErr" class="err-box">{{ anErr.error || anErr }}</div>
         </div>
 
@@ -931,6 +1178,19 @@ WB.pages.video = {
           <a style="font-size:12px" @click.stop.prevent="delPool(item)">移除</a>
         </div>
       </div>
+      <div class="card">
+        <h3>历史分析 <span class="badge blue" style="margin-left:6px">以往结果 · 点击载入</span>
+          <button class="btn" style="float:right" :disabled="anHistoryLoading" @click="loadAnHistory">
+            {{ anHistoryLoading ? '刷新中…' : '刷新' }}</button></h3>
+        <div v-if="!anHistory.length" class="empty">还没有分析记录 —— 分析完成的结果都会归档在这里</div>
+        <div v-for="h in anHistory" :key="h.key" class="list-item"
+             :class="{sel: anRec && anRec.key === h.key}" @click="openAnalysis(h.key)">
+          <div class="t">{{ cut(h.title, 26) }}
+            <span class="badge" :class="h.status==='ok' ? 'green' : h.status==='partial' ? 'yellow' : 'red'"
+                  style="float:right">{{ h.status }}</span></div>
+          <div class="s">{{ h.updated_at }} · {{ h.tier_used || '—' }}</div>
+        </div>
+      </div>
     </div>
 
     <!-- ═══ 子页3: 脚本生成 ═══ -->
@@ -951,7 +1211,7 @@ WB.pages.video = {
             <option v-for="d in drafts" :key="d.id" :value="d.id">{{ d.title }} · {{ d.updated_at }}</option></select>
           <span v-if="!drafts.length" class="muted">图文页还没有草稿</span></div>
         <div class="form-row"><label>脚本风格</label>
-          <select v-model="sg.styleId" style="min-width:280px"><option v-for="s in styles" :key="s.id" :value="s.id">{{ s.name }} · {{ s.target_s }}秒</option></select></div>
+          <select v-model="sg.styleId" style="min-width:280px"><option v-for="s in styles" :key="s.id" :value="s.id">{{ s.name }} · 约 {{ s.wc[0] }}–{{ s.wc[1] }} 字</option></select></div>
         <p v-if="selectedStyle" class="muted" style="margin:-4px 0 10px 98px">{{ selectedStyle.prompt }}</p>
         <div class="form-row"><label>参考分析</label>
           <select v-model="sg.analysisKey" style="min-width:360px"><option value="">不使用</option>
@@ -1023,16 +1283,173 @@ WB.pages.video = {
       </div>
     </div>
 
-    <!-- ═══ 子页4: 视频制作(项目列表 + 创建视频向导) ═══ -->
+    <!-- 四段视频制作 -->
     <div v-show="tab==='make'">
-      <div class="two-col">
-        <div class="card">
-          <h3>视频项目({{ videos.length }})
-            <span style="float:right">
-              <button class="btn primary" @click="openWizard">＋ 创建视频</button>
-            </span></h3>
-          <div v-if="!videos.length" class="muted" style="padding:12px 0">
-            暂无项目 —— 点右上「＋ 创建视频」从脚本一键出片，或 <code class="mono">python cli.py video build &lt;id&gt;</code></div>
+      <div v-if="makeErr || error" class="err-box" style="padding:12px">{{ makeErr || makeError(error) }}
+        <button class="btn" @click="cur && flushMake(cur).catch(()=>{})">重试保存</button></div>
+      <div v-if="narBusy || storyBusy || voiceBusy || buildBusy" class="notice" style="padding:10px">
+        <div v-if="narBusy">口播稿生成中 · {{ narProgress && narProgress.message || '准备中…' }}</div>
+        <div v-if="storyBusy">分镜生成中 · {{ storyProgress && storyProgress.message || '准备中…' }}</div>
+        <div v-if="voiceBusy">语音生成中 · {{ voiceProgress && voiceProgress.message || '准备中…' }}</div>
+        <div v-if="buildBusy">视频制作中 · {{ buildProgress && buildProgress.message || '准备中…' }}</div>
+      </div>
+      <div class="two-col" style="grid-template-columns:repeat(auto-fit,minmax(min(100%,360px),1fr));align-items:start">
+        <div style="min-width:0">
+          <div v-if="!curMake" class="card empty">从草稿箱载入，或点击「＋ 新建制作」开始</div>
+          <template v-else>
+            <div class="form-row"><input type="text" v-model="curMake.title" @input="saveMake()" :disabled="makeBusy" placeholder="制作标题" style="flex:1;min-width:0">
+              <span class="muted">{{ {pending:'2 秒后自动保存',saving:'保存中…',saved:'已保存',error:'保存失败'}[saveState[cur]] || '' }}</span></div>
+            <div class="card">
+              <h3>1 · 口播稿 <span class="badge" :class="segBadge(1).cls">{{ segBadge(1).text }}</span></h3>
+              <fieldset :disabled="makeBusy" style="border:0;min-width:0;padding:0">
+                <template v-if="!curMake.narration.locked">
+                  <div class="form-row radio-group">
+                    <label><input type="radio" value="a" v-model="narTab">A 智能生成</label>
+                    <label><input type="radio" value="b" v-model="narTab">B 直接输入</label></div>
+                  <template v-if="narTab==='a'">
+                    <textarea v-model="curMake.narration.ref_text" @input="saveMake()" rows="5" style="width:100%" placeholder="粘贴参考文，或上传 .txt/.md（≤200KB）"></textarea>
+                    <div class="form-row" style="margin-top:8px">
+                      <label class="btn" style="width:auto">上传参考文<input type="file" accept=".txt,.md" style="display:none" @change="readNarrationFile"></label>
+                      <select v-model="narDraftId" @change="pickNarrationDraft" style="max-width:100%"><option value="">从图文草稿选取</option>
+                        <option v-for="d in drafts" :key="d.id" :value="d.id">{{ d.title }}</option></select></div>
+                    <div class="form-row"><label>一句话简报</label><input type="text" v-model="narBrief" placeholder="这期视频讲什么" style="flex:1;min-width:0"></div>
+                    <div class="form-row"><label>风格</label><select v-model="curMake.narration.style_id" @change="saveMake()" style="max-width:100%">
+                      <option value="" disabled>请选择风格</option><option v-for="s in styles" :key="s.id" :value="s.id">{{ s.name }} · {{ s.wc ? s.wc.join('–') : '默认' }} 字</option></select></div>
+                    <button class="btn primary" :disabled="narBusy || storyBusy || sgBusy || !curMake.narration.style_id || !(narBrief.trim() || curMake.narration.ref_text.trim())" @click="runMakeJob('narration')">{{ narBusy ? '生成中…' : '生成口播稿' }}</button>
+                  </template>
+                </template>
+                <div class="muted" style="margin:10px 0 4px">正文</div>
+                <textarea v-model="curMake.narration.text" @input="narrationInput" :readonly="curMake.narration.locked" rows="10" style="width:100%" placeholder="在这里输入或修改口播稿"></textarea>
+                <p class="muted">{{ narrationWords }} 字 · 预估 {{ Math.round(narrationWords / 4.2) }} 秒</p>
+                <div v-if="curMake.narration.locked" style="margin-top:10px">
+                  <p class="muted mono">已定稿 hash {{ curMake.narration.hash }} · {{ curMake.narration.locked_at }}</p>
+                  <button class="btn" @click="makeLock('narration', true)">解锁改稿</button></div>
+                <button v-else class="btn primary" :disabled="narrationWords < 40" @click="makeLock('narration')">定稿</button>
+              </fieldset>
+              <div v-if="narErr" class="err-box" style="padding:12px">{{ narErr }}</div>
+            </div>
+            <div class="card">
+              <h3>2 · 视频脚本 <span class="badge" :class="segBadge(2).cls">{{ segBadge(2).text }}</span></h3>
+              <div v-if="!curMake.narration.locked" class="stub-wrap" style="padding:30px;text-align:center;background:var(--bg-hover);color:var(--text-mute)">先定稿口播稿</div>
+              <template v-else>
+                <div v-if="curMake.script_stale" class="notice">口播稿已重定稿，脚本与口播不一致——重新生成或手动对齐后再定稿</div>
+                <fieldset :disabled="makeBusy" style="border:0;min-width:0;padding:0">
+                  <div v-if="!curMake.script_meta.locked" class="form-row">
+                    <button class="btn primary" :disabled="narBusy || storyBusy || sgBusy" @click="runMakeJob('storyboard')">{{ storyBusy ? '分镜生成中…' : curMake.script ? '重新生成分镜脚本' : 'AI 生成分镜脚本' }}</button>
+                    <select v-model="importId" @change="importMakeScript" style="max-width:100%"><option value="">从脚本仓库导入</option>
+                      <option v-for="r in importScripts" :key="r.id" :value="r.id">{{ r.title }}</option></select></div>
+                  <div v-if="storyBusy" class="muted">{{ storyProgress && storyProgress.message || '准备中…' }}</div>
+                  <template v-if="curMake.script">
+                    <fieldset :disabled="curMake.script_meta.locked" style="border:0;min-width:0;padding:0">
+                      <div class="form-row"><label>脚本标题</label><input type="text" v-model="curMake.script.title" @input="curMake.title=curMake.script.title;saveMake()" style="flex:1;min-width:0"></div>
+                      <div class="muted">开场 Hook 变体</div>
+                      <label v-for="(h,i) in ((curMake.script.hook || {}).variants || []).slice(0,3)" :key="i" class="list-item" style="display:block">
+                        <input type="radio" :value="i" v-model="curMake.video.hook_index" @change="saveMake()"> {{ h.text || h }}</label>
+                      <p class="muted">口播只读，点击文字定位光标后可拆分；删除后的口播一致性在定稿时校验。</p>
+                      <div style="overflow-x:auto"><table class="tbl"><thead><tr><th>拍 / role</th><th>口播（只读）</th><th>字幕 / 屏幕要点 / 画面</th><th>操作</th></tr></thead>
+                        <tbody><tr v-for="(b,i) in makeBeats" :key="b.id">
+                          <td>{{ i+1 }} · {{ b.id }}<select v-model="b.role" @change="saveMake()" style="width:90px"><option v-for="r in ['hook','setup','move','gives','payoff','cta']" :key="r">{{ r }}</option></select></td>
+                          <td><textarea :value="b.narration" readonly rows="4" style="width:100%;min-width:130px" @click="beatCursors[b.id]=$event.target.selectionStart" @keyup="beatCursors[b.id]=$event.target.selectionStart" @select="beatCursors[b.id]=$event.target.selectionStart"></textarea></td>
+                          <td><input type="text" v-model="b.subtitle" @input="saveMake()" placeholder="字幕" style="width:100%;min-width:130px">
+                            <input type="text" :value="(b.on_screen || []).join('、')" @input="changeBeatScreen(b,$event)" placeholder="屏幕要点（顿号分隔）" style="width:100%">
+                            <input type="text" v-model="b.visual_hint" @input="saveMake()" placeholder="画面建议" style="width:100%"></td>
+                          <td><button class="btn" @click="splitMakeBeat(i)">拆分</button><button class="btn" :disabled="i===makeBeats.length-1" @click="mergeMakeBeat(i)">合并↓</button><button class="btn" @click="removeMakeBeat(i)">删除</button></td>
+                        </tr></tbody></table></div>
+                    </fieldset>
+                    <div v-if="curMake.script.warnings && curMake.script.warnings.length" class="notice"><div v-for="(w,i) in curMake.script.warnings" :key="i">{{ w }}</div></div>
+                    <div v-if="curMake.script_meta.locked" style="margin-top:10px"><p class="muted mono">已定稿 hash {{ curMake.script_meta.hash }} · {{ curMake.script_meta.locked_at }}</p>
+                      <button class="btn" @click="makeLock('script',true)">解锁</button></div>
+                    <button v-else class="btn primary" style="margin-top:10px" @click="makeLock('script')">定稿脚本</button>
+                  </template>
+                </fieldset>
+              </template>
+              <div v-if="scriptErr" class="err-box" style="padding:12px">{{ scriptErr }}</div>
+            </div>
+            <div class="card">
+              <h3>3 · 语音 <span class="badge" :class="segBadge(3).cls">{{ segBadge(3).text }}</span></h3>
+              <div v-if="!curMake.script_meta.locked" class="stub-wrap" style="padding:30px;text-align:center;background:var(--bg-hover);color:var(--text-mute)">先定稿视频脚本</div>
+              <template v-else>
+                <div v-if="curMake.voice_bad.length" class="notice">{{ curMake.voice_bad.length }} 拍语音与最新脚本不一致，需重生成（{{ curMake.voice_bad.map(id => {const i=makeBeats.findIndex(b=>b.id===id);return i>=0 ? '第 '+(i+1)+' 拍 ('+id+')' : id;}).join('、') }}）</div>
+                <fieldset :disabled="makeBusy" style="border:0;min-width:0;padding:0">
+                  <div class="form-row"><label>供应商</label><select v-model="curMake.voice.profile_id" @change="changeMakeProvider"><option value="" disabled>请选择</option>
+                    <option v-for="p in ttsProviders" :key="p.id" :value="p.id">{{ p.name }} · {{ p.engine }}</option></select></div>
+                  <div class="form-row"><label>音色</label><select v-model="curMake.voice.voice" @change="changeMakeVoice"><option value="" disabled>请选择音色</option>
+                    <option v-for="v in makeVoices" :key="v.id" :value="v.id">{{ v.name }}</option></select></div>
+                  <p class="muted">换音色=全新合成；旧音色文件保留，切回即复用</p>
+                  <p v-if="!ttsProviders.length" class="notice">请到 <a href="#/settings">设置 → 语音合成</a> 启用供应商和音色</p>
+                  <button class="btn primary" :disabled="voiceBusy || !makeVoices.some(v=>v.id===curMake.voice.voice) || curMake.script_stale" @click="runMakeJob('voice')">{{ voiceBusy ? '生成中…' : '生成语音稿' }}</button>
+                </fieldset>
+                <p v-if="voiceBusy" class="muted">{{ voiceProgress && voiceProgress.message || '准备中…' }}</p>
+                <div v-for="(b,i) in makeBeats" :key="b.id" style="padding:8px 0;border-bottom:1px solid var(--border)" :style="curMake.voice_bad.includes(b.id) ? {background:'color-mix(in oklch,var(--yellow) 12%,transparent)'} : {}">
+                  <div>{{ i+1 }} · {{ cut(b.narration,20) }} <span class="muted">{{ curMake.voice.items[b.id] ? curMake.voice.items[b.id].duration_s + ' 秒' : '待合成' }}</span></div>
+                  <div class="form-row" style="margin:4px 0"><audio v-if="curMake.voice.items[b.id] && curMake.voice.voice_key" controls preload="none" :src="voiceUrl(b)" style="max-width:100%;height:34px"></audio>
+                    <button class="btn" :disabled="makeBusy || voiceBusy || curMake.script_stale || !makeVoices.some(v=>v.id===curMake.voice.voice)" @click="runMakeJob('voice',b.id)">重生成</button></div>
+                </div>
+              </template>
+              <div v-if="voiceErr" class="err-box" style="padding:12px">{{ voiceErr }}</div>
+            </div>
+            <div class="card">
+              <h3>4 · 视频 <span class="badge" :class="segBadge(4).cls">{{ segBadge(4).text }}</span></h3>
+              <p v-if="!makeVoiceReady" class="notice">语音尚未就绪，可先定稿脚本并制作无声预览</p>
+              <fieldset :disabled="makeBusy" style="border:0;min-width:0;padding:0">
+                <div class="form-row"><label>语音稿</label><select disabled style="max-width:100%"><option>{{ curMake.voice.voice_key || '尚无语音稿' }}</option></select></div>
+                <div class="form-row"><label>画幅</label><select v-model="curMake.video.aspect" @change="changeMakeAspect"><option v-for="a in (presets && presets.aspects) || []" :key="a.id" :value="a.id">{{ a.label }} {{ a.dims.join('×') }}</option></select></div>
+                <div class="form-row"><label>帧率</label><div class="radio-group"><label v-for="fps in [30,60]" :key="fps"><input type="radio" :value="fps" v-model="curMake.video.fps" @change="saveMake()">{{ fps }} fps</label></div></div>
+                <div class="form-row"><label>制作方式</label><div class="radio-group">
+                  <label><input type="radio" value="unified" v-model="curMake.video.mode" @change="saveMake()">统一生成</label>
+                  <label><input type="radio" value="edit" v-model="curMake.video.mode" @change="saveMake()" :disabled="curMake.video.aspect!=='16:9'">编辑生成</label></div>
+                  <span v-if="curMake.video.aspect!=='16:9'" class="muted">编辑生成仅支持 16:9</span></div>
+                <template v-if="curMake.video.mode==='unified'">
+                  <div class="form-row"><label>视觉风格</label><select v-model="curMake.video.theme" @change="saveMake()"><option v-for="t in (presets && presets.themes) || []" :key="t.id" :value="t.id" :disabled="t.aspect_limit && t.aspect_limit!==curMake.video.aspect">{{ t.name }}{{ t.aspect_limit && t.aspect_limit!==curMake.video.aspect ? '（仅 '+t.aspect_limit+'）' : '' }}</option></select>
+                    <span v-if="makeTheme" style="display:inline-flex;gap:5px"><span v-for="(color,i) in makeTheme.swatch" :key="i" :style="{backgroundColor:color}" style="display:inline-block;width:14px;height:14px;border-radius:50%;border:1px solid var(--border)"></span></span></div>
+                  <div class="form-row"><label>编排策略</label><select v-model="curMake.video.layout" @change="saveMake()"><option v-for="l in (presets && presets.layouts) || []" :key="l.id" :value="l.id" :disabled="l.id==='fast-cut' && curMake.video.aspect!=='16:9'">{{ l.name }}{{ l.id==='fast-cut' && curMake.video.aspect!=='16:9' ? '（仅 16:9）' : '' }}</option></select></div>
+                  <div class="form-row"><label>画面编排</label><div class="radio-group"><label><input type="radio" value="llm" v-model="curMake.video.enrich" @change="saveMake()" :disabled="!presets || !presets.llm_ready">AI 编排</label>
+                    <label><input type="radio" value="plain" v-model="curMake.video.enrich" @change="saveMake()">简洁</label></div>
+                    <span v-if="!presets || !presets.llm_ready" class="muted">AI 编排需先在设置页配置翻译模型</span></div>
+                  <div v-if="curMake.video.theme==='vox-collage'" class="notice">纸拼贴档案（VOX）：每个场景 AI 生成一张纸拼贴海报（约 40 秒/张，走 Ark 套餐额度，失败自动回退无图版式）。
+                    {{ presets && presets.collage_ready===false ? '⚠ 未检测到 arkcli 命令，将全部回退无图版式' : '' }} 建议搭配「VOX 纪录片」脚本风格 + 云扬音色。</div>
+                </template>
+                <div v-else style="overflow-x:auto"><table class="tbl"><thead><tr><th>拍</th><th>生成方法</th><th>素材 / 参数</th></tr></thead><tbody>
+                  <tr v-for="(b,i) in makeBeats" :key="b.id"><td>{{ i+1 }} · {{ b.id }}</td>
+                    <td><select :value="beatOverride(b).method" @change="setBeatOverride(b,'method',$event.target.value)">
+                      <option value="template">模板动画</option><option value="ai_image">AI 生图</option><option value="upload_image">上传图片</option><option value="upload_video">上传视频</option></select></td>
+                    <td>
+                      <template v-if="beatOverride(b).method.startsWith('upload_')">
+                        <select :value="beatOverride(b).asset_id || ''" @change="setBeatOverride(b,'asset_id',$event.target.value)" style="max-width:220px"><option value="">选择该拍素材</option><option v-for="a in beatAssets(b)" :key="a.asset_id" :value="a.asset_id">{{ a.name }}</option></select>
+                        <label class="btn">{{ assetUploadBusy[cur+':'+b.id] ? '上传中…' : '上传' }}<input type="file" style="display:none" :accept="beatOverride(b).method==='upload_video' ? '.mp4,.webm' : '.png,.jpg,.jpeg,.webp'" @change="uploadBeatAsset(b,$event)"></label>
+                      </template>
+                      <input v-if="beatOverride(b).method==='ai_image'" type="text" :value="beatOverride(b).prompt || ''" @input="setBeatOverride(b,'prompt',$event.target.value)" :placeholder="(b.visual_hint || '')+' · 纸质拼贴、剪报纹理、档案风格，无文字'" style="width:100%;min-width:180px">
+                      <details style="margin-top:8px"><summary>每拍参数</summary>
+                        <div class="form-row"><label>镜头运动</label><select :value="beatOverride(b).kenburns || 'in'" @change="setBeatOverride(b,'kenburns',$event.target.value)"><option value="in">推近</option><option value="out">拉远</option><option value="left">向左</option><option value="right">向右</option></select></div>
+                        <div class="form-row"><label>署名</label><input type="text" :value="beatOverride(b).credit || ''" @input="setBeatOverride(b,'credit',$event.target.value)" style="width:160px"></div>
+                        <div class="form-row"><label>起止（秒）</label><input type="number" min="0" step="0.1" :value="beatOverride(b).start" @input="setBeatOverride(b,'start',$event.target.value==='' ? '' : Number($event.target.value))" style="width:75px" aria-label="开始秒数">—<input type="number" min="0" step="0.1" :value="beatOverride(b).end" @input="setBeatOverride(b,'end',$event.target.value==='' ? '' : Number($event.target.value))" style="width:75px" aria-label="结束秒数"></div>
+                      </details>
+                    </td></tr></tbody></table></div>
+                <div class="form-row" style="margin-top:12px"><label>出片模式</label><div class="radio-group"><label><input type="radio" value="build" v-model="buildMode">正式成片</label><label><input type="radio" value="estimate" v-model="buildMode">无声预览</label></div></div>
+                <button class="btn primary" :disabled="buildBusy || !curMake.script_meta.locked || curMake.script_stale || (buildMode==='build' && !makeVoiceReady)" @click="runMakeJob('build')">开始制作</button>
+              </fieldset>
+              <div v-if="buildBusy || curMake.status==='rendering'" style="margin-top:12px">
+                <div style="display:flex;justify-content:space-between"><span>{{ buildProgress && buildProgress.message || '正在恢复制作进度…' }}</span><span>{{ buildProgress && buildProgress.pct || 0 }}%</span></div>
+                <span class="bar-track"><span class="bar-fill" :style="{width:Math.max(0,Math.min(100,Number(buildProgress && buildProgress.pct)||0))+'%'}"></span></span>
+                <p class="muted">{{ buildPid }} · {{ buildProgress && buildProgress.stage || 'queued' }}</p></div>
+              <div v-if="buildErr" class="err-box" style="padding:12px">{{ buildErr }}<div>
+                <button class="btn" @click="showMakeBuildLog">{{ buildLogOpen ? '收起日志' : '查看日志' }}</button>
+                <button class="btn primary" :disabled="makeBusy || buildBusy || !curMake.script_meta.locked || curMake.script_stale || (buildMode==='build' && !makeVoiceReady)" @click="runMakeJob('build')">重试</button></div></div>
+              <div v-if="buildLogOpen" style="max-height:260px;overflow:auto;margin-top:8px"><p v-if="buildLogTruncated" class="muted">仅显示末尾 {{ buildLogLines.length }} 行</p><pre class="mono" style="white-space:pre-wrap">{{ buildLogLines.join('\\n') }}</pre></div>
+            </div>
+          </template>
+        </div>
+        <div style="position:sticky;top:64px;align-self:start;max-height:calc(100vh - 76px);overflow-y:auto;min-width:0">
+          <div class="card"><h3>草稿箱（{{ makes.length }}）<button class="btn primary" :disabled="makeActionBusy" @click="newMake">＋ 新建制作</button></h3>
+            <div v-if="!makes.length" class="muted">尚无制作草稿</div>
+            <div v-for="m in makes" :key="m.id" class="list-item" :class="{sel:cur===m.id}">
+              <div class="t"><span :title="m.title">{{ cut(m.title,18) }}</span><span style="display:inline-flex;gap:5px">
+                <span v-for="stage in [1,2,3,4]" :key="stage" :title="['口播','脚本','语音','视频'][stage-1]+'：'+segBadge(stage,m).text" :aria-label="['口播','脚本','语音','视频'][stage-1]+'：'+segBadge(stage,m).text" :style="{backgroundColor:segColor(stage,m)}" style="display:inline-block;width:8px;height:8px;border-radius:50%"></span></span></div>
+              <div class="s">{{ m.updated_at }}</div><div class="form-row" style="gap:6px;margin:6px 0 0">
+                <button class="btn" :disabled="makeActionBusy" @click="selectMake(m.id)">载入</button><button class="btn" :disabled="makeActionBusy || Object.values(makeJobIds).includes(m.id)" @click="duplicateMake(m)">另存副本</button><button class="btn" :disabled="makeActionBusy || Object.values(makeJobIds).includes(m.id)" @click="deleteMake(m)">删除</button></div></div>
+          </div>
+          <div class="card"><h3>视频项目（{{ videos.length }}）<button class="btn" @click="loadVideos">刷新</button></h3>
+            <div v-if="!videos.length" class="muted">暂无视频项目</div>
           <div v-for="v in videos" :key="v.id" class="list-item" :class="{sel: sel === v}" @click="sel = v">
             <div class="t">{{ v.title }}
               <span class="badge" :class="gateClass(v.status)" style="float:right">{{ gateText(v.status) }}</span></div>
@@ -1040,188 +1457,21 @@ WB.pages.video = {
               <span v-if="v.mp4.length"> · {{ v.mp4.length }} 个 mp4</span>
               <a style="font-size:12px;float:right" @click.stop.prevent="delVideo(v)">删除</a></div>
           </div>
+          </div>
         </div>
-        <div>
-          <!-- ═══ 创建视频向导(卡内三步) ═══ -->
-          <div class="card" v-if="mk.open">
-            <h3>创建视频 · 第 {{ mk.step }} / 3 步
-              <span style="float:right"><a @click="closeWizard">收起</a></span></h3>
-
-            <!-- Step 1: 文稿来源 -->
-            <template v-if="mk.step===1">
-              <div class="form-row"><label>文稿来源</label><div class="radio-group">
-                <label><input type="radio" value="repo" v-model="mk.source"> 脚本仓库</label>
-                <label><input type="radio" value="paste" v-model="mk.source"> 粘贴文稿</label>
-                <label><input type="radio" value="upload" v-model="mk.source"> 上传文件</label>
-              </div></div>
-
-              <template v-if="mk.source==='repo'">
-                <div class="form-row"><label>选择脚本</label>
-                  <select v-model="mk.repoId" style="min-width:340px"><option value="">请选择</option>
-                    <option v-for="r in mkRepoScripts" :key="r.id" :value="r.id">{{ cut(r.title, 24) }} · {{ r.updated_at }}</option></select>
-                  <span v-if="!mkRepoScripts.length" class="muted">仓库还没有成稿 —— 先到【脚本生成】生成并保存</span></div>
-                <table class="tbl" v-if="mkRepoScript" style="margin:6px 0 10px">
-                  <thead><tr><th>段落</th><th>口播</th></tr></thead>
-                  <tbody><tr v-for="b in mkRepoScript.beats" :key="b.id">
-                    <td><span class="badge" :class="b.role==='hook'||b.role==='payoff' ? 'yellow' : 'blue'">{{ b.role }}</span></td>
-                    <td>{{ b.narration }}</td></tr></tbody></table>
-                <div v-if="mkRepoScript">
-                  <button class="btn primary" @click="wizardToStep2">用这个脚本制作 →</button></div>
-              </template>
-
-              <template v-else>
-                <div v-if="mk.source==='upload'" class="form-row"><label>上传文件</label>
-                  <input type="file" accept=".txt,.md" @change="wizardFilePicked">
-                  <span v-if="mk.fileName" class="muted">{{ mk.fileName }}（已读入下方文本框）</span></div>
-                <div class="form-row" style="align-items:flex-start"><label>文稿内容</label>
-                  <textarea v-model="mk.pasted" rows="6" style="flex:1"
-                            placeholder="粘贴文章全文（或上传 .txt/.md，≤200KB）"></textarea></div>
-                <div class="form-row"><label>脚本风格</label>
-                  <select v-model="mk.styleId" style="min-width:260px"><option v-for="s in styles" :key="s.id" :value="s.id">{{ s.name }} · {{ s.target_s }}秒</option></select>
-                  <button class="btn" :disabled="sgBusy || !mk.pasted.trim()" @click="wizardGenerate">
-                    {{ sgBusy ? '生成中…' + (sgProgress && sgProgress.message ? ' ' + sgProgress.message : '') : '生成口播脚本' }}</button></div>
-              </template>
-
-              <!-- 脚本快照预览 + 换选 hook 变体 -->
-              <template v-if="mk.script">
-                <h3 style="margin-top:14px">{{ mk.script.title }}
-                  <span class="muted" style="font-weight:400;margin-left:8px">{{ mk.script.word_count }} 字 · {{ mk.script.duration_est_s }} 秒</span></h3>
-                <div v-if="mk.script.hook && mk.script.hook.variants && mk.script.hook.variants.length">
-                  <div class="muted" style="margin:4px 0">开场钩子（点选一条）：</div>
-                  <div v-for="(v,i) in mk.script.hook.variants" :key="i"
-                       class="list-item" :class="{sel:mk.hookSel===i}" @click="mk.hookSel=i">● {{ v.text || v }}</div>
-                </div>
-                <table class="tbl" style="margin-top:8px"><thead><tr><th>段落</th><th>口播</th></tr></thead>
-                  <tbody><tr v-for="b in mk.script.beats" :key="b.id">
-                    <td><span class="badge" :class="b.role==='hook'||b.role==='payoff' ? 'yellow' : 'blue'">{{ b.role }}</span></td>
-                    <td>{{ b.narration }}</td></tr></tbody></table>
-                <div style="margin-top:10px">
-                  <button class="btn primary" @click="wizardToStep2">用这个脚本制作 →</button></div>
-              </template>
-            </template>
-
-            <!-- Step 2: 创作设置 -->
-            <template v-else-if="mk.step===2">
-              <div class="form-row"><label>标题</label>
-                <input type="text" v-model="mk.title" maxlength="30" style="flex:1;min-width:280px"
-                       placeholder="≤30 字，出片封面与项目名"></div>
-              <div class="form-row"><label>画幅</label>
-                <select v-model="mk.format" style="width:auto">
-                  <option value="horizontal">横版 1920×1080</option>
-                  <option value="vertical">竖版 1080×1920</option></select>
-                <span v-if="mk.format==='vertical'" class="badge yellow">将按 1080×1920 渲染</span></div>
-              <div class="form-row"><label>配音</label>
-                <select v-model="mk.voice" style="min-width:280px">
-                  <optgroup label="Edge（免费）">
-                    <option v-for="v in mkVoiceGroups.edge" :key="v.id" :value="v.id">{{ v.name }}</option>
-                  </optgroup>
-                  <optgroup label="DashScope" v-if="mkVoiceGroups.dashscope.length">
-                    <option v-for="v in mkVoiceGroups.dashscope" :key="v.id" :value="v.id"
-                            :disabled="!mkDashOk"
-                            :title="mkDashOk ? '' : '未配置 DASHSCOPE_API_KEY'">{{ v.name }}{{ mkDashOk ? '' : '（未配 Key）' }}</option>
-                  </optgroup>
-                </select></div>
-              <div class="form-row"><label>画面编排</label><div class="radio-group">
-                <label><input type="radio" value="llm" v-model="mk.enrich" :disabled="!mkLlmReady">
-                  AI 编排{{ mkLlmReady ? '' : '（需先在设置页配置翻译模型）' }}</label>
-                <label><input type="radio" value="plain" v-model="mk.enrich"> 简洁版式</label></div></div>
-              <div class="form-row"><label>视觉风格包</label>
-                <select v-model="mk.stylePack" :disabled="mk.busy || mk.format==='vertical'" style="min-width:280px">
-                  <option v-for="p in (mk.presets && mk.presets.packs) || []" :key="p.id" :value="p.id">{{ p.name }}</option>
-                  <option v-if="!mk.presets || !mk.presets.packs || !mk.presets.packs.length" value="auto">AI 自动（LLM 按内容选型）</option>
-                </select>
-                <span v-if="mk.format==='vertical'" class="muted">竖版不支持风格包</span></div>
-              <div class="form-row"><label>出片模式</label><div class="radio-group">
-                <label><input type="radio" value="build" v-model="mk.mode"> 正式成片（TTS 配音 + 渲染）</label>
-                <label><input type="radio" value="estimate" v-model="mk.mode"> 无声预览（估时长快出）</label></div></div>
-              <div style="margin-top:10px">
-                <button class="btn" @click="mk.step=1">← 上一步</button>
-                <button class="btn primary" @click="mk.step=3">下一步 →</button></div>
-            </template>
-
-            <!-- Step 3: 确认 + 进度 -->
-            <template v-else>
-              <table class="tbl" v-if="mk.script"><tbody>
-                <tr><td style="width:90px" class="muted">标题</td><td>{{ mk.title || '（未命名）' }}</td></tr>
-                <tr><td class="muted">画幅</td><td>{{ mk.format==='vertical' ? '竖版 1080×1920' : '横版 1920×1080' }}</td></tr>
-                <tr><td class="muted">配音</td><td>{{ mk.voice }} · {{ mk.mode==='estimate' ? '无声预览' : 'TTS 配音' }}</td></tr>
-                <tr><td class="muted">画面编排</td><td>{{ mk.enrich==='llm' ? 'AI 编排' : '简洁版式' }}</td></tr>
-                <tr><td class="muted">字数</td><td>{{ mkWords }} 字</td></tr>
-                <tr><td class="muted">预估时长</td><td>约 {{ mkEstSeconds }} 秒（字数 ÷ 4.2 + 场景数 × 1.5）</td></tr>
-                <tr><td class="muted">场景数</td><td>{{ mkBeats.length }} 场</td></tr>
-              </tbody></table>
-              <h3 style="margin-top:14px">分镜轻编辑</h3>
-              <p class="muted">{{ mkWords }} 字 · 约 {{ mkEstSeconds }} 秒 · {{ mkBeats.length }} 场</p>
-              <div v-if="mkBeats.length && !mkBeats.some(b => b.role==='cta')" class="notice">脚本已无 CTA 场景，成片将缺少行动引导</div>
-              <div v-if="mkEmptyNarrs.length" class="notice">
-                <div v-for="n in mkEmptyNarrs" :key="n">场景 {{ n }} 口播为空</div></div>
-              <table class="tbl"><thead><tr><th>段落</th><th>口播</th><th>字幕</th><th>屏幕要点</th><th>时长</th><th>操作</th></tr></thead>
-                <tbody><tr v-for="(b,i) in mkBeats" :key="i">
-                  <td><span class="badge" :class="b.role==='hook'||b.role==='payoff' ? 'yellow' : 'blue'">{{ b.role }}</span></td>
-                  <td><textarea rows="2" v-model="b.narration" :disabled="mk.busy" style="width:100%;min-width:100px"></textarea></td>
-                  <td><textarea rows="2" v-model="b.subtitle" :disabled="mk.busy" style="width:100%;min-width:80px"></textarea></td>
-                  <td><input :value="(b.on_screen||[]).join('、')" @input="setOnScreen(b, $event)" :disabled="mk.busy" style="width:100%;min-width:80px"></td>
-                  <td class="mono">{{ b.duration_est_s }}s</td>
-                  <td><a v-if="!mk.busy" style="font-size:12px" @click="delBeat(i)">删除</a><span v-else class="muted">删除</span></td>
-                </tr></tbody></table>
-              <p class="muted" style="margin:8px 0">渲染约 1-5 分钟；期间请勿关闭工作台页面。</p>
-              <div v-if="!mk.busy && !mk.err">
-                <button class="btn" @click="mk.step=2">← 上一步</button>
-                <button class="btn primary" @click="startBuild">开始制作</button></div>
-              <div v-if="mk.busy" style="margin:10px 0">
-                <div style="display:flex;justify-content:space-between;margin-bottom:4px">
-                  <span>{{ mk.progress ? mk.progress.message : '准备中…' }}</span>
-                  <span class="mono">{{ mk.progress ? mk.progress.pct : 0 }}%</span></div>
-                <span class="bar-track"><span class="bar-fill"
-                      :style="{width: (mk.progress ? mk.progress.pct : 0) + '%'}"></span></span>
-                <div class="muted" style="margin-top:4px">阶段: {{ mk.progress ? mk.progress.stage : 'queued' }}</div>
-              </div>
-              <div v-if="mk.err" class="err-box" style="margin-top:10px">
-                {{ mk.err }}
-                <div style="margin-top:8px">
-                  <button class="btn" @click="loadBuildLog">{{ mk.logOpen ? '收起日志' : '查看日志' }}</button>
-                  <button class="btn primary" @click="retryBuild">重试</button></div></div>
-              <div v-if="mk.logOpen && mk.logLines.length"
-                   style="margin-top:8px;max-height:260px;overflow:auto;background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:8px">
-                <div v-if="mk.logTruncated" class="muted">（仅显示末尾 {{ mk.logLines.length }} 行）</div>
-                <pre class="mono" style="white-space:pre-wrap;margin:0"><code v-for="(l,i) in mk.logLines" :key="i">{{ l }}
-</code></pre></div>
-            </template>
-          </div>
-
-          <div class="card" v-else-if="!sel">
-            <h3>项目详情</h3>
-            <div class="muted">从左侧选择一个视频项目查看详情与预览</div>
-          </div>
-          <template v-else>
-            <div class="card">
-              <h3>{{ sel.title }}</h3>
-              <p class="muted" style="margin-bottom:10px">项目 {{ sel.id }} · 门禁状态: {{ gateText(sel.status) }}
-                <span v-if="sel.verify_mode==='estimate'" class="badge yellow">无声预览版</span></p>
-              <div v-if="mk.warn.length && sel && mk.jobPid && sel.id.indexOf(mk.jobPid)===0" class="notice">
-                <div v-for="(w,i) in mk.warn" :key="i">{{ w }}</div></div>
-              <div v-if="sel.verify_warnings && sel.verify_warnings.length" class="notice">
-                <strong>QA 警告</strong><div v-for="(w,i) in sel.verify_warnings" :key="i">{{ w }}</div></div>
-              <div v-if="sel.verify_errors && sel.verify_errors.length" class="err-box">
-                <div v-for="(e,i) in sel.verify_errors" :key="i">{{ e }}</div></div>
-              <video v-if="selMp4" :src="selMp4" controls preload="metadata" style="max-height:420px"></video>
-              <img v-else-if="selCover" :src="selCover" class="cover-thumb" style="max-width:280px">
-              <div v-else class="muted">尚无渲染产物(out/ 为空)</div>
-              <div v-if="sel.mp4.length > 1" class="muted" style="margin-top:6px">
-                产物: <span v-for="m in sel.mp4" class="mono" style="margin-right:8px">{{ m }}</span></div>
-            </div>
-            <div class="card">
-              <h3>操作</h3>
-              <div class="stub-wrap">
-                <button class="btn stub" disabled>投稿 B站/抖音</button>
-                <div class="stub-tip">
-                  重新出片: <code>python cli.py video build {{ sel.id }}</code><br>
-                  投稿(先草稿): <code>{{ pubCmd }}</code> <a style="font-size:12px" @click="copyPubCmd">复制</a>
-                </div>
-              </div>
-              <a style="font-size:12px" @click="delVideo(sel)">删除项目</a>
-            </div>
-          </template>
+      </div>
+      <div v-if="sel" role="presentation" @click.self="sel=null" @keydown.esc="sel=null" style="position:fixed;inset:0;background:rgba(0,0,0,.65);z-index:80;display:flex;align-items:center;justify-content:center;padding:24px">
+        <div class="card" role="dialog" aria-modal="true" aria-labelledby="video-project-title" tabindex="-1" style="width:min(860px,100%);max-height:90vh;overflow:auto">
+          <h3 id="video-project-title">{{ sel.title }}<button class="btn" autofocus @click="sel=null">关闭</button></h3>
+          <p class="muted">项目 {{ sel.id }} · 门禁状态：{{ gateText(sel.status) }} <span v-if="sel.verify_duration_s!=null" class="badge">成片 {{ Math.round(sel.verify_duration_s) }} 秒</span><span v-if="sel.verify_mode==='estimate'" class="badge yellow">无声预览版</span></p>
+          <div v-if="buildWarnings.length && buildPid && sel.id.indexOf(buildPid)===0" class="notice"><div v-for="(w,i) in buildWarnings" :key="i">{{ w }}</div></div>
+          <div v-if="sel.verify_warnings && sel.verify_warnings.length" class="notice"><strong>QA 警告</strong><div v-for="(w,i) in sel.verify_warnings" :key="i">{{ w }}</div></div>
+          <div v-if="sel.verify_errors && sel.verify_errors.length" class="err-box"><div v-for="(e,i) in sel.verify_errors" :key="i">{{ e }}</div></div>
+          <video v-if="selMp4" :src="selMp4" :key="selMp4" controls preload="metadata" style="max-height:420px"></video>
+          <img v-else-if="selCover" :src="selCover" class="cover-thumb" style="max-width:280px"><div v-else class="muted">尚无渲染产物(out/ 为空)</div>
+          <div v-if="sel.mp4.length>1" class="muted">产物：<span v-for="m in sel.mp4" :key="m" class="mono" style="margin-right:8px">{{ m }}</span></div>
+          <div class="stub-wrap" style="margin:12px 0"><button class="btn stub" disabled>投稿 B站/抖音</button><div class="stub-tip">投稿（先草稿）：<code style="white-space:pre-wrap;overflow-wrap:anywhere">{{ pubCmd }}</code><button class="btn" @click="copyPubCmd">复制</button></div></div>
+          <button class="btn" @click="delVideo(sel)">删除项目</button>
         </div>
       </div>
     </div>

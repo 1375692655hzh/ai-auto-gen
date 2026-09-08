@@ -83,6 +83,7 @@ WB.basket = {
     if (rows.some((r) => r.id === item.id)) { WB.toast("该条已在素材篮"); return; }
     rows.unshift({ id: item.id, time: item.time, source: item.source,
                    text: (item.title || item.text || "").slice(0, 200), url: item.url || "",
+                   body: (item.body || "").slice(0, 2000),
                    sel: true });
     localStorage.setItem(this.key, JSON.stringify(rows));
     WB.toast("已加入素材篮(图文页可用)");

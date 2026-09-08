@@ -62,6 +62,7 @@ WB.pages.article = {
       genResult: null, genTimer: null,
       genHistory: [], historyLoading: false, historyLoaded: false,
       calendarLoading: false, genDownloading: false, tplSuggestion: null,
+      manualForm: { show: false, title: "", text: "", time: "", source: "" },
       flows: [], template: "",
       editingId: "", editorTitle: "", editorContent: "",
       drafts: [], runs: [],
@@ -338,7 +339,8 @@ WB.pages.article = {
     /* 开始生成: 端点校验+spawn CLI(检索/行情/聚合/LLM 全在子进程), 前端 2s 轮询 */
     async startGen() {
       const items = this.materials.filter((m) => this.matChecked(m))
-        .map((m) => ({ id: m.id, time: m.time, source: m.source, text: m.text, url: m.url }));
+        .map((m) => ({ id: m.id, time: m.time, source: m.source, text: m.text, url: m.url,
+                       body: m.body || "" }));
       if (!items.length) { WB.toast("先勾选参与生成的素材"); return; }
       try {
         await WB.api.post("/gen-compose", { items, modules: this.onModules, ...this.genParams });
@@ -509,7 +511,8 @@ WB.pages.article = {
     /* ── 信息检索: 勾选素材 → 服务端三路回查(全文/同簇/同标的), 结果按素材折叠展示 ── */
     async runRetrieve() {
       const items = this.materials.filter((m) => this.matChecked(m))
-        .map((m) => ({ id: m.id, time: m.time, source: m.source, text: m.text, url: m.url }));
+        .map((m) => ({ id: m.id, time: m.time, source: m.source, text: m.text, url: m.url,
+                       body: m.body || "" }));
       if (!items.length) { WB.toast("先勾选要检索的素材"); return; }
       this.retrieving = true;
       try {
@@ -554,6 +557,31 @@ WB.pages.article = {
       return Math.floor(h / 24) + " 天前";
     },
     isStale(m) { return this.ageHours(m) > 48; },
+    /* ── 手动录入素材: 用户自己找到/粘贴的内容直接进素材池。
+       id = manual-+正文内容哈希(重复粘贴自动撞篮提示); 链接当场剥除(成稿零链接红线),
+       全文走 body 字段(篮存 200 字截断只针对 text 摘要, body 保 2000 字)。 ── */
+    _fnv(s) {
+      let h = 0x811c9dc5;
+      for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = (h * 0x01000193) >>> 0; }
+      return h.toString(36);
+    },
+    addManual() {
+      const f = this.manualForm;
+      const raw = (f.text || "").trim();
+      if (raw.length < 20) { WB.toast("正文至少 20 字"); return; }
+      const nLinks = (raw.match(/https?:\/\/\S+/g) || []).length;
+      const body = raw.replace(/https?:\/\/\S+/g, "").replace(/[ \t]+\n/g, "\n").trim().slice(0, 2000);
+      const id = "manual-" + this._fnv(body);
+      if (WB.basket.list().some((r) => r.id === id)) { WB.toast("该内容已在素材池(重复粘贴)"); return; }
+      const title = (f.title || "").trim() || body.split("\n")[0].slice(0, 30);
+      const t = f.time ? f.time.replace("T", " ")
+                       : new Date(Date.now() - new Date().getTimezoneOffset() * 6e4).toISOString().slice(0, 16).replace("T", " ");
+      WB.basket.add({ id, time: t, source: (f.source || "").trim() || "手动录入",
+                      text: (title + "\n" + body).slice(0, 200), url: "", body });
+      this.manualForm = { show: false, title: "", text: "", time: "", source: "" };
+      this.syncMaterials(); this.initBasketIds();
+      if (nLinks) WB.toast("已剥除 " + nLinks + " 个链接(成稿零链接)");
+    },
     moveModule(i, dir) {
       const j = i + dir;
       if (j < 0 || j >= this.modules.length) return;
@@ -875,10 +903,25 @@ WB.pages.article = {
           <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px">
             <button class="btn" :disabled="calendarLoading" @click="loadCalendar('calendar')">拉财经日历</button>
             <button class="btn" :disabled="calendarLoading" @click="loadCalendar('nasdaq_earnings')">拉美股财报日历</button>
+            <button class="btn" @click="manualForm.show = !manualForm.show">
+              {{ manualForm.show ? '收起录入' : '＋手动录入' }}</button>
+          </div>
+          <!-- 手动录入: 用户自己找到的信息(研报摘录/群聊截图文字/外文原文)直接进素材池 -->
+          <div v-if="manualForm.show" class="manual-form" style="border:1px solid var(--border);border-radius:8px;padding:8px;margin-bottom:8px;display:flex;flex-direction:column;gap:6px">
+            <input type="text" v-model="manualForm.title" maxlength="60"
+                   placeholder="标题(选填, 缺省取正文首行前30字)">
+            <textarea v-model="manualForm.text" rows="5" maxlength="2000"
+                      placeholder="粘贴正文(必填, 20-2000 字; 链接会被当场剥除, 出处请填下方来源标注)"></textarea>
+            <div style="display:flex;gap:6px;flex-wrap:wrap">
+              <input type="datetime-local" v-model="manualForm.time" title="发布时间(选填, 缺省=现在)" style="flex:1;min-width:150px">
+              <input type="text" v-model="manualForm.source" placeholder="来源标注(选填): 如 高盛研报 / 群聊 / 路透" style="flex:2;min-width:180px">
+            </div>
+            <div class="muted" style="font-size:12px">{{ (manualForm.text || '').length }} / 2000 字 · 手动素材由你担保事实性, LLM 不会虚构出处</div>
+            <button class="btn primary" :disabled="(manualForm.text || '').trim().length < 20" @click="addManual">加入素材池</button>
           </div>
           <input type="text" v-model="matQ" class="mat-search" placeholder="搜索素材(正文/来源)">
           <div v-if="!materials.length" class="muted">
-            空 —— 到「推荐信息」点「＋加入生成」, 或资讯页点「＋加入素材篮」</div>
+            空 —— 点上方「＋手动录入」粘贴自己的内容, 或到「推荐信息」点「＋加入生成」, 或资讯页点「＋加入素材篮」</div>
           <div v-else-if="!filteredMaterials.length" class="muted">无匹配 —— 换个关键词</div>
           <div class="mat-pool">
             <div v-for="m in filteredMaterials" :key="m.id" class="list-item"
@@ -890,7 +933,7 @@ WB.pages.article = {
                   <span>{{ m.text || '(无标题)' }}</span></label>
               </div>
               <div class="s"><span :title="m.time">{{ ageText(m) }}</span><span v-if="isStale(m)"> · 超48h</span>
-                · {{ m.source }}
+                · <span v-if="String(m.id).startsWith('manual-')" class="badge blue" title="手动录入素材">手</span>{{ m.source }}
                 <a style="float:right" @click.stop="removeMaterial(m.id)">移除</a></div>
               <div v-if="retrieveRes[m.id]" class="rv-block">
                 <a class="rv-toggle" @click="toggleRv(m.id)">

@@ -10,18 +10,21 @@ WB.pages.settings = {
            translate: { base_url: "", api_key: "", model: "" },
            youtube: { api_key: "" },
            gemini: { api_key: '', model: 'gemini-3.6-flash' },
+           analysis_paths: { paths: ["", "", "", ""] },
            compose: { base_url: "", api_key: "", model: "" },
            finnhub: { api_key: "" },
            market: { source_pref: "auto" },
            gen_defaults: { lang: "en", tier: "free", template: "catalyst-take" },
+           tts: { default: { provider_id: "edge", voice: "zh-CN-XiaoxiaoNeural" }, providers: [] },
            cloud: { endpoint: "", account: "", sync_enabled: false } },
       hasKey: false, keyTail: "", testResult: null, testing: false,
       tHasKey: false, tKeyTail: "",
       yHasKey: false, yKeyTail: "",
       gHasKey: false, gKeyTail: "",
-      cHasKey: false, cKeyTail: "",
+      cHasKey: false, cKeyTail: "", composeExtra: "",
       fHasKey: false, fKeyTail: "",
       llmTest: false, llmTestResult: null,
+      ttsRemoved: [], ttsTests: {}, ttsTesting: "",
       // 与 article.js genTpls 同步维护
       genTpls: [{ v: "catalyst-take", t: "事件快评 · 单票突发催化(默认)" },
                 { v: "earnings-print", t: "业绩拆解 · 财报/指引解读" },
@@ -47,11 +50,44 @@ WB.pages.settings = {
       this.tHasKey = d.translate.has_key; this.tKeyTail = d.translate.key_tail;
       this.yHasKey = (d.youtube || {}).has_key; this.yKeyTail = (d.youtube || {}).key_tail;
       this.gHasKey = (d.gemini || {}).has_key; this.gKeyTail = (d.gemini || {}).key_tail;
+      const ap = ((d.analysis_paths || {}).paths || []).slice(0, 4);
+      while (ap.length < 4) ap.push("");
+      this.s.analysis_paths = { paths: ap };
       this.cHasKey = (d.compose || {}).has_key; this.cKeyTail = (d.compose || {}).key_tail;
+      const ebl = (d.compose || {}).extra_body;
+      this.composeExtra = ebl && Object.keys(ebl).length ? JSON.stringify(ebl) : "";
       this.fHasKey = (d.finnhub || {}).has_key; this.fKeyTail = (d.finnhub || {}).key_tail;
+      const tts = d.tts || {};
+      this.s.tts = {
+        default: { provider_id: "edge", voice: "zh-CN-XiaoxiaoNeural", ...(tts.default || {}) },
+        providers: (tts.providers || []).map((p) => ({
+          id: p.id, name: p.name, engine: p.engine, enabled: !!p.enabled,
+          api_key: "", base_url: p.base_url || "",
+          voices: (p.voices || []).map((v) => ({ id: v.id, name: v.name })),
+          has_key: !!p.has_key, key_tail: p.key_tail || "", locked: true,
+        })),
+      };
+      this.ttsRemoved = [];
       this.applyTheme();
     },
     async save() {
+      let extraBody = {};
+      if ((this.composeExtra || "").trim()) {
+        try { extraBody = JSON.parse(this.composeExtra); }
+        catch (e) { WB.toast("厂商私有参数不是合法 JSON, 未保存"); return; }
+        if (!extraBody || typeof extraBody !== "object" || Array.isArray(extraBody)) {
+          WB.toast("厂商私有参数必须是 JSON 对象"); return;
+        }
+      }
+      const ids = [];
+      for (const p of this.s.tts.providers || []) {
+        if (!this.ttsIdOk(p.id)) { WB.toast("供应商 id 只能是字母数字下划线或短横线: " + (p.id || "(空)")); return; }
+        if (ids.includes(p.id)) { WB.toast("供应商 id 重复: " + p.id); return; }
+        ids.push(p.id);
+        if ((p.voices || []).some((v) => v.id && !this.ttsIdOk(v.id))) {
+          WB.toast(p.name + " 有非法音色 id"); return;
+        }
+      }
       this.saving = true;
       try {
         const d = await WB.api.put("/settings", {
@@ -63,12 +99,15 @@ WB.pages.settings = {
           youtube: { api_key: (this.s.youtube || {}).api_key || "" },
           gemini: { api_key: (this.s.gemini || {}).api_key || '',
                     model: (this.s.gemini || {}).model || 'gemini-3.6-flash' },
+          analysis_paths: { paths: (this.s.analysis_paths || {}).paths || ["", "", "", ""] },
           compose: { base_url: (this.s.compose || {}).base_url || "",
                      api_key: (this.s.compose || {}).api_key || "",
-                     model: (this.s.compose || {}).model || "" },
+                     model: (this.s.compose || {}).model || "",
+                     extra_body: extraBody },
           finnhub: { api_key: (this.s.finnhub || {}).api_key || "" },
           market: { ...this.s.market },
           gen_defaults: { ...this.s.gen_defaults },
+          tts: this.ttsPayload(),
         });
         this.s.source.api_key = "";                 // 不保留明文
         this.hasKey = d.source.has_key; this.keyTail = d.source.key_tail;
@@ -82,6 +121,7 @@ WB.pages.settings = {
         this.cHasKey = (d.compose || {}).has_key; this.cKeyTail = (d.compose || {}).key_tail;
         if (this.s.finnhub) this.s.finnhub.api_key = "";
         this.fHasKey = (d.finnhub || {}).has_key; this.fKeyTail = (d.finnhub || {}).key_tail;
+        this.applyTtsPublic(d.tts);
         this.applyTheme();
         WB.toast("设置已保存");
         this.$root.refreshHealth && this.$root.refreshHealth();
@@ -107,7 +147,12 @@ WB.pages.settings = {
     async testLlm() {
       this.llmTest = true; this.llmTestResult = null;
       try {
-        const saved = await WB.api.put("/settings", { compose: { ...this.s.compose } });
+        let eb = {};
+        if ((this.composeExtra || "").trim()) {
+          try { eb = JSON.parse(this.composeExtra); } catch (e) { eb = undefined; }
+          if (eb === undefined) { WB.toast("厂商私有参数不是合法 JSON"); this.llmTest = false; return; }
+        }
+        const saved = await WB.api.put("/settings", { compose: { ...this.s.compose, extra_body: eb } });
         this.s.compose.api_key = "";
         this.cHasKey = (saved.compose || {}).has_key;
         this.cKeyTail = (saved.compose || {}).key_tail;
@@ -116,6 +161,102 @@ WB.pages.settings = {
       } catch (e) {
         this.llmTestResult = { ok: false, text: e.error || "连接测试失败" };
       } finally { this.llmTest = false; }
+    },
+    ttsIdOk(v) { return /^[\w-]+$/.test(String(v || "")); },
+    engineVoices(engine) {
+      return engine === "dashscope"
+        ? [{ id: "longanlufeng", name: "陆锋 · 男声" }, { id: "longanlingxin", name: "灵欣 · 女声" }]
+        : [{ id: "zh-CN-XiaoxiaoNeural", name: "晓晓 · 女声" },
+           { id: "zh-CN-YunxiNeural", name: "云希 · 男声" },
+           { id: "zh-CN-YunyangNeural", name: "云扬 · 男声·新闻" }];
+    },
+    ttsDefaultVoices() {
+      const p = (this.s.tts.providers || []).find((p) => p.id === this.s.tts.default.provider_id);
+      return (p && p.voices) || [];
+    },
+    ttsPayload() {
+      return {
+        default: { provider_id: this.s.tts.default.provider_id || "",
+                   voice: this.s.tts.default.voice || "" },
+        providers: (this.s.tts.providers || []).map((p) => ({
+          id: p.id, name: p.name, engine: p.engine, enabled: !!p.enabled,
+          api_key: p.api_key || "", base_url: p.base_url || "",
+          voices: (p.voices || []).filter((v) => this.ttsIdOk(v.id))
+            .map((v) => ({ id: v.id, name: v.name || v.id })),
+        })),
+        remove_ids: this.ttsRemoved.slice(),
+      };
+    },
+    applyTtsPublic(tts) {
+      const pub = tts || {};
+      const byId = {};
+      (pub.providers || []).forEach((p) => { byId[p.id] = p; });
+      (this.s.tts.providers || []).forEach((p) => {
+        p.api_key = "";
+        p.locked = true;
+        const row = byId[p.id] || {};
+        p.has_key = !!row.has_key; p.key_tail = row.key_tail || "";
+      });
+      if (pub.default) this.s.tts.default = { ...this.s.tts.default, ...pub.default };
+      this.ttsRemoved = [];
+    },
+    addTtsProvider() {
+      const ids = new Set((this.s.tts.providers || []).map((p) => p.id));
+      let n = 1, id = "custom";
+      while (ids.has(id)) { n += 1; id = "custom-" + n; }
+      this.s.tts.providers.push({
+        id, name: "自定义供应商", engine: "edge", enabled: true,
+        api_key: "", base_url: "", voices: this.engineVoices("edge").map((v) => ({ ...v })),
+        has_key: false, key_tail: "", locked: false,
+      });
+      this.ttsRemoved = this.ttsRemoved.filter((x) => x !== id);
+    },
+    removeTtsProvider(p) {
+      if (!confirm("删除供应商「" + (p.name || p.id) + "」？已保存的 Key 会一并丢掉。")) return;
+      this.s.tts.providers = this.s.tts.providers.filter((x) => x.id !== p.id);
+      if (!this.ttsRemoved.includes(p.id)) this.ttsRemoved.push(p.id);
+      if (this.s.tts.default.provider_id === p.id) {
+        const next = this.s.tts.providers.find((x) => x.enabled) || this.s.tts.providers[0];
+        this.s.tts.default.provider_id = next ? next.id : "";
+        this.s.tts.default.voice = next && next.voices[0] ? next.voices[0].id : "";
+      }
+    },
+    onTtsEngine(p) {
+      p.voices = this.engineVoices(p.engine).map((v) => ({ ...v }));
+      if (this.s.tts.default.provider_id === p.id)
+        this.s.tts.default.voice = (p.voices[0] && p.voices[0].id) || "";
+    },
+    addTtsVoice(p) { p.voices.push({ id: "", name: "" }); },
+    removeTtsVoice(p, i) {
+      p.voices.splice(i, 1);
+      if (this.s.tts.default.provider_id === p.id
+          && !p.voices.some((v) => v.id === this.s.tts.default.voice))
+        this.s.tts.default.voice = (p.voices[0] && p.voices[0].id) || "";
+    },
+    onTtsDefaultProvider() {
+      const v = this.ttsDefaultVoices();
+      if (!v.some((x) => x.id === this.s.tts.default.voice))
+        this.s.tts.default.voice = (v[0] && v[0].id) || "";
+    },
+    async testTts(p) {
+      const voice = (this.s.tts.default.provider_id === p.id && this.s.tts.default.voice)
+        || ((p.voices || []).find((v) => this.ttsIdOk(v.id)) || {}).id;
+      if (!this.ttsIdOk(p.id) || !voice) { WB.toast("供应商 id 与至少一个音色都要填写"); return; }
+      this.saving = true;
+      try {
+        const saved = await WB.api.put("/settings", { tts: this.ttsPayload() });
+        this.applyTtsPublic(saved.tts);
+      } catch (e) { WB.toast("保存失败: " + e.error); this.saving = false; return; }
+      this.saving = false;
+      this.ttsTesting = p.id;
+      this.ttsTests = { ...this.ttsTests, [p.id]: { testing: true } };
+      try {
+        const d = await WB.api.post("/test-tts", { provider_id: p.id, voice });
+        this.ttsTests = { ...this.ttsTests, [p.id]: { ok: true, text: "连接正常 · " + voice, url: d.url + "?t=" + Date.now() } };
+      } catch (e) {
+        this.ttsTests = { ...this.ttsTests, [p.id]: { ok: false, text: e.error + (e.hint ? " — " + e.hint : "") } };
+      }
+      this.ttsTesting = "";
     },
     applyTheme() {
       WB.theme ? WB.theme.apply(this.s.ui.theme)
@@ -229,6 +370,10 @@ WB.pages.settings = {
       <div class="form-row"><label>模型</label>
         <input type="text" v-model="s.compose.model" placeholder="如 deepseek-v4-flash"
                style="width:220px"></div>
+      <div class="form-row"><label>私有参数</label>
+        <input type="text" v-model="composeExtra" style="width:420px"
+               placeholder='选填 JSON, 如智谱推理模型 {"thinking": {"type": "disabled"}} 防思考吃光字数'>
+        <span class="muted">原样并入请求体, 一般用不上</span></div>
       <p class="muted">未配置时「开始生成」报配置缺失, 不回落翻译链</p>
       <button class="btn" :disabled="llmTest || saving" @click="testLlm">{{ llmTest ? '测试中…' : '测试连接' }}</button>
       <div v-if="llmTestResult" class="test-result" :class="llmTestResult.ok ? 'ok' : 'fail'">
@@ -322,6 +467,90 @@ WB.pages.settings = {
       <div class="form-row"><label>模型</label>
         <input type="text" v-model="s.gemini.model" placeholder="gemini-3.6-flash" style="width:260px"></div>
       <p class="muted">仅存服务端打码回显</p>
+      <button class="btn primary" :disabled="saving" @click="save">保存设置</button>
+    </div>
+
+    <!-- 语音合成(视频制作配音, Edge 免费 / DashScope 可选, 可增删供应商) -->
+    <div class="card">
+      <h3>语音合成 <span class="muted">视频制作·配音 · 可配置多个供应商</span></h3>
+      <div class="key-guide">
+        <b>注册来源:</b> Edge TTS 免费免 Key;
+        DashScope 走
+        <a href="https://dashscope.console.aliyun.com/" target="_blank" rel="noopener">阿里云百炼</a>
+        → API-KEY(sk- 开头)。可添加多套同一引擎(例如两把 DashScope Key)。<br>
+        <b>说明:</b> 只服务视频制作「语音」段; 配置仅存本工作台。视频页只列出已启用且至少有一个音色的供应商。
+      </div>
+      <div class="form-row"><label>默认供应商</label>
+        <select v-model="s.tts.default.provider_id" @change="onTtsDefaultProvider" style="max-width:280px">
+          <option value="">未指定</option>
+          <option v-for="p in s.tts.providers" :key="p.id" :value="p.id">{{ p.name }} · {{ p.id }}</option>
+        </select></div>
+      <div class="form-row"><label>默认音色</label>
+        <select v-model="s.tts.default.voice" style="max-width:280px">
+          <option value="">未指定</option>
+          <option v-for="v in ttsDefaultVoices()" :key="v.id" :value="v.id">{{ v.name || v.id }}</option>
+        </select></div>
+      <div v-for="p in s.tts.providers" :key="p.id"
+           style="margin:12px 0;padding:10px;border:1px dashed var(--border);border-radius:8px">
+        <div class="form-row"><label>标识</label>
+          <input type="text" v-model="p.id" :readonly="p.locked" placeholder="edge / dashscope / custom"
+                 style="width:180px">
+          <span class="muted">{{ p.locked ? '已保存的标识不可改' : '保存后锁定' }}</span></div>
+        <div class="form-row"><label>显示名</label>
+          <input type="text" v-model="p.name" style="width:220px"></div>
+        <div class="form-row"><label>引擎</label>
+          <select v-model="p.engine" @change="onTtsEngine(p)">
+            <option value="edge">Edge TTS（免费）</option>
+            <option value="dashscope">DashScope（阿里云）</option>
+          </select>
+          <label><input type="checkbox" v-model="p.enabled"> 启用</label></div>
+        <div class="form-row"><label>API Key</label>
+          <input type="password" v-model="p.api_key"
+                 :placeholder="p.has_key ? '已配置(尾号 ' + p.key_tail + '), 留空保持不变' : (p.engine==='edge' ? 'Edge 可留空' : 'sk-...')"
+                 style="width:320px">
+          <span class="muted">仅存本机服务端, 不回显明文</span></div>
+        <div class="form-row" v-if="p.engine==='dashscope'"><label>接口地址</label>
+          <input type="text" v-model="p.base_url" placeholder="可留空, 默认官方地址" style="width:320px"></div>
+        <p class="muted" style="margin:6px 0 4px">音色清单</p>
+        <div v-for="(v,i) in p.voices" :key="i" class="form-row">
+          <label>音色 {{ i+1 }}</label>
+          <input type="text" v-model="v.id" placeholder="id, 如 zh-CN-XiaoxiaoNeural" style="width:220px">
+          <input type="text" v-model="v.name" placeholder="显示名" style="width:160px">
+          <button class="btn" @click="removeTtsVoice(p,i)">删除音色</button></div>
+        <div class="form-row">
+          <button class="btn" @click="addTtsVoice(p)">＋ 音色</button>
+          <button class="btn" :disabled="ttsTesting===p.id || saving" @click="testTts(p)">
+            {{ ttsTesting===p.id ? '测试中…' : '测试连接' }}</button>
+          <button class="btn" @click="removeTtsProvider(p)">删除供应商</button>
+        </div>
+        <div v-if="ttsTests[p.id]" class="test-result" :class="ttsTests[p.id].ok ? 'ok' : 'fail'">
+          {{ ttsTests[p.id].ok ? '✓ ' : '✗ ' }}{{ ttsTests[p.id].text }}</div>
+        <audio v-if="ttsTests[p.id] && ttsTests[p.id].url" :src="ttsTests[p.id].url" controls
+               style="display:block;margin-top:8px;max-width:100%;height:34px"></audio>
+      </div>
+      <div class="form-row">
+        <button class="btn" @click="addTtsProvider">＋ 添加供应商</button>
+        <button class="btn primary" :disabled="saving" @click="save">保存设置</button>
+      </div>
+    </div>
+
+    <!-- 视频分析路径(本地文件分析扫描根) -->
+    <div class="card">
+      <h3>视频分析路径 <span class="muted">视频工坊·本地文件分析 · 4 个扫描根</span></h3>
+      <div class="form-row"><label>路径 1</label>
+        <input type="text" v-model="s.analysis_paths.paths[0]" style="width:520px"
+               placeholder="如微信文件接收目录, 留空禁用"></div>
+      <div class="form-row"><label>路径 2</label>
+        <input type="text" v-model="s.analysis_paths.paths[1]" style="width:520px" placeholder="可选"></div>
+      <div class="form-row"><label>路径 3</label>
+        <input type="text" v-model="s.analysis_paths.paths[2]" style="width:520px" placeholder="可选"></div>
+      <div class="form-row"><label>路径 4</label>
+        <input type="text" v-model="s.analysis_paths.paths[3]" style="width:520px" placeholder="可选"></div>
+      <div class="key-guide">
+        <b>说明:</b> 视频工坊「分析视频」切到「本地文件」方式时, 递归扫描这些目录下的
+        视频文件(mp4/mov/mkv/webm/avi 等, 最多 200 个); 只允许分析这些目录内的文件,
+        目录外路径会被拒绝。留空 = 禁用该槽位。
+      </div>
       <button class="btn primary" :disabled="saving" @click="save">保存设置</button>
     </div>
 

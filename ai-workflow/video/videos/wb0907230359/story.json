@@ -1,0 +1,884 @@
+{
+	"meta": {
+		"title": "全球长债利率重估风暴",
+		"voice": "zh-CN-YunyangNeural",
+		"fps": 30,
+		"width": 1920,
+		"height": 1080,
+		"format": "horizontal",
+		"padSeconds": 0.5
+	},
+	"scenes": [
+		{
+			"id": "b1",
+			"template": "title",
+			"narration": "二零二六年八月十八日，三十年期美债收益率触及百分之五点三二。",
+			"caption": "二零二六年八月十八日 华盛顿 收益率触及百分之五点三二",
+			"data": {
+				"subtitle1": [
+					{
+						"t": "WASHINGTON 2026-08-18"
+					}
+				],
+				"subtitle2": [
+					{
+						"t": "US 30Y 5.32 PCT"
+					}
+				]
+			}
+		},
+		{
+			"id": "b2-s1",
+			"template": "event",
+			"narration": "美国联邦赤字接近二万亿美元。",
+			"caption": "美国联邦赤字接近二万亿美元。",
+			"data": {
+				"headline": [
+					{
+						"t": "US DEFICIT 2T"
+					}
+				],
+				"chips": [
+					"CORP ISSUANCE 145.2B",
+					"TERM PREMIUM 0.83 PCT"
+				]
+			}
+		},
+		{
+			"id": "b2-s2",
+			"template": "bars",
+			"narration": "年度利息支出达到一万一千七百亿美元。",
+			"caption": "年度利息支出达到一万一千七百亿美元。",
+			"data": {
+				"headline": [
+					{
+						"t": "赤字与发债推高期限溢价"
+					}
+				],
+				"bars": [
+					{
+						"name": "CORP ISSUANCE B",
+						"pct": 145.2
+					},
+					{
+						"name": "TERM PREMIUM  PCT",
+						"pct": 0.83
+					},
+					{
+						"name": "US DEFICIT T",
+						"pct": 2.0
+					}
+				]
+			}
+		},
+		{
+			"id": "b2-s3",
+			"template": "cards",
+			"narration": "八月高评级发行达到一千四百五十二亿美元。",
+			"caption": "八月高评级发行达到一千四百五十二亿美元。",
+			"data": {
+				"headline": [
+					{
+						"t": "赤字与发债推高期限溢价"
+					}
+				],
+				"cards": [
+					{
+						"icon": "◆",
+						"title": "TERM PREMIUM 0.83 PCT"
+					},
+					{
+						"icon": "◆",
+						"title": "US DEFICIT 2T"
+					},
+					{
+						"icon": "◆",
+						"title": "CORP ISSUANCE 145.2B"
+					}
+				]
+			}
+		},
+		{
+			"id": "b2-s4",
+			"template": "event",
+			"narration": "超过二零二零年八月纪录。",
+			"caption": "超过二零二零年八月纪录。",
+			"data": {
+				"headline": [
+					{
+						"t": "US DEFICIT 2T"
+					}
+				],
+				"chips": [
+					"CORP ISSUANCE 145.2B",
+					"TERM PREMIUM 0.83 PCT"
+				]
+			}
+		},
+		{
+			"id": "b2-s5",
+			"template": "bars",
+			"narration": "Alphabet单笔发行二百五十亿美元。",
+			"caption": "Alphabet单笔发行二百五十亿美元。",
+			"data": {
+				"headline": [
+					{
+						"t": "赤字与发债推高期限溢价"
+					}
+				],
+				"bars": [
+					{
+						"name": "CORP ISSUANCE B",
+						"pct": 145.2
+					},
+					{
+						"name": "TERM PREMIUM  PCT",
+						"pct": 0.83
+					},
+					{
+						"name": "US DEFICIT T",
+						"pct": 2.0
+					}
+				]
+			}
+		},
+		{
+			"id": "b2-s6",
+			"template": "cards",
+			"narration": "摩根大通预计二零二六年相关发行达到五千四百亿美元。",
+			"caption": "摩根大通预计二零二六年相关发行达到五千四百亿美元。",
+			"data": {
+				"headline": [
+					{
+						"t": "赤字与发债推高期限溢价"
+					}
+				],
+				"cards": [
+					{
+						"icon": "◆",
+						"title": "TERM PREMIUM 0.83 PCT"
+					},
+					{
+						"icon": "◆",
+						"title": "US DEFICIT 2T"
+					},
+					{
+						"icon": "◆",
+						"title": "CORP ISSUANCE 145.2B"
+					}
+				]
+			}
+		},
+		{
+			"id": "b2-s7",
+			"template": "event",
+			"narration": "期限溢价升至百分之零点八三。",
+			"caption": "期限溢价升至百分之零点八三。",
+			"data": {
+				"headline": [
+					{
+						"t": "US DEFICIT 2T"
+					}
+				],
+				"chips": [
+					"CORP ISSUANCE 145.2B",
+					"TERM PREMIUM 0.83 PCT"
+				]
+			}
+		},
+		{
+			"id": "b3-s1",
+			"template": "stacked",
+			"narration": "供给放量的同时。",
+			"caption": "供给放量的同时。",
+			"data": {
+				"headline": [
+					{
+						"t": "PENSION FUNDS EXIT"
+					}
+				],
+				"panels": [
+					{
+						"title": [
+							{
+								"t": "FED MINUTES JUNE"
+							}
+						],
+						"body": [
+							{
+								"t": "PRIVATE BUYERS RISE"
+							}
+						]
+					},
+					{
+						"title": [
+							{
+								"t": "PRIVATE BUYERS RISE"
+							}
+						],
+						"body": []
+					}
+				]
+			}
+		},
+		{
+			"id": "b3-s2",
+			"template": "bars",
+			"narration": "传统买家正在撤离。",
+			"caption": "传统买家正在撤离。",
+			"data": {
+				"headline": [
+					{
+						"t": "传统买家退场 结构性缺口形成"
+					}
+				],
+				"bars": [
+					{
+						"name": "FED MINUTES JUNE",
+						"pct": 50
+					},
+					{
+						"name": "PRIVATE BUYERS RISE",
+						"pct": 50
+					},
+					{
+						"name": "PENSION FUNDS EXIT",
+						"pct": 50
+					}
+				]
+			}
+		},
+		{
+			"id": "b3-s3",
+			"template": "compare",
+			"narration": "养老基金需求持续萎缩。",
+			"caption": "养老基金需求持续萎缩。",
+			"data": {
+				"headline": [
+					{
+						"t": "传统买家退场 结构性缺口形成"
+					}
+				],
+				"left": {
+					"title": [
+						{
+							"t": "PRIVATE BUYERS RISE"
+						}
+					],
+					"items": []
+				},
+				"right": {
+					"title": [
+						{
+							"t": "PENSION FUNDS EXIT"
+						}
+					],
+					"items": [
+						[
+							{
+								"t": "FED MINUTES JUNE"
+							}
+						]
+					]
+				}
+			}
+		},
+		{
+			"id": "b3-s4",
+			"template": "cards",
+			"narration": "制度转向固定缴款。",
+			"caption": "制度转向固定缴款。",
+			"data": {
+				"headline": [
+					{
+						"t": "传统买家退场 结构性缺口形成"
+					}
+				],
+				"cards": [
+					{
+						"icon": "◆",
+						"title": "PENSION FUNDS EXIT"
+					},
+					{
+						"icon": "◆",
+						"title": "FED MINUTES JUNE"
+					},
+					{
+						"icon": "◆",
+						"title": "PRIVATE BUYERS RISE"
+					}
+				]
+			}
+		},
+		{
+			"id": "b3-s5",
+			"template": "stacked",
+			"narration": "监管鼓励增配股票。",
+			"caption": "监管鼓励增配股票。",
+			"data": {
+				"headline": [
+					{
+						"t": "FED MINUTES JUNE"
+					}
+				],
+				"panels": [
+					{
+						"title": [
+							{
+								"t": "PRIVATE BUYERS RISE"
+							}
+						],
+						"body": [
+							{
+								"t": "PENSION FUNDS EXIT"
+							}
+						]
+					},
+					{
+						"title": [
+							{
+								"t": "PENSION FUNDS EXIT"
+							}
+						],
+						"body": []
+					}
+				]
+			}
+		},
+		{
+			"id": "b3-s6",
+			"template": "bars",
+			"narration": "美联储六月纪要显示。",
+			"caption": "美联储六月纪要显示。",
+			"data": {
+				"headline": [
+					{
+						"t": "传统买家退场 结构性缺口形成"
+					}
+				],
+				"bars": [
+					{
+						"name": "PRIVATE BUYERS RISE",
+						"pct": 50
+					},
+					{
+						"name": "PENSION FUNDS EXIT",
+						"pct": 50
+					},
+					{
+						"name": "FED MINUTES JUNE",
+						"pct": 50
+					}
+				]
+			}
+		},
+		{
+			"id": "b3-s7",
+			"template": "compare",
+			"narration": "官方机构占比下降。",
+			"caption": "官方机构占比下降。",
+			"data": {
+				"headline": [
+					{
+						"t": "传统买家退场 结构性缺口形成"
+					}
+				],
+				"left": {
+					"title": [
+						{
+							"t": "PENSION FUNDS EXIT"
+						}
+					],
+					"items": []
+				},
+				"right": {
+					"title": [
+						{
+							"t": "FED MINUTES JUNE"
+						}
+					],
+					"items": [
+						[
+							{
+								"t": "PRIVATE BUYERS RISE"
+							}
+						]
+					]
+				}
+			}
+		},
+		{
+			"id": "b3-s8",
+			"template": "cards",
+			"narration": "私人投资者占比上升。",
+			"caption": "私人投资者占比上升。",
+			"data": {
+				"headline": [
+					{
+						"t": "传统买家退场 结构性缺口形成"
+					}
+				],
+				"cards": [
+					{
+						"icon": "◆",
+						"title": "FED MINUTES JUNE"
+					},
+					{
+						"icon": "◆",
+						"title": "PRIVATE BUYERS RISE"
+					},
+					{
+						"icon": "◆",
+						"title": "PENSION FUNDS EXIT"
+					}
+				]
+			}
+		},
+		{
+			"id": "b3-s9",
+			"template": "stacked",
+			"narration": "这一转变推高三十年期期限溢价约九十个基点。",
+			"caption": "这一转变推高三十年期期限溢价约九十个基点。",
+			"data": {
+				"headline": [
+					{
+						"t": "PRIVATE BUYERS RISE"
+					}
+				],
+				"panels": [
+					{
+						"title": [
+							{
+								"t": "PENSION FUNDS EXIT"
+							}
+						],
+						"body": [
+							{
+								"t": "FED MINUTES JUNE"
+							}
+						]
+					},
+					{
+						"title": [
+							{
+								"t": "FED MINUTES JUNE"
+							}
+						],
+						"body": []
+					}
+				]
+			}
+		},
+		{
+			"id": "b4-s1",
+			"template": "rows",
+			"narration": "通胀忧虑重新抬头。",
+			"caption": "通胀忧虑重新抬头。",
+			"data": {
+				"headline": [
+					{
+						"t": "油价成为通胀定价核心变量"
+					}
+				],
+				"rows": [
+					{
+						"label": [
+							{
+								"t": "OIL CORRELATION 0.85"
+							}
+						],
+						"body": []
+					},
+					{
+						"label": [
+							{
+								"t": "REAL YIELD 2.44 PCT"
+							}
+						],
+						"body": []
+					},
+					{
+						"label": [
+							{
+								"t": "BEI 2.29 PCT"
+							}
+						],
+						"body": []
+					}
+				]
+			}
+		},
+		{
+			"id": "b4-s2",
+			"template": "checklist",
+			"narration": "原油与三十年期收益率相关性升至零点八五。",
+			"caption": "原油与三十年期收益率相关性升至零点八五。",
+			"data": {
+				"headline": [
+					{
+						"t": "油价成为通胀定价核心变量"
+					}
+				],
+				"items": [
+					{
+						"tag": "REAL YIELD 2.44 PCT",
+						"body": [
+							{
+								"t": "油价成为通胀定价核心变量"
+							}
+						]
+					},
+					{
+						"tag": "BEI 2.29 PCT",
+						"body": []
+					},
+					{
+						"tag": "OIL CORRELATION 0.85",
+						"body": []
+					}
+				]
+			}
+		},
+		{
+			"id": "b4-s3",
+			"template": "cards",
+			"narration": "七月二十三日前后相关性接近零。",
+			"caption": "七月二十三日前后相关性接近零。",
+			"data": {
+				"headline": [
+					{
+						"t": "油价成为通胀定价核心变量"
+					}
+				],
+				"cards": [
+					{
+						"icon": "◆",
+						"title": "BEI 2.29 PCT"
+					},
+					{
+						"icon": "◆",
+						"title": "OIL CORRELATION 0.85"
+					},
+					{
+						"icon": "◆",
+						"title": "REAL YIELD 2.44 PCT"
+					}
+				]
+			}
+		},
+		{
+			"id": "b4-s4",
+			"template": "bars",
+			"narration": "长期盈亏平衡通胀率保持稳定。",
+			"caption": "长期盈亏平衡通胀率保持稳定。",
+			"data": {
+				"headline": [
+					{
+						"t": "油价成为通胀定价核心变量"
+					}
+				],
+				"bars": [
+					{
+						"name": "OIL CORRELATION",
+						"pct": 0.85
+					},
+					{
+						"name": "REAL YIELD  PCT",
+						"pct": 2.44
+					},
+					{
+						"name": "BEI  PCT",
+						"pct": 2.29
+					}
+				]
+			}
+		},
+		{
+			"id": "b4-s5",
+			"template": "rows",
+			"narration": "美国十年期实际收益率升至百分之二点四四。",
+			"caption": "美国十年期实际收益率升至百分之二点四四。",
+			"data": {
+				"headline": [
+					{
+						"t": "油价成为通胀定价核心变量"
+					}
+				],
+				"rows": [
+					{
+						"label": [
+							{
+								"t": "REAL YIELD 2.44 PCT"
+							}
+						],
+						"body": []
+					},
+					{
+						"label": [
+							{
+								"t": "BEI 2.29 PCT"
+							}
+						],
+						"body": []
+					},
+					{
+						"label": [
+							{
+								"t": "OIL CORRELATION 0.85"
+							}
+						],
+						"body": []
+					}
+				]
+			}
+		},
+		{
+			"id": "b4-s6",
+			"template": "checklist",
+			"narration": "通胀补偿升至百分之二点二九。",
+			"caption": "通胀补偿升至百分之二点二九。",
+			"data": {
+				"headline": [
+					{
+						"t": "油价成为通胀定价核心变量"
+					}
+				],
+				"items": [
+					{
+						"tag": "BEI 2.29 PCT",
+						"body": [
+							{
+								"t": "油价成为通胀定价核心变量"
+							}
+						]
+					},
+					{
+						"tag": "OIL CORRELATION 0.85",
+						"body": []
+					},
+					{
+						"tag": "REAL YIELD 2.44 PCT",
+						"body": []
+					}
+				]
+			}
+		},
+		{
+			"id": "b5-s1",
+			"template": "stacked",
+			"narration": "共振蔓延至全球。",
+			"caption": "共振蔓延至全球。",
+			"data": {
+				"headline": [
+					{
+						"t": "FRANCE 2008 HIGH"
+					}
+				],
+				"panels": [
+					{
+						"title": [
+							{
+								"t": "GERMANY 2011 HIGH"
+							}
+						],
+						"body": [
+							{
+								"t": "JAPAN 1999 HIGH"
+							}
+						]
+					},
+					{
+						"title": [
+							{
+								"t": "JAPAN 1999 HIGH"
+							}
+						],
+						"body": []
+					}
+				]
+			}
+		},
+		{
+			"id": "b5-s2",
+			"template": "versus",
+			"narration": "法国三十年期收益率创二零零八年以来新高。",
+			"caption": "法国三十年期收益率创二零零八年以来新高。",
+			"data": {
+				"headline": [
+					{
+						"t": "从华盛顿到东京 全球共振"
+					}
+				],
+				"bull": {
+					"title": [
+						{
+							"t": "GERMANY 2011 HIGH"
+						}
+					],
+					"items": []
+				},
+				"bear": {
+					"title": [
+						{
+							"t": "JAPAN 1999 HIGH"
+						}
+					],
+					"items": [
+						[
+							{
+								"t": "FRANCE 2008 HIGH"
+							}
+						]
+					]
+				}
+			}
+		},
+		{
+			"id": "b5-s3",
+			"template": "cards",
+			"narration": "德国同期收益率升至二零一一年水平。",
+			"caption": "德国同期收益率升至二零一一年水平。",
+			"data": {
+				"headline": [
+					{
+						"t": "从华盛顿到东京 全球共振"
+					}
+				],
+				"cards": [
+					{
+						"icon": "◆",
+						"title": "JAPAN 1999 HIGH"
+					},
+					{
+						"icon": "◆",
+						"title": "FRANCE 2008 HIGH"
+					},
+					{
+						"icon": "◆",
+						"title": "GERMANY 2011 HIGH"
+					}
+				]
+			}
+		},
+		{
+			"id": "b5-s4",
+			"template": "stacked",
+			"narration": "英国收益率逼近百分之六。",
+			"caption": "英国收益率逼近百分之六。",
+			"data": {
+				"headline": [
+					{
+						"t": "FRANCE 2008 HIGH"
+					}
+				],
+				"panels": [
+					{
+						"title": [
+							{
+								"t": "GERMANY 2011 HIGH"
+							}
+						],
+						"body": [
+							{
+								"t": "JAPAN 1999 HIGH"
+							}
+						]
+					},
+					{
+						"title": [
+							{
+								"t": "JAPAN 1999 HIGH"
+							}
+						],
+						"body": []
+					}
+				]
+			}
+		},
+		{
+			"id": "b5-s5",
+			"template": "versus",
+			"narration": "日本三十年期收益率接近一九九九年以来峰值。",
+			"caption": "日本三十年期收益率接近一九九九年以来峰值。",
+			"data": {
+				"headline": [
+					{
+						"t": "从华盛顿到东京 全球共振"
+					}
+				],
+				"bull": {
+					"title": [
+						{
+							"t": "GERMANY 2011 HIGH"
+						}
+					],
+					"items": []
+				},
+				"bear": {
+					"title": [
+						{
+							"t": "JAPAN 1999 HIGH"
+						}
+					],
+					"items": [
+						[
+							{
+								"t": "FRANCE 2008 HIGH"
+							}
+						]
+					]
+				}
+			}
+		},
+		{
+			"id": "b5-s6",
+			"template": "cards",
+			"narration": "日本五年期两年远期利率升至百分之二点二七。",
+			"caption": "日本五年期两年远期利率升至百分之二点二七。",
+			"data": {
+				"headline": [
+					{
+						"t": "从华盛顿到东京 全球共振"
+					}
+				],
+				"cards": [
+					{
+						"icon": "◆",
+						"title": "JAPAN 1999 HIGH"
+					},
+					{
+						"icon": "◆",
+						"title": "FRANCE 2008 HIGH"
+					},
+					{
+						"icon": "◆",
+						"title": "GERMANY 2011 HIGH"
+					}
+				]
+			}
+		},
+		{
+			"id": "b6",
+			"template": "conclusion",
+			"narration": "逆转需要多重条件同时满足。财政收缩。科技发债放缓。发债策略调整。经济数据走软。悲观者认为政策偏向宽松。僵局难破。除非出现衰退或外部冲击。利率风暴是否已经见顶。下一次抛售由谁触发。",
+			"caption": "下一次抛售由谁触发",
+			"data": {
+				"statements": [
+					{
+						"who": "",
+						"body": [
+							{
+								"t": "下一次抛售由谁触发。"
+							}
+						]
+					}
+				],
+				"tagline": [
+					{
+						"t": "下一次抛售由谁触发。"
+					}
+				]
+			}
+		}
+	]
+}
