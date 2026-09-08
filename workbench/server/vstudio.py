@@ -641,6 +641,13 @@ def run_analyze(request: dict) -> tuple[dict, int]:
     if cached and cached.get("status") in ("ok", "partial") and not request.get("force"):
         return {**cached, "skipped_cache": True}, 0
 
+    # 可核验拆解工作流(copylab 移植): 与看片链完全不同的路线, 用户自选
+    if str(request.get("workflow") or "") == "copylab":
+        if not target.get("video_id"):
+            return {"error": "copylab 工作流仅支持 YouTube 链接/素材池视频(需要字幕)"}, 4
+        from . import vstudio_copylab
+        return vstudio_copylab.run(target, key, request)
+
     cfg = config.load()
     gem = cfg.get("gemini") or {}
     gem_key = str(gem.get("api_key") or "")

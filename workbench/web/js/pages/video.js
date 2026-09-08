@@ -11,7 +11,7 @@ WB.pages.video = {
       f: { range: "7d", sort: "views", kind: "all", channel: "", q: "" },   // 默认7d: 低活跃日24h窗口天然为空
       hotLoading: false, hotErr: null,
       /* ── 视频分析·本地文件方式 + 历史结果 ── */
-      anMode: "url", anPaths: [], anPathIdx: null, anFiles: [], anFile: "",
+      anMode: "url", anWorkflow: "gemini", anPaths: [], anPathIdx: null, anFiles: [], anFile: "",
       anHistory: [], anHistoryLoading: false,
       collecting: false, collectPoll: null,
       /* ── 视频工坊 ── */
@@ -411,7 +411,7 @@ WB.pages.video = {
       try {
         await WB.api.post('/video-analyze', {
           pool_id: this.poolSel ? this.poolSel.id : undefined,
-          url: url || undefined, force: !!force,
+          url: url || undefined, force: !!force, workflow: this.anWorkflow,
         });
         this.anBusy = true; this.pollJob('analyze');
       } catch (e) {
@@ -1071,6 +1071,12 @@ WB.pages.video = {
               <button v-if="poolSel && (poolSel.analysis_status==='ok' || poolSel.analysis_status==='partial')"
                       class="btn" :disabled="anBusy" @click="startAnalyze(true)">重新分析</button>
             </div>
+            <div class="form-row" style="margin-top:4px"><label>工作流</label>
+              <select v-model="anWorkflow" style="min-width:280px">
+                <option value="gemini">Gemini 看片(画面语义, 需 Gemini Key)</option>
+                <option value="copylab">可核验拆解(文案框架+引用核验, 走文本模型)</option>
+              </select>
+              <span class="muted">可核验拆解需要字幕, 仅 YouTube; 引用逐条机器核对, 报告带通过率</span></div>
           </template>
           <div v-if="anErr" class="err-box">{{ anErr.error || anErr }}</div>
         </div>

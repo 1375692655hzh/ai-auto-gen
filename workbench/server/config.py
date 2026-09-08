@@ -54,9 +54,8 @@ DEFAULTS = {
         "api_key": "",
         "model": "gemini-3.6-flash",
     },
-    "analysis_paths": {                             # 视频工坊·本地文件分析扫描根(4槽位, 设置页可改)
-        "paths": ["D:/weixininstall/liaotianjilu/xwechat_files/wxid_q17hzc13rz7822_4b98/msg/file/2026-09/copylab/copylab",
-                  "", "", ""],
+    "analysis_paths": {                             # 视频工坊·本地文件分析扫描根(4槽位, 设置页可改;
+        "paths": ["", "", "", ""],                  #  出厂全空, 由用户自己选目录)
     },
     "compose": {                                    # 内容生成·成稿专用 LLM(2026-09-07 用户拍板:
         "base_url": "",                             # 独立于翻译链, 用户自填, 不动翻译额度;
