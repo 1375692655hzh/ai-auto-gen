@@ -461,6 +461,11 @@ input[type=radio], input[type=checkbox] { accent-color: var(--accent); }
 @media (max-width: 1100px) {
   .two-col.pool-right { grid-template-columns: 1fr; }
 }
+/* 视频制作: 左四段制作台(主) + 右窄栏(草稿箱/项目列表, 窄屏纵堆) */
+.make-cols { grid-template-columns: minmax(0, 1fr) 300px; align-items: start; }
+@media (max-width: 1100px) {
+  .make-cols { grid-template-columns: 1fr; }
+}
 /* 内容生成·信息检索: 素材卡下补充信息折叠区 */
 .rv-block { margin-top: 5px; }
 .rv-toggle { font-size: 11.5px; cursor: pointer; color: var(--accent); }

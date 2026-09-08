@@ -163,6 +163,32 @@ def create_app() -> FastAPI:
                                 status_code=400)
         return {"removed": 1}
 
+    @app.post("/wb-api/videos/{vid}/rename")
+    async def video_rename(vid: str, request: Request):
+        """重命名视频项目(改 project.json 标题, 经 CLI 子进程写板块二)。"""
+        import re
+        import subprocess
+        if not re.fullmatch(r"[A-Za-z0-9_\-]+", vid):
+            return JSONResponse({"error": "bad_vid"}, status_code=400)
+        body = await request.json()
+        title = str(body.get("title") or "").strip()
+        if not title or len(title) > 60:
+            return JSONResponse({"error": "标题需为 1-60 字"}, status_code=400)
+        cli = Path(__file__).resolve().parents[2] / "cli.py"
+        try:
+            result = subprocess.run(
+                ["py", "-3.11", str(cli), "video", "rename", vid, "--title", title],
+                capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=30)
+        except subprocess.TimeoutExpired:
+            return JSONResponse({"error": "rename_timeout"}, status_code=504)
+        except OSError:
+            return JSONResponse({"error": "rename_failed"}, status_code=500)
+        if result.returncode != 0:
+            return JSONResponse({"error": "rename_failed",
+                                 "hint": (result.stderr or result.stdout or "")[-200:]},
+                                status_code=400)
+        return {"renamed": 1, "title": title}
+
     @app.get("/wb-api/videos/{vid}/file/{name}")
     def video_file(vid: str, name: str):
         p = views.video_file(vid, name)
@@ -622,6 +648,28 @@ def create_app() -> FastAPI:
             return {"ok": False, "error": "先填接口地址"}
         url = base + "/audio/voices"
         try:
+            if "minimax" in base:                  # MiniMax: 独立语音列表接口
+                vb = json.dumps({"voice_type": "system"}).encode()
+                req = urllib.request.Request(base + "/get_voice", data=vb,
+                    headers={"Authorization": f"Bearer {key}",
+                             "Content-Type": "application/json"})
+                with urllib.request.urlopen(req, timeout=15) as r:
+                    d = json.loads(r.read())
+                br = d.get("base_resp") or {}
+                if br.get("status_code"):
+                    return {"ok": False,
+                            "error": f"MiniMax {br.get('status_code')}: {br.get('status_msg')}"}
+                raw = (d.get("system_voice_list") or d.get("voices")
+                       or d.get("data") or [])
+                voices = []
+                for v in raw:
+                    vid = str(v.get("voice_id") or v.get("id") or "")
+                    if vid:
+                        voices.append({"id": vid,
+                                       "name": str(v.get("voice_name") or v.get("name") or vid)})
+                if voices:
+                    return {"ok": True, "voices": voices}
+                return {"ok": False, "error": "MiniMax get_voice 返回为空"}
             req = urllib.request.Request(url, headers={"Authorization": f"Bearer {key}"})
             with urllib.request.urlopen(req, timeout=15) as r:
                 d = json.loads(r.read())
@@ -650,9 +698,13 @@ def create_app() -> FastAPI:
         body = await request.json()
         cli = Path(__file__).resolve().parents[2] / "cli.py"
         try:
-            proc = subprocess.run(["py", "-3.11", str(cli), "workbench", "test-tts",
-                                   "--provider", str(body.get("provider_id") or ""),
-                                   "--voice", str(body.get("voice") or "")],
+            tts_args = ["py", "-3.11", str(cli), "workbench", "test-tts",
+                        "--provider", str(body.get("provider_id") or ""),
+                        "--voice", str(body.get("voice") or "")]
+            if body.get("text"):
+                tts_args += ["--text", str(body["text"])]
+            proc = subprocess.run(tts_args,
+                                  
                                   capture_output=True, text=True, encoding="utf-8", timeout=120)
         except subprocess.TimeoutExpired:
             return JSONResponse({"ok": False, "error": "cli_timeout"}, status_code=504)

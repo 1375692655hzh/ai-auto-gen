@@ -53,8 +53,12 @@ export function validateStory(story) {
 			warn(`未知画幅标注 ${JSON.stringify(fmt)}（放行，渲染以 meta.width/height 为准）`);
 		if (meta.tts !== undefined) {
 			if (!isObj(meta.tts)) err("meta.tts 必须是对象");
-			else if (meta.tts.provider !== "edge" && meta.tts.provider !== "dashscope")
-				err(`meta.tts.provider 只能是 edge|dashscope，收到 ${JSON.stringify(meta.tts.provider)}`);
+			else if (meta.tts.provider === "custom") {
+				// 自定义 OpenAI 兼容供应商(如 mimo): 协议参数随 meta 透传, 密钥走环境变量
+				if (!meta.tts.base_url || !meta.tts.model)
+					err("meta.tts.provider=custom 时必须带 base_url 与 model");
+			} else if (meta.tts.provider !== "edge" && meta.tts.provider !== "dashscope")
+				err(`meta.tts.provider 只能是 edge|dashscope|custom，收到 ${JSON.stringify(meta.tts.provider)}`);
 		}
 		// format 只是标注，尺寸不匹配或缺省仅提示。
 		if (typeof meta.width !== "number" || typeof meta.height !== "number") {
@@ -118,9 +122,10 @@ export function validateStory(story) {
 		if (unknown.length) warn(`${where} 含未知字段（放行）: ${unknown.join(", ")}`);
 	});
 
-	// CTA 收尾场（warning 级）
+	// CTA 收尾场（warning 级；vox-collage 单风格主题以悬念收尾是特性，豁免）
 	const last = story.scenes[story.scenes.length - 1];
-	if (isObj(last)) {
+	const singleStyle = story.meta?.theme === "vox-collage";
+	if (isObj(last) && !singleStyle) {
 		const ctaOk = aspect === "9:16"
 			? last.template === "vpoints"
 			: last.template === "conclusion";
@@ -129,13 +134,15 @@ export function validateStory(story) {
 				(aspect === "9:16" ? "（建议 vpoints）" : "（建议 conclusion）"));
 	}
 
-	// 连续同版式提示
-	let run = 1;
-	for (let i = 1; i < story.scenes.length; i++) {
-		if (!isObj(story.scenes[i]) || !isObj(story.scenes[i - 1])) { run = 1; continue; }
-		run = story.scenes[i].template === story.scenes[i - 1].template ? run + 1 : 1;
-		if (run >= 4)
-			warn(`scenes[${i}].id=${story.scenes[i].id}：连续 ${run} 场使用 ${story.scenes[i].template}，视觉单调`);
+	// 连续同版式提示（vox-collage 全场 paper-board 是主题特性，豁免）
+	if (!singleStyle) {
+		let run = 1;
+		for (let i = 1; i < story.scenes.length; i++) {
+			if (!isObj(story.scenes[i]) || !isObj(story.scenes[i - 1])) { run = 1; continue; }
+			run = story.scenes[i].template === story.scenes[i - 1].template ? run + 1 : 1;
+			if (run >= 4)
+				warn(`scenes[${i}].id=${story.scenes[i].id}：连续 ${run} 场使用 ${story.scenes[i].template}，视觉单调`);
+		}
 	}
 
 	return { errors, warnings };

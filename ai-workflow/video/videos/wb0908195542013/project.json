@@ -1,0 +1,29 @@
+{
+	"id": "wb0908195542013",
+	"title": "未命名视频",
+	"status": "built",
+	"note": "向导确认即审核（workbench 创建）；draft=待审 reviewed=可制作 built=已出片",
+	"created": "2026-09-08",
+	"date": "2026-09-08",
+	"origin": "workbench",
+	"settings": {
+		"aspect": "16:9",
+		"fps": 30,
+		"theme": "vox-collage",
+		"layout": "auto",
+		"enrich": "llm",
+		"title": "未命名视频",
+		"voice": "冰糖",
+		"tts_provider": "custom",
+		"tts_custom": {
+			"base_url": "https://api.xiaomimimo.com/v1",
+			"model": "mimo-v2.5-tts",
+			"style": "财经新闻播报语气, 清晰专业, 语速适中",
+			"format": ""
+		},
+		"beat_overrides": [],
+		"materials_dir": "E:\\ai-gen-article-publish\\ai-workflow\\video\\videos\\wb0908195542013\\input\\materials"
+	},
+	"builtAt": "2026-09-08",
+	"output": "out/final.mp4 (5.03 min)"
+}

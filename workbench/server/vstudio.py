@@ -1452,7 +1452,7 @@ def run_test_tts_cli(args) -> int:
                 and not os.environ.get("DASHSCOPE_API_KEY") and not vmake.dashscope_key_ok()):
             print(json.dumps({"ok": False, "error": "dashscope_key_missing"}))
             return 3
-        narration = "各位好，这里是 AI 财经工作台语音合成自检，当前链路工作正常。"
+        narration = str(getattr(args, "text", "") or "").strip() or             "各位好，这里是 AI 财经工作台语音合成自检，当前链路工作正常。"
         out_dir = _safe_path(voice_root(), "_probe", args.provider)
         # 探测目录按供应商共用，换音色不能命中上一音色的同文缓存。
         (out_dir / "probe.mp3").unlink(missing_ok=True)
@@ -1770,6 +1770,11 @@ def _run_make_build_cli(request: dict) -> int:
         settings = {k: row["video"].get(k) for k in ("aspect", "fps", "theme", "layout", "enrich")}
         settings.update(title=row["title"], voice=row["voice"]["voice"],
                         tts_provider=provider.get("engine") or "edge")
+        if provider.get("engine") == "custom":
+            # 自定义供应商(如 mimo): 协议参数随 settings 进 meta(非密钥字段),
+            # api_key 由下方 spawn 注入 CUSTOM_TTS_API_KEY 环境变量, 不落 story.json
+            settings["tts_custom"] = {k: provider.get(k) or ""
+                                      for k in ("base_url", "model", "style", "format")}
         warnings, overrides, materials = [], [], []
         for override in row["video"].get("beat_overrides") or []:
             override = dict(override)
@@ -1824,6 +1829,8 @@ def _run_make_build_cli(request: dict) -> int:
                 env["DASHSCOPE_API_KEY"] = provider["api_key"]
             if provider.get("base_url"):
                 env["DASHSCOPE_BASE_URL"] = provider["base_url"]
+        if provider.get("engine") == "custom" and provider.get("api_key"):
+            env["CUSTOM_TTS_API_KEY"] = provider["api_key"]   # custom 协议参数走 meta, 密钥走环境
         timeout = BUILD_TIMEOUT_S * (2 if vmake.normalize_fps(settings.get("fps")) == 60 else 1)
         code, hint = _run_build_process(cmd, project_id, logs / f"{project_id}.log", timeout, env=env)
         mp4s = sorted((proj / "out").glob("*.mp4"))

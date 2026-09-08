@@ -142,13 +142,25 @@ def _build_meta(script: dict, settings: dict, fmt: str, fps: int, theme: str, la
     width, height = ASPECTS[fmt]
     title = str(settings.get("title") or script.get("title") or "未命名视频").strip()[:30]
     provider = str(settings.get("tts_provider") or "edge")
+    custom_cfg = settings.get("tts_custom") if isinstance(settings.get("tts_custom"), dict) else {}
     use_dash = provider == "dashscope" and dashscope_key_ok()
-    if use_dash:
+    if provider == "custom":
+        # 自定义 OpenAI 兼容供应商(如 mimo): 音色名自由(冰糖/茉莉…), 协议参数随 meta 透传,
+        # api_key 不落 story.json —— 由 run_build_cli 注入 CUSTOM_TTS_API_KEY 环境变量
+        if not (custom_cfg.get("base_url") and custom_cfg.get("model")):
+            raise ValueError("custom TTS 供应商配置缺失 base_url/model，请到设置页补全后重新制作")
+        voice = settings.get("voice") or "mimo_default"
+        tts = {"provider": "custom", "voice": voice,
+               "base_url": custom_cfg["base_url"], "model": custom_cfg["model"],
+               **({"style": custom_cfg["style"]} if custom_cfg.get("style") else {}),
+               **({"format": custom_cfg["format"]} if custom_cfg.get("format") else {})}
+        meta_voice = voice
+    elif use_dash:
         voice = settings.get("voice") or DEFAULT_DASHSCOPE_VOICE
         meta_voice = voice if str(voice).startswith("longan") else DEFAULT_DASHSCOPE_VOICE
         tts = {"provider": "dashscope", "voice": meta_voice}
     else:
-        # edge 引擎：只认 zh-CN-* 音色，dashscope 音色名落进来会整批失败，兜底回默认
+        # edge 引擎：只认 zh-CN-* 音色，dashscope/自定义音色名落进来会整批失败，兜底回默认
         voice = settings.get("voice") or DEFAULT_EDGE_VOICE
         meta_voice = voice if str(voice).startswith("zh-CN") else DEFAULT_EDGE_VOICE
         tts = None

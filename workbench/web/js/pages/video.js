@@ -10,6 +10,7 @@ WB.pages.video = {
       hotItems: [], hotTotal: 0, hotMeta: null, hotInsights: [],
       f: { range: "7d", sort: "views", kind: "all", channel: "", q: "" },   // 默认7d: 低活跃日24h窗口天然为空
       hotLoading: false, hotErr: null,
+      voiceTesting: false, voiceTestUrl: "", voiceTestPhrase: "你好，我是特朗普的爷爷，巴菲特的爸爸，鲍威尔的祖宗",
       /* ── 视频分析·本地文件方式 + 历史结果 ── */
       anMode: "url", anWorkflow: "gemini", anPaths: [], anPathIdx: null, anFiles: [], anFile: "",
       anHistory: [], anHistoryLoading: false,
@@ -35,7 +36,8 @@ WB.pages.video = {
       buildBusy: false, buildProgress: null, buildErr: '', buildPid: '', buildMakeId: '',
       buildMode: 'build', buildLogOpen: false, buildLogLines: [], buildLogTruncated: false, buildWarnings: [],
       assetUploadBusy: {}, makeActionBusy: false, saveTimers: {}, savePending: {}, saveChains: {},
-      saveVersions: {}, saveState: {}, beatCursors: {}, makeJobIds: {}, disposed: false,
+      saveVersions: {}, saveState: {}, savedAt: {}, renameDraft: null, renameDraftTitle: '', projTitle: '',
+      beatCursors: {}, makeJobIds: {}, disposed: false,
       phTitles: { templates: "模板仓库", materials: "素材仓库" },
     };
   },
@@ -393,6 +395,19 @@ WB.pages.video = {
         this.anRec = await WB.api.get("/video-analyses?key=" + encodeURIComponent(key));
       } catch (e) { WB.toast(e.error || "记录载入失败"); }
     },
+    /* 语音试听: 用当前选择的供应商+音色念固定台词(Trump 爷爷/巴菲特爸爸/鲍威尔祖宗) */
+    async testVoiceListen() {
+      const pid = this.curMake && this.curMake.voice.profile_id;
+      const voice = this.curMake && this.curMake.voice.voice;
+      if (!pid || !voice) { WB.toast("先选择供应商和音色"); return; }
+      this.voiceTesting = true; this.voiceTestUrl = "";
+      try {
+        const d = await WB.api.post("/test-tts",
+          { provider_id: pid, voice, text: this.voiceTestPhrase });
+        this.voiceTestUrl = d.url;
+      } catch (e) { WB.toast(e.error || "试听失败"); }
+      this.voiceTesting = false;
+    },
     async startAnalyzeLocal(force) {
       if (!this.anFile) { WB.toast("先选择要分析的视频文件"); return; }
       this.anErr = null;
@@ -688,13 +703,41 @@ WB.pages.video = {
         try {
           const d = await WB.api.post('/video-makes', pending.body);
           const full = await WB.api.get('/video-makes/' + id);
-          if (this.saveVersions[id] === pending.version) { this.putMake(full.make || d.make); this.saveState[id] = 'saved'; }
+          if (this.saveVersions[id] === pending.version) {
+            this.putMake(full.make || d.make);
+            this.savedAt = { ...this.savedAt, [id]: new Date().toTimeString().slice(0, 8) };
+            this.saveState[id] = 'saved';
+          }
         } catch (e) {
           if (!this.savePending[id] && this.saveVersions[id] === pending.version) this.savePending[id] = pending;
           this.saveState[id] = 'error'; this.makeErr = '自动保存失败：' + this.makeError(e); throw e;
         }
       });
       this.saveChains[id] = chain; return chain;
+    },
+    startRenameDraft(m) { this.renameDraft = m.id; this.renameDraftTitle = m.title; },
+    async saveRenameDraft(m) {
+      const t = this.renameDraftTitle.trim();
+      if (!t) { WB.toast('标题不能为空'); return; }
+      try {
+        await WB.api.post('/video-makes', { id: m.id, title: t });
+        m.title = t;
+        if (this.cur === m.id && this.curMake) this.curMake.title = t;
+        this.savedAt = { ...this.savedAt, [m.id]: new Date().toTimeString().slice(0, 8) };
+        this.renameDraft = null;
+        WB.toast('已重命名');
+      } catch (e) { WB.toast(this.makeError(e)); }
+    },
+    openProj(v) { this.sel = v; this.projTitle = v.title; },
+    async saveProjTitle() {
+      if (!this.sel) return;
+      const t = (this.projTitle || '').trim();
+      if (!t) { WB.toast('标题不能为空'); return; }
+      try {
+        const d = await WB.api.post('/videos/' + this.sel.id + '/rename', { title: t });
+        this.sel.title = d.title || t; this.projTitle = d.title || t;
+        WB.toast('已重命名');
+      } catch (e) { WB.toast(this.makeError(e)); }
     },
     segBadge(stage, m = this.curMake) {
       const badge = (cls, text) => ({ cls, text });
@@ -1299,12 +1342,12 @@ WB.pages.video = {
         <div v-if="voiceBusy">语音生成中 · {{ voiceProgress && voiceProgress.message || '准备中…' }}</div>
         <div v-if="buildBusy">视频制作中 · {{ buildProgress && buildProgress.message || '准备中…' }}</div>
       </div>
-      <div class="two-col" style="grid-template-columns:repeat(auto-fit,minmax(min(100%,360px),1fr));align-items:start">
+      <div class="two-col make-cols">
         <div style="min-width:0">
           <div v-if="!curMake" class="card empty">从草稿箱载入，或点击「＋ 新建制作」开始</div>
           <template v-else>
             <div class="form-row"><input type="text" v-model="curMake.title" @input="saveMake()" :disabled="makeBusy" placeholder="制作标题" style="flex:1;min-width:0">
-              <span class="muted">{{ {pending:'2 秒后自动保存',saving:'保存中…',saved:'已保存',error:'保存失败'}[saveState[cur]] || '' }}</span></div>
+              <span class="muted">{{ {pending:'2 秒后自动保存',saving:'保存中…',saved:('已保存 ' + (savedAt[cur] || '')),error:'保存失败'}[saveState[cur]] || '' }}</span></div>
             <div class="card">
               <h3>1 · 口播稿 <span class="badge" :class="segBadge(1).cls">{{ segBadge(1).text }}</span></h3>
               <fieldset :disabled="makeBusy" style="border:0;min-width:0;padding:0">
@@ -1380,7 +1423,12 @@ WB.pages.video = {
                   <div class="form-row"><label>供应商</label><select v-model="curMake.voice.profile_id" @change="changeMakeProvider"><option value="" disabled>请选择</option>
                     <option v-for="p in ttsProviders" :key="p.id" :value="p.id">{{ p.name }} · {{ p.engine }}</option></select></div>
                   <div class="form-row"><label>音色</label><select v-model="curMake.voice.voice" @change="changeMakeVoice"><option value="" disabled>请选择音色</option>
-                    <option v-for="v in makeVoices" :key="v.id" :value="v.id">{{ v.name }}</option></select></div>
+                    <option v-for="v in makeVoices" :key="v.id" :value="v.id">{{ v.name }}</option></select>
+                    <button class="btn" :disabled="voiceTesting || !curMake.voice.profile_id || !curMake.voice.voice" @click="testVoiceListen">
+                      {{ voiceTesting ? '合成中…' : '试听' }}</button></div>
+                  <div v-if="voiceTestUrl" style="margin:6px 0">
+                    <audio controls :src="voiceTestUrl + '?t=' + Date.now()" style="max-width:100%;height:36px"></audio>
+                    <p class="muted" style="font-size:11px">试听文本: 「{{ voiceTestPhrase }}」</p></div>
                   <p class="muted">换音色=全新合成；旧音色文件保留，切回即复用</p>
                   <p v-if="!ttsProviders.length" class="notice">请到 <a href="#/settings">设置 → 语音合成</a> 启用供应商和音色</p>
                   <button class="btn primary" :disabled="voiceBusy || !makeVoices.some(v=>v.id===curMake.voice.voice) || curMake.script_stale" @click="runMakeJob('voice')">{{ voiceBusy ? '生成中…' : '生成语音稿' }}</button>
@@ -1451,24 +1499,38 @@ WB.pages.video = {
             <div v-for="m in makes" :key="m.id" class="list-item" :class="{sel:cur===m.id}">
               <div class="t"><span :title="m.title">{{ cut(m.title,18) }}</span><span style="display:inline-flex;gap:5px">
                 <span v-for="stage in [1,2,3,4]" :key="stage" :title="['口播','脚本','语音','视频'][stage-1]+'：'+segBadge(stage,m).text" :aria-label="['口播','脚本','语音','视频'][stage-1]+'：'+segBadge(stage,m).text" :style="{backgroundColor:segColor(stage,m)}" style="display:inline-block;width:8px;height:8px;border-radius:50%"></span></span></div>
-              <div class="s">{{ m.updated_at }}</div><div class="form-row" style="gap:6px;margin:6px 0 0">
-                <button class="btn" :disabled="makeActionBusy" @click="selectMake(m.id)">载入</button><button class="btn" :disabled="makeActionBusy || Object.values(makeJobIds).includes(m.id)" @click="duplicateMake(m)">另存副本</button><button class="btn" :disabled="makeActionBusy || Object.values(makeJobIds).includes(m.id)" @click="deleteMake(m)">删除</button></div></div>
+              <div class="s">保存于 {{ m.updated_at }}</div>
+              <div v-if="renameDraft===m.id" class="form-row" style="gap:6px;margin:6px 0 0">
+                <input v-model="renameDraftTitle" :disabled="makeActionBusy" style="min-width:0;flex:1"
+                       placeholder="新标题" @keyup.enter="saveRenameDraft(m)" @keyup.esc="renameDraft=null">
+                <button class="btn primary" @click="saveRenameDraft(m)">存</button>
+                <button class="btn" @click="renameDraft=null">取消</button></div>
+              <div v-else class="form-row" style="gap:6px;margin:6px 0 0">
+                <button class="btn" :disabled="makeActionBusy" @click="selectMake(m.id)">载入</button>
+                <button class="btn" @click="startRenameDraft(m)">重命名</button>
+                <button class="btn" :disabled="makeActionBusy || Object.values(makeJobIds).includes(m.id)" @click="duplicateMake(m)">另存副本</button>
+                <button class="btn" :disabled="makeActionBusy || Object.values(makeJobIds).includes(m.id)" @click="deleteMake(m)">删除</button></div></div>
           </div>
           <div class="card"><h3>视频项目（{{ videos.length }}）<button class="btn" @click="loadVideos">刷新</button></h3>
             <div v-if="!videos.length" class="muted">暂无视频项目</div>
-          <div v-for="v in videos" :key="v.id" class="list-item" :class="{sel: sel === v}" @click="sel = v">
+          <div v-for="v in videos" :key="v.id" class="list-item" :class="{sel: sel === v}" @click="openProj(v)">
             <div class="t">{{ v.title }}
               <span class="badge" :class="gateClass(v.status)" style="float:right">{{ gateText(v.status) }}</span></div>
             <div class="s">{{ v.id }}<span v-if="v.scenes"> · {{ v.scenes }} 幕</span>
               <span v-if="v.mp4.length"> · {{ v.mp4.length }} 个 mp4</span>
               <a style="font-size:12px;float:right" @click.stop.prevent="delVideo(v)">删除</a></div>
+            <div class="s muted" v-if="v.date || v.verify_duration_s">{{ v.date }}<span v-if="v.verify_duration_s"> · 成片 {{ fmtDur(v.verify_duration_s) }}</span></div>
           </div>
           </div>
         </div>
       </div>
       <div v-if="sel" role="presentation" @click.self="sel=null" @keydown.esc="sel=null" style="position:fixed;inset:0;background:rgba(0,0,0,.65);z-index:80;display:flex;align-items:center;justify-content:center;padding:24px">
         <div class="card" role="dialog" aria-modal="true" aria-labelledby="video-project-title" tabindex="-1" style="width:min(860px,100%);max-height:90vh;overflow:auto">
-          <h3 id="video-project-title">{{ sel.title }}<button class="btn" autofocus @click="sel=null">关闭</button></h3>
+          <h3 id="video-project-title" style="display:flex;gap:8px;align-items:center">
+            <input v-model="projTitle" @keyup.enter="saveProjTitle" style="flex:1;min-width:0"
+                   title="点击此处可重命名，回车或点「重命名」保存">
+            <button class="btn" @click="saveProjTitle">重命名</button>
+            <button class="btn" autofocus @click="sel=null">关闭</button></h3>
           <p class="muted">项目 {{ sel.id }} · 门禁状态：{{ gateText(sel.status) }} <span v-if="sel.verify_duration_s!=null" class="badge">成片 {{ Math.round(sel.verify_duration_s) }} 秒</span><span v-if="sel.verify_mode==='estimate'" class="badge yellow">无声预览版</span></p>
           <div v-if="buildWarnings.length && buildPid && sel.id.indexOf(buildPid)===0" class="notice"><div v-for="(w,i) in buildWarnings" :key="i">{{ w }}</div></div>
           <div v-if="sel.verify_warnings && sel.verify_warnings.length" class="notice"><strong>QA 警告</strong><div v-for="(w,i) in sel.verify_warnings" :key="i">{{ w }}</div></div>

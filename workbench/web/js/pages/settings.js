@@ -497,8 +497,15 @@ WB.pages.settings = {
         <a href="https://dashscope.console.aliyun.com/" target="_blank" rel="noopener">阿里云百炼</a>
         → API-KEY(sk- 开头)。可添加多套同一引擎(例如两把 DashScope Key)。<br>
         <b>说明:</b> 只服务视频制作「语音」段; 配置仅存本工作台。视频页只列出已启用且至少有一个音色的供应商。<br>
-        <b>自定义供应商:</b> 任意 OpenAI 兼容 TTS 端点(POST {base}/audio/speech, {model, voice, input});
-        填 url/api_key/model 后点「检测预设语音」自动拉取音色(端点不支持则手动加音色)。
+        <b>自定义供应商:</b> 填 url/api_key/model 后点「检测预设语音」自动拉音色(端点不支持则手动加音色)。<br>
+        <b>mimo(小米)填写规则:</b> url=<code>https://api.xiaomimimo.com/v1</code> · model=<code>mimo-v2.5-tts</code> ·
+        key 从 <a href="https://api.xiaomimimo.com" target="_blank" rel="noopener">api.xiaomimimo.com</a> 创建;
+        音色=mimo_default/冰糖/茉莉/苏打/白桦/Mia/Chloe/Milo/Dean(检测可自动拉取); 可选「风格提示」控制语气。<br>
+        <b>MiniMax 填写规则:</b> url=<code>https://api.minimax.io/v1</code>(国内 <code>https://api.minimaxi.com/v1</code>) ·
+        model=<code>speech-2.8-hd</code>(或 speech-2.8-turbo) ·
+        key 从 <a href="https://platform.minimaxi.com" target="_blank" rel="noopener">platform.minimaxi.com</a>
+        「账户管理→API密钥」创建; 音色走 MiniMax 语音库(get_voice 自动检测),
+        如 male-qn-qingse/female-shaonv/audiobook_male_1; 音频为 mp3 输出。
       </div>
       <div class="form-row"><label>默认供应商</label>
         <select v-model="s.tts.default.provider_id" @change="onTtsDefaultProvider" style="max-width:280px">

@@ -61,6 +61,23 @@ export async function synthCustom(cfg, voice, text, outFile) {
 	const base = String(cfg.base_url || "").replace(/\/+$/, "");
 	if (!base || !cfg.model) throw new Error("custom 供应商缺 base_url/model");
 	const auth = { "Content-Type": "application/json", Authorization: `Bearer ${cfg.api_key || ""}` };
+	// MiniMax 协议: /t2a_v2(音频为 hex 编码; voice_setting.voice_id)
+	if (base.includes("minimax")) {
+		const r0 = await fetch(base + "/t2a_v2", {
+			method: "POST", headers: auth,
+			body: JSON.stringify({ model: cfg.model, text, stream: false,
+				voice_setting: { voice_id: voice },
+				audio_setting: { format: (cfg.format || "mp3"), sample_rate: 32000 } }),
+		});
+		if (!r0.ok) throw new Error(`MiniMax HTTP ${r0.status}: ${(await r0.text()).slice(0, 150)}`);
+		const d0 = await r0.json();
+		const br = d0.base_resp || {};
+		if (br.status_code) throw new Error(`MiniMax ${br.status_code}: ${br.status_msg || ""}`);
+		const hex = (d0.data || {}).audio || "";
+		if (!hex) throw new Error("MiniMax 响应缺 data.audio");
+		writeFileSync(outFile, Buffer.from(hex, "hex"));
+		return;
+	}
 	// 协议一: OpenAI /audio/speech
 	const r1 = await fetch(base + "/audio/speech", {
 		method: "POST", headers: auth,
@@ -103,6 +120,13 @@ export async function synthOnce(engine, voice, text, outFile, customCfg) {
 			}
 			return true;
 		} catch (e) {
+			// voiceLocale 报错 = 音色名不是合法 Edge 语音（须形如 zh-CN-XiaoxiaoNeural），
+			// 重试无意义：给出可操作提示后立即失败
+			if (engine === "edge" && /voiceLocale/i.test(e.message)) {
+				console.error(`  TTS 失败: 音色"${voice}"不是有效的 Edge 语音名（应形如 zh-CN-XiaoxiaoNeural）。`
+					+ `自定义供应商音色请先在制作页第三段生成语音稿（渲染时会直接复用），或到设置页改用标准音色名`);
+				return false;
+			}
 			console.error(`  TTS 重试 ${attempt}/8: ${e.message}`);
 			await new Promise((r) => setTimeout(r, 2500 * attempt));
 		}

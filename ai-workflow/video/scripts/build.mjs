@@ -101,21 +101,33 @@ syncMaterials();
 
 /* ---- TTS：补齐缺失音频 ---- */
 
-/** 按项目配置分发引擎（story.json meta.tts，缺省用 edge + meta.voice） */
-const ttsConf =
-	story.meta.tts && story.meta.tts.provider === "dashscope"
-		? { engine: "dashscope", voice: story.meta.tts.voice ?? "longanlufeng" }
-		: { engine: "edge", voice: story.meta.voice ?? "zh-CN-XiaoxiaoNeural" };
+/** 按项目配置分发引擎（story.json meta.tts：dashscope/custom 走 meta 配置，缺省 edge + meta.voice） */
+const ttsConf = (() => {
+	const tts = story.meta.tts;
+	if (tts && tts.provider === "dashscope")
+		return { engine: "dashscope", voice: tts.voice ?? "longanlufeng", customCfg: undefined };
+	if (tts && tts.provider === "custom")
+		return {
+			engine: "custom",
+			voice: tts.voice ?? "",
+			customCfg: {
+				base_url: tts.base_url ?? "", model: tts.model ?? "",
+				style: tts.style ?? "", format: tts.format ?? "",
+				api_key: process.env.CUSTOM_TTS_API_KEY ?? "",   // 密钥经 CLI 注入环境, 不落 story.json
+			},
+		};
+	return { engine: "edge", voice: story.meta.voice ?? "zh-CN-XiaoxiaoNeural", customCfg: undefined };
+})();
 
 /** 用指定引擎补齐全部缺失音频；返回 {ok, made[], failedId} */
-async function synthAll(engine, voice) {
+async function synthAll(engine, voice, customCfg) {
 	const made = [];
 	for (const s of story.scenes) {
 		if (s.silent) continue;                  // 静默场景无旁白，不需要音频
 		const outFile = path.join(audioDir, `${s.id}.mp3`);
 		if (existsSync(outFile)) continue;
 		process.stdout.write(`合成语音: ${s.id} ... `);
-		if (await synthOnce(engine, voice, s.narration, outFile)) {
+		if (await synthOnce(engine, voice, s.narration, outFile, customCfg)) {
 			console.log("ok");
 			made.push(outFile);
 		} else {
@@ -143,7 +155,7 @@ if (!ESTIMATE) {
 		manifest[s.id] = hash;
 	}
 	writeFileSync(manifestPath, JSON.stringify(manifest, null, 2));
-	let r = await synthAll(ttsConf.engine, ttsConf.voice);
+	let r = await synthAll(ttsConf.engine, ttsConf.voice, ttsConf.customCfg);
 	// 降级链：dashscope 失败/缺 key → 删掉本次已合成音频，整批改用 edge 重跑（保音色一致）
 	if (!r.ok && ttsConf.engine === "dashscope") {
 		console.warn(`\n⚠ ${r.failedId} 合成失败，DashScope 不可用 → 自动降级 Edge TTS，整批重跑保持音色一致`);

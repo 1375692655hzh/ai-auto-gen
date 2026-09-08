@@ -1,0 +1,21 @@
+{
+  "id": "wb0908183509688",
+  "title": "未命名视频",
+  "status": "reviewed",
+  "note": "向导确认即审核（workbench 创建）；draft=待审 reviewed=可制作 built=已出片",
+  "created": "2026-09-08",
+  "date": "2026-09-08",
+  "origin": "workbench",
+  "settings": {
+    "aspect": "16:9",
+    "fps": 30,
+    "theme": "vox-collage",
+    "layout": "auto",
+    "enrich": "llm",
+    "title": "未命名视频",
+    "voice": "苏打",
+    "tts_provider": "custom",
+    "beat_overrides": [],
+    "materials_dir": "E:\\ai-gen-article-publish\\ai-workflow\\video\\videos\\wb0908183509688\\input\\materials"
+  }
+}

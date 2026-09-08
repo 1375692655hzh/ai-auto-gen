@@ -764,6 +764,7 @@ def main() -> int:
                           ("gen-voice", "视频工坊逐拍语音合成任务")):
         wsub.add_parser(command, help=desc).add_argument("--json", action="store_true", help="输出单行 JSON")
     pw_tt = wsub.add_parser("test-tts", help="测试语音供应商与音色连接")
+    pw_tt.add_argument("--text", default="", help="自定义试音文本(默认自检句)")
     pw_tt.add_argument("--provider", required=True)
     pw_tt.add_argument("--voice", required=True)
     pw_tt.add_argument("--json", action="store_true", help="输出单行 JSON（兼容位）")
@@ -787,6 +788,9 @@ def main() -> int:
     pv_n.add_argument("args", nargs=argparse.REMAINDER)
     pv_r = vsub.add_parser("remove", help="删除视频项目目录(videos/<id>/ 整目录)")
     pv_r.add_argument("project_id", help="项目 id(videos/ 下目录名)")
+    pv_ren = vsub.add_parser("rename", help="重命名视频项目(改 project.json 标题)")
+    pv_ren.add_argument("project_id", help="项目 id(videos/ 下目录名)")
+    pv_ren.add_argument("--title", required=True, help="新标题(1-60 字)")
 
     argv = sys.argv[1:]
     if len(argv) >= 2 and argv[0] == "publish" and argv[1] in ("login", "run", "run-video"):
@@ -873,6 +877,27 @@ def main() -> int:
                 return EXIT_FAIL
             _shutil.rmtree(target)
             print(f"✅ 已删除 {target}")
+            return EXIT_OK
+        if args.sub == "rename":
+            import json as _json
+            import re as _re
+            pid = args.project_id
+            title = (args.title or "").strip()
+            base = (AIWF / "video" / "videos").resolve()
+            if not _re.fullmatch(r"[\w\-]+", pid) or not title or len(title) > 60:
+                print("❌ 非法项目 id 或标题(1-60 字)", file=sys.stderr)
+                return EXIT_FAIL
+            target = (base / pid).resolve()
+            if base not in target.parents or not target.is_dir():
+                print(f"❌ 项目不存在: {target}", file=sys.stderr)
+                return EXIT_FAIL
+            pj = target / "project.json"
+            data = _json.loads(pj.read_text(encoding="utf-8")) if pj.is_file() else {}
+            if not isinstance(data, dict):
+                data = {}
+            data["title"] = title
+            pj.write_text(_json.dumps(data, ensure_ascii=False, indent=1), encoding="utf-8")
+            print(f"✅ 已重命名: {title}")
             return EXIT_OK
     ap.print_help()
     return EXIT_FAIL

@@ -1,19 +1,19 @@
 {
-	"id": "wb0907214956",
-	"title": "全球长债利率重估风暴",
-	"status": "built",
-	"note": "向导确认即审核（workbench 创建）；draft=待审 reviewed=可制作 built=已出片",
-	"created": "2026-09-07",
-	"date": "2026-09-07",
-	"origin": "workbench",
-	"settings": {
-		"format": "horizontal",
-		"voice": "zh-CN-YunyangNeural",
-		"tts_provider": "edge",
-		"enrich": "plain",
-		"title": "全球长债利率重估风暴",
-		"style_pack": "vox-collage"
-	},
-	"builtAt": "2026-09-07",
-	"output": "out/final.mp4 (2.08 min)"
+ "id": "wb0907214956",
+ "title": "利率重估 · VOX 纸拼贴版",
+ "status": "built",
+ "note": "向导确认即审核（workbench 创建）；draft=待审 reviewed=可制作 built=已出片",
+ "created": "2026-09-07",
+ "date": "2026-09-07",
+ "origin": "workbench",
+ "settings": {
+  "format": "horizontal",
+  "voice": "zh-CN-YunyangNeural",
+  "tts_provider": "edge",
+  "enrich": "plain",
+  "title": "全球长债利率重估风暴",
+  "style_pack": "vox-collage"
+ },
+ "builtAt": "2026-09-07",
+ "output": "out/final.mp4 (2.08 min)"
 }
