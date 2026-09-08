@@ -790,6 +790,9 @@ WB.pages.article = {
             <div class="surge-rank">
               <div class="prob">{{ r.fv_score }}<span>分</span></div>
               <div class="prob-lab">金融价值</div>
+              <div class="prob growth" :title="r.growth_views_h != null ? '浏览增速 ' + fmtN(r.growth_views_h) + '/时' : '增速基线攒集中'">
+                {{ r.growth_views_h != null ? fmtN(r.growth_views_h) : '—' }}<span v-if="r.growth_views_h != null">/时</span></div>
+              <div class="prob-lab">增速</div>
               <span class="badge" :class="tierBadge(r.fv_tier)" :title="fvTitle(r)">{{ r.fv_tier }}</span>
               <span v-if="r.golden" class="badge golden" style="margin-top:4px">黄金窗口</span>
             </div>
@@ -824,7 +827,7 @@ WB.pages.article = {
                 <span>👁 {{ fmtN(r.views) }}</span>
               </div>
               <div class="surge-parts muted">
-                参考: <template v-if="r.growth_views_h != null">增速 {{ fmtN(r.growth_views_h) }}/时</template><template v-else>增速 —(攒基线中)</template><template v-if="r.views_pred != null"> · 预测浏览 {{ fmtN(r.views_pred) }}</template><template v-if="r.reply_exposure != null"> · 评论可蹭 ~{{ fmtN(r.reply_exposure) }} 曝光</template> · {{ r.age_h }}h 前</div>
+                参考: <template v-if="r.views_pred != null">预测浏览 {{ fmtN(r.views_pred) }}</template><template v-if="r.reply_exposure != null"> · 评论可蹭 ~{{ fmtN(r.reply_exposure) }} 曝光</template> · {{ r.age_h }}h 前</div>
               <div class="news-actions">
                 <a :href="r.reply_url" target="_blank" rel="noopener">去评论 ↗</a>
                 <span class="act" @click="xfCopy(r)">一键复制</span>

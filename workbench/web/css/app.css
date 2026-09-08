@@ -489,3 +489,7 @@ input[type=radio], input[type=checkbox] { accent-color: var(--accent); }
 /* 视频分析页三列: 素材池 | 分析对象+结果(最宽) | 历史分析 */
 .analysis-cols { grid-template-columns: 260px minmax(0, 1fr) 300px; }
 @media (max-width: 1100px) { .analysis-cols { grid-template-columns: 1fr; } }
+
+/* 左列增速大数: 与金融价值并列, 绿色醒目 */
+.surge-rank .prob.growth { color: var(--green); font-size: 20px; }
+.surge-rank .prob.growth span { font-size: 11px; }
