@@ -1329,7 +1329,9 @@ def _tts_node(scenes: list, out_dir: Path, provider: dict, voice: str, progress:
     if provider["engine"] == "custom":              # 自定义 OpenAI 兼容供应商: 全量配置透传 Node
         job["provider_config"] = {"base_url": provider.get("base_url") or "",
                                   "api_key": provider.get("api_key") or "",
-                                  "model": provider.get("model") or ""}
+                                  "model": provider.get("model") or "",
+                                  "style": provider.get("style") or "",
+                                  "format": provider.get("format") or ""}
     _atomic_json(job_json, job)
     env = os.environ.copy()
     if provider["engine"] == "dashscope":

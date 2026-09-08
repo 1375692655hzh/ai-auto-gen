@@ -63,6 +63,7 @@ WB.pages.settings = {
         providers: (tts.providers || []).map((p) => ({
           id: p.id, name: p.name, engine: p.engine, enabled: !!p.enabled,
           api_key: "", base_url: p.base_url || "", model: p.model || "",
+          style: p.style || "", format: p.format || "",
           voices: (p.voices || []).map((v) => ({ id: v.id, name: v.name })),
           has_key: !!p.has_key, key_tail: p.key_tail || "", locked: true,
         })),
@@ -181,6 +182,7 @@ WB.pages.settings = {
         providers: (this.s.tts.providers || []).map((p) => ({
           id: p.id, name: p.name, engine: p.engine, enabled: !!p.enabled,
           api_key: p.api_key || "", base_url: p.base_url || "", model: p.model || "",
+          style: p.style || "", format: p.format || "",
           voices: (p.voices || []).filter((v) => this.ttsIdOk(v.id))
             .map((v) => ({ id: v.id, name: v.name || v.id })),
         })),
@@ -536,6 +538,12 @@ WB.pages.settings = {
           <input type="text" v-model="p.model" placeholder="必填, 如 gpt-4o-mini-tts / ark tts 模型" style="width:280px">
           <button class="btn" :disabled="ttsTesting===p.id || !p.base_url" @click="detectTtsVoices(p)">
             {{ ttsTesting===p.id ? '检测中…' : '检测预设语音' }}</button></div>
+        <div class="form-row" v-if="p.engine==='custom'"><label>风格提示</label>
+          <input type="text" v-model="p.style" placeholder="可选, 语气风格指令(chat 音频模态端点生效)" style="width:420px"></div>
+        <div class="form-row" v-if="p.engine==='custom'"><label>音频格式</label>
+          <select v-model="p.format" style="width:120px">
+            <option value="">mp3(默认)</option><option value="wav">wav</option>
+          </select></div>
         <p class="muted" style="margin:6px 0 4px">音色清单</p>
         <div v-for="(v,i) in p.voices" :key="i" class="form-row">
           <label>音色 {{ i+1 }}</label>

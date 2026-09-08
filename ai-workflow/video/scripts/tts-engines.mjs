@@ -75,11 +75,14 @@ export async function synthCustom(cfg, voice, text, outFile) {
 	if (r1.status !== 404)
 		throw new Error(`custom TTS HTTP ${r1.status}: ${(await r1.text()).slice(0, 150)}`);
 	// 协议二: /chat/completions 音频模态(小米 mimo 等把 TTS 挂在 chat 端点的实现)
+	// 官方契约: user 消息=语气风格指令, assistant 消息=要合成的文本(供应商可配默认风格)
+	const style = cfg.style || "清晰自然的新闻播报语气, 语速适中, 情绪平稳专业";
 	const r2 = await fetch(base + "/chat/completions", {
 		method: "POST", headers: auth,
 		body: JSON.stringify({ model: cfg.model, modalities: ["text", "audio"],
-			audio: { voice, format: "mp3" },
-			messages: [{ role: "assistant", content: text }] }),
+			audio: { voice, format: cfg.format || "mp3" },
+			messages: [{ role: "user", content: style },
+			           { role: "assistant", content: text }] }),
 	});
 	if (!r2.ok) throw new Error(`custom TTS(chat) HTTP ${r2.status}: ${(await r2.text()).slice(0, 150)}`);
 	const d2 = await r2.json();
