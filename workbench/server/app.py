@@ -648,28 +648,42 @@ def create_app() -> FastAPI:
             return {"ok": False, "error": "先填接口地址"}
         url = base + "/audio/voices"
         try:
-            if "minimax" in base:                  # MiniMax: 独立语音列表接口
-                vb = json.dumps({"voice_type": "system"}).encode()
-                req = urllib.request.Request(base + "/get_voice", data=vb,
-                    headers={"Authorization": f"Bearer {key}",
-                             "Content-Type": "application/json"})
-                with urllib.request.urlopen(req, timeout=15) as r:
-                    d = json.loads(r.read())
-                br = d.get("base_resp") or {}
-                if br.get("status_code"):
-                    return {"ok": False,
-                            "error": f"MiniMax {br.get('status_code')}: {br.get('status_msg')}"}
-                raw = (d.get("system_voice_list") or d.get("voices")
-                       or d.get("data") or [])
+            if "minimax" in base:                  # MiniMax: get_voice 只列自建音色,
+                                                   # 系统预设不返回 → 空则回官方预设库
                 voices = []
-                for v in raw:
-                    vid = str(v.get("voice_id") or v.get("id") or "")
-                    if vid:
-                        voices.append({"id": vid,
-                                       "name": str(v.get("voice_name") or v.get("name") or vid)})
+                for vtype in ("all", "system"):
+                    try:
+                        vb = json.dumps({"voice_type": vtype}).encode()
+                        req = urllib.request.Request(base + "/get_voice", data=vb,
+                            headers={"Authorization": f"Bearer {key}",
+                                     "Content-Type": "application/json"})
+                        with urllib.request.urlopen(req, timeout=15) as r:
+                            d = json.loads(r.read())
+                        for v in (d.get("system_voice_list") or d.get("voices")
+                                  or d.get("data") or []):
+                            vid = str(v.get("voice_id") or v.get("id") or "")
+                            if vid and not any(x["id"] == vid for x in voices):
+                                voices.append({"id": vid,
+                                               "name": str(v.get("voice_name") or v.get("name") or vid)})
+                    except Exception:
+                        continue
                 if voices:
-                    return {"ok": True, "voices": voices}
-                return {"ok": False, "error": "MiniMax get_voice 返回为空"}
+                    return {"ok": True, "voices": voices,
+                            "hint": "含账号自建音色"}
+                # 官方预设语音库(MiniMax T2A 文档标准集, 无需接口)
+                presets = [
+                    ("male-qn-qingse", "青涩青年·男"), ("male-qn-jingying", "精英青年·男"),
+                    ("male-qn-badao", "霸道青年·男"), ("male-qn-daxuesheng", "大学生·男"),
+                    ("female-shaonv", "少女·女"), ("female-yujie", "御姐·女"),
+                    ("female-chengshu", "成熟·女"), ("female-tianmei", "甜美·女"),
+                    ("male-guangchangbo", "男播音"), ("female-yuanqi", "元气·女"),
+                    ("presenter_male", "主持人·男"), ("presenter_female", "主持人·女"),
+                    ("audiobook_male_1", "有声书·男1"), ("audiobook_female_1", "有声书·女1"),
+                    ("audiobook_male_2", "有声书·男2"), ("audiobook_female_2", "有声书·女2"),
+                ]
+                return {"ok": True, "model": str(body.get("model") or "speech-2.8-hd"),
+                        "voices": [{"id": v, "name": n} for v, n in presets],
+                        "hint": "get_voice 为空(无自建音色), 已给官方预设语音库"}
             req = urllib.request.Request(url, headers={"Authorization": f"Bearer {key}"})
             with urllib.request.urlopen(req, timeout=15) as r:
                 d = json.loads(r.read())
