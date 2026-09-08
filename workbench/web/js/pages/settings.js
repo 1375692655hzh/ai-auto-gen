@@ -63,7 +63,7 @@ WB.pages.settings = {
         providers: (tts.providers || []).map((p) => ({
           id: p.id, name: p.name, engine: p.engine, enabled: !!p.enabled,
           api_key: "", base_url: p.base_url || "", model: p.model || "",
-          style: p.style || "", format: p.format || "",
+          style: p.style || "", format: p.format || "", open: false,
           voices: (p.voices || []).map((v) => typeof v === "string" ? { id: v, name: v }
             : { id: v.id, name: v.name || v.id }),
           has_key: !!p.has_key, key_tail: p.key_tail || "", locked: true,
@@ -203,6 +203,46 @@ WB.pages.settings = {
       if (pub.default) this.s.tts.default = { ...this.s.tts.default, ...pub.default };
       this.ttsRemoved = [];
     },
+    /* 模板快填: 已知供应商的 url/model/音色/风格一键就位, 用户只填 api_key */
+    addTtsTemplate(kind) {
+      const TPL = {
+        mimo: { name: "mimo(小米)", engine: "custom",
+                base_url: "https://api.xiaomimimo.com/v1", model: "mimo-v2.5-tts",
+                style: "财经新闻播报语气, 清晰专业, 语速适中",
+                voices: ["mimo_default", "冰糖", "茉莉", "苏打", "白桦",
+                         "Mia", "Chloe", "Milo", "Dean"] },
+        minimax: { name: "MiniMax", engine: "custom",
+                   base_url: "https://api.minimax.io/v1", model: "speech-2.8-hd",
+                   style: "",
+                   voices: ["male-qn-qingse", "male-qn-jingying", "male-qn-badao",
+                            "male-qn-daxuesheng", "female-shaonv", "female-yujie",
+                            "female-chengshu", "female-tianmei", "male-guangchangbo",
+                            "female-yuanqi", "presenter_male", "presenter_female",
+                            "audiobook_male_1", "audiobook_female_1",
+                            "audiobook_male_2", "audiobook_female_2"] },
+      };
+      const tpl = TPL[kind];
+      if (!tpl) return;
+      const provs = this.s.tts.providers || [];
+      if (provs.some((p2) => p2.base_url === tpl.base_url)) {
+        WB.toast("已存在同地址的 " + tpl.name + " 供应商, 无需重复添加");
+        return;
+      }
+      const ids = new Set(provs.map((p2) => p2.id));
+      let n = 1, id = kind;
+      while (ids.has(id)) { n += 1; id = kind + "-" + n; }
+      this.s.tts.providers.push({
+        id, name: tpl.name, engine: tpl.engine, enabled: true,
+        api_key: "", base_url: tpl.base_url, model: tpl.model, style: tpl.style,
+        voices: tpl.voices.map((v) => ({ id: v, name: v })),
+        has_key: false, key_tail: "", locked: false, open: true,
+      });
+      WB.toast(tpl.name + " 模板已填好 —— 补上 API Key 后点保存设置");
+    },
+    toggleTtsOpen(p) { p.open = p.open === true ? false : true; },
+    engineLabel(e) {
+      return { edge: "Edge TTS", dashscope: "DashScope", custom: "自定义" }[e] || e;
+    },
     addTtsProvider() {
       const ids = new Set((this.s.tts.providers || []).map((p) => p.id));
       let n = 1, id = "custom";
@@ -210,7 +250,7 @@ WB.pages.settings = {
       this.s.tts.providers.push({
         id, name: "自定义供应商", engine: "edge", enabled: true,
         api_key: "", base_url: "", voices: this.engineVoices("edge").map((v) => ({ ...v })),
-        has_key: false, key_tail: "", locked: false,
+        has_key: false, key_tail: "", locked: false, open: true,
       });
       this.ttsRemoved = this.ttsRemoved.filter((x) => x !== id);
     },
@@ -245,7 +285,7 @@ WB.pages.settings = {
       this.ttsTesting = p.id;
       try {
         const d = await WB.api.post("/tts-voices-detect",
-          { base_url: p.base_url, api_key: p.api_key, model: p.model });
+          { base_url: p.base_url, api_key: p.api_key, model: p.model, provider_id: p.id });
         if (d.ok) {
           if (d.model && !p.model) p.model = d.model;
           const have = new Set((p.voices || []).map(v => v.id));
@@ -519,7 +559,16 @@ WB.pages.settings = {
           <option v-for="v in ttsDefaultVoices()" :key="v.id" :value="v.id">{{ v.name || v.id }}</option>
         </select></div>
       <div v-for="p in s.tts.providers" :key="p.id"
-           style="margin:12px 0;padding:10px;border:1px dashed var(--border);border-radius:8px">
+           style="margin:12px 0;border:1px dashed var(--border);border-radius:8px">
+        <div style="display:flex;align-items:center;gap:8px;padding:9px 10px;cursor:pointer;flex-wrap:wrap"
+             @click="toggleTtsOpen(p)">
+          <span style="font-weight:600">{{ p.name || p.id }}</span>
+          <span class="badge">{{ engineLabel(p.engine) }}</span>
+          <span class="badge" :class="p.enabled ? 'green' : ''">{{ p.enabled ? '启用' : '停用' }}</span>
+          <span class="muted" style="font-size:11px">{{ (p.voices || []).length }} 音色</span>
+          <span class="muted" style="margin-left:auto;font-size:11px">{{ p.open ? '收起 ▲' : '展开编辑 ▼' }}</span>
+        </div>
+        <div v-show="p.open" style="padding:0 10px 10px">
         <div class="form-row"><label>标识</label>
           <input type="text" v-model="p.id" :readonly="p.locked" placeholder="edge / dashscope / custom"
                  style="width:180px">
@@ -568,9 +617,12 @@ WB.pages.settings = {
           {{ ttsTests[p.id].ok ? '✓ ' : '✗ ' }}{{ ttsTests[p.id].text }}</div>
         <audio v-if="ttsTests[p.id] && ttsTests[p.id].url" :src="ttsTests[p.id].url" controls
                style="display:block;margin-top:8px;max-width:100%;height:34px"></audio>
+        </div>
       </div>
       <div class="form-row">
-        <button class="btn" @click="addTtsProvider">＋ 添加供应商</button>
+        <button class="btn" @click="addTtsTemplate('mimo')">＋ mimo(小米) 模板</button>
+        <button class="btn" @click="addTtsTemplate('minimax')">＋ MiniMax 模板</button>
+        <button class="btn" @click="addTtsProvider">＋ 空白供应商</button>
         <button class="btn primary" :disabled="saving" @click="save">保存设置</button>
       </div>
     </div>

@@ -642,8 +642,12 @@ def create_app() -> FastAPI:
         """自定义供应商: 在线检测支持的预设音色。尝试 GET {base}/audio/voices,
         兼容多种返回形状; 不支持的端点明确报错, 让用户回手动添加。"""
         body = await request.json()
-        base = str(body.get("base_url") or "").rstrip("/")
-        key = str(body.get("api_key") or "")
+        # 已保存供应商: 表单留空的字段回退存储值(key 打码后用户点检测仍可用真实 key)
+        saved = next((p for p in (config.load().get("tts") or {}).get("providers", [])
+                      if p.get("id") == str(body.get("provider_id") or "")), None)             if body.get("provider_id") else None
+        base = str(body.get("base_url") or "") or (saved or {}).get("base_url", "")
+        key = str(body.get("api_key") or "") or (saved or {}).get("api_key", "")
+        model = str(body.get("model") or "") or (saved or {}).get("model", "")
         if not base:
             return {"ok": False, "error": "先填接口地址"}
         url = base + "/audio/voices"
@@ -681,7 +685,7 @@ def create_app() -> FastAPI:
                     ("audiobook_male_1", "有声书·男1"), ("audiobook_female_1", "有声书·女1"),
                     ("audiobook_male_2", "有声书·男2"), ("audiobook_female_2", "有声书·女2"),
                 ]
-                return {"ok": True, "model": str(body.get("model") or "speech-2.8-hd"),
+                return {"ok": True, "model": model or "speech-2.8-hd",
                         "voices": [{"id": v, "name": n} for v, n in presets],
                         "hint": "get_voice 为空(无自建音色), 已给官方预设语音库"}
             req = urllib.request.Request(url, headers={"Authorization": f"Bearer {key}"})
@@ -701,7 +705,7 @@ def create_app() -> FastAPI:
             return {"ok": True, "voices": voices}
         except urllib.error.HTTPError as e:
             if e.code == 404:
-                return _detect_fallback(base, key, str(body.get("model") or ""))
+                return _detect_fallback(base, key, model)
             return {"ok": False, "error": f"HTTP {e.code}: {e.read().decode('utf-8', 'replace')[:120]}"}
         except Exception as e:
             return {"ok": False, "error": f"检测失败: {type(e).__name__}: {str(e)[:100]}"}
