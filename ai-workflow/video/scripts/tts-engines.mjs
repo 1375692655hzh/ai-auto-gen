@@ -60,15 +60,32 @@ export async function synthDashscope(text, voice, outFile) {
 export async function synthCustom(cfg, voice, text, outFile) {
 	const base = String(cfg.base_url || "").replace(/\/+$/, "");
 	if (!base || !cfg.model) throw new Error("custom 供应商缺 base_url/model");
-	const resp = await fetch(base + "/audio/speech", {
-		method: "POST",
-		headers: { "Content-Type": "application/json", Authorization: `Bearer ${cfg.api_key || ""}` },
+	const auth = { "Content-Type": "application/json", Authorization: `Bearer ${cfg.api_key || ""}` };
+	// 协议一: OpenAI /audio/speech
+	const r1 = await fetch(base + "/audio/speech", {
+		method: "POST", headers: auth,
 		body: JSON.stringify({ model: cfg.model, voice, input: text, response_format: "mp3" }),
 	});
-	if (!resp.ok) throw new Error(`custom TTS HTTP ${resp.status}: ${(await resp.text()).slice(0, 150)}`);
-	const buf = Buffer.from(await resp.arrayBuffer());
-	if (buf.length < 200) throw new Error(`custom TTS 返回内容过小(${buf.length}B), 疑似非音频`);
-	writeFileSync(outFile, buf);
+	if (r1.ok) {
+		const buf = Buffer.from(await r1.arrayBuffer());
+		if (buf.length < 200) throw new Error(`custom TTS 返回内容过小(${buf.length}B), 疑似非音频`);
+		writeFileSync(outFile, buf);
+		return;
+	}
+	if (r1.status !== 404)
+		throw new Error(`custom TTS HTTP ${r1.status}: ${(await r1.text()).slice(0, 150)}`);
+	// 协议二: /chat/completions 音频模态(小米 mimo 等把 TTS 挂在 chat 端点的实现)
+	const r2 = await fetch(base + "/chat/completions", {
+		method: "POST", headers: auth,
+		body: JSON.stringify({ model: cfg.model, modalities: ["text", "audio"],
+			audio: { voice, format: "mp3" },
+			messages: [{ role: "assistant", content: text }] }),
+	});
+	if (!r2.ok) throw new Error(`custom TTS(chat) HTTP ${r2.status}: ${(await r2.text()).slice(0, 150)}`);
+	const d2 = await r2.json();
+	const b64 = d2?.choices?.[0]?.message?.audio?.data || "";
+	if (!b64) throw new Error("chat TTS 响应缺 audio.data");
+	writeFileSync(outFile, Buffer.from(b64, "base64"));
 }
 
 export async function synthOnce(engine, voice, text, outFile, customCfg) {

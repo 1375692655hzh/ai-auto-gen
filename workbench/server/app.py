@@ -23,6 +23,50 @@ from . import config, gcompose, proxy, retrieve, stats, views, vstudio, xaccount
 WEB = Path(__file__).resolve().parent.parent / "web"
 
 
+def _detect_fallback(base: str, key: str, model: str) -> dict:
+    """/audio/voices 不存在时: ①/models 找 tts 模型(回填 model 提示)
+    ②/chat/completions 发假音色探测, 从错误信息 "Available voices: [...]" 提取清单
+    (小米 mimo 类端点实测有效)。"""
+    auth = {"Content-Type": "application/json", "Authorization": f"Bearer {key}"}
+    hint = ""
+    try:
+        req = urllib.request.Request(base + "/models", headers=auth)
+        with urllib.request.urlopen(req, timeout=15) as r:
+            d = json.loads(r.read())
+        tts_models = [m.get("id") for m in (d.get("data") or [])
+                      if "tts" in str(m.get("id", "")).lower()]
+        if tts_models:
+            hint = f"检测到 TTS 模型: {tts_models[0]}"
+            if not model:
+                model = tts_models[0]
+    except Exception:
+        pass
+    if model:
+        try:
+            body = json.dumps({"model": model, "modalities": ["text", "audio"],
+                               "audio": {"voice": "__probe__", "format": "mp3"},
+                               "messages": [{"role": "assistant", "content": "探测"}]}).encode()
+            req = urllib.request.Request(base + "/chat/completions", data=body, headers=auth)
+            try:
+                urllib.request.urlopen(req, timeout=20)
+            except urllib.error.HTTPError as e:
+                import re
+                m = re.search(r"Available voices[:：]\s*\[([^\]]+)\]",
+                              e.read().decode("utf-8", "replace"))
+                if m:
+                    voices = [{"id": v.strip().strip("'\""), "name": v.strip().strip("'\"")}
+                              for v in m.group(1).split(",") if v.strip()]
+                    voices = [v for v in voices if v["id"]]
+                    if voices:
+                        return {"ok": True, "voices": voices, "model": model,
+                                "hint": (hint + "; " if hint else "") + "音色来自端点错误枚举"}
+        except Exception:
+            pass
+    return {"ok": False, "hint": hint,
+            "error": (hint + ";" if hint else "") + "端点无音色列表接口, 请按文档手动添加音色"}
+
+
+
 def create_app() -> FastAPI:
     app = FastAPI(title="aag-workbench", version="0.1", docs_url=None, redoc_url=None)
 
@@ -565,6 +609,8 @@ def create_app() -> FastAPI:
     def video_asset_delete(asset_id: str, make_id: str = ""):
         return {"removed": 1, "cleared_overrides": vstudio.asset_del(asset_id, make_id)}
 
+
+
     @app.post("/wb-api/tts-voices-detect")
     async def tts_voices_detect(request: Request):
         """自定义供应商: 在线检测支持的预设音色。尝试 GET {base}/audio/voices,
@@ -593,7 +639,7 @@ def create_app() -> FastAPI:
             return {"ok": True, "voices": voices}
         except urllib.error.HTTPError as e:
             if e.code == 404:
-                return {"ok": False, "error": "端点不支持在线检测(/audio/voices 404), 请手动添加音色"}
+                return _detect_fallback(base, key, str(body.get("model") or ""))
             return {"ok": False, "error": f"HTTP {e.code}: {e.read().decode('utf-8', 'replace')[:120]}"}
         except Exception as e:
             return {"ok": False, "error": f"检测失败: {type(e).__name__}: {str(e)[:100]}"}

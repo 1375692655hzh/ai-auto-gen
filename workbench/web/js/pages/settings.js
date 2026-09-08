@@ -244,11 +244,13 @@ WB.pages.settings = {
         const d = await WB.api.post("/tts-voices-detect",
           { base_url: p.base_url, api_key: p.api_key, model: p.model });
         if (d.ok) {
+          if (d.model && !p.model) p.model = d.model;
           const have = new Set((p.voices || []).map(v => v.id));
           const add = (d.voices || []).filter(v => v.id && !have.has(v.id));
           p.voices.push(...add);
-          WB.toast(`检测到 ${d.voices.length} 个音色, 新增 ${add.length} 个(保存后生效)`);
-        } else WB.toast(d.error || "检测失败");
+          WB.toast(`检测到 ${d.voices.length} 个音色, 新增 ${add.length} 个(保存后生效)`
+            + (d.hint ? " · " + d.hint : ""));
+        } else WB.toast((d.error || "检测失败") + (d.hint ? " · " + d.hint : ""));
       } catch (e) { WB.toast(e.error || "检测失败"); }
       this.ttsTesting = "";
     },
