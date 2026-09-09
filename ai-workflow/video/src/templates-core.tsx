@@ -174,7 +174,7 @@ export const BarsTpl: React.FC<SceneProps> = ({ scene, duration, caption }) => {
 	const frame = useCurrentFrame();
 	const { fps } = useVideoConfig();
 	const maxLen = 430;
-	const maxPct = Math.max(...d.bars.map((b) => b.pct), 1);
+	const maxPct = Math.max(...d.bars.map((b) => Math.abs(b.pct)), 1);
 	return (
 		<SceneShell duration={duration} caption={caption}>
 			<Backdrop />
@@ -193,7 +193,7 @@ export const BarsTpl: React.FC<SceneProps> = ({ scene, duration, caption }) => {
 					}}
 				>
 					{d.bars.map((b: BarData, i) => {
-						const len = (b.pct / maxPct) * maxLen;
+						const len = (Math.abs(b.pct) / maxPct) * maxLen;
 						const grow = spring({
 							frame: frame - 40 - i * 5,
 							fps,
@@ -214,7 +214,7 @@ export const BarsTpl: React.FC<SceneProps> = ({ scene, duration, caption }) => {
 										opacity: grow,
 									}}
 								>
-									-{(b.pct * grow).toFixed(1)}%
+									{b.pct.toFixed(1)}%
 								</div>
 								<div
 									style={{

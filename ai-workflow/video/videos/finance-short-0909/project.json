@@ -1,0 +1,26 @@
+{
+	"id": "finance-short-0909",
+	"title": "短场景兜底 · 历史音频验收",
+	"status": "built",
+	"note": "向导确认即审核（workbench 创建）；draft=待审 reviewed=可制作 built=已出片",
+	"created": "2026-09-09",
+	"date": "2026-09-09",
+	"origin": "workbench",
+	"settings": {
+		"aspect": "16:9",
+		"fps": 30,
+		"theme": "news-dark",
+		"layout": "auto",
+		"enrich": "plain",
+		"generation_method": null,
+		"image_budget": 0,
+		"title": "短场景兜底 · 历史音频验收",
+		"voice": "archived",
+		"tts_provider": "edge",
+		"beat_overrides": [],
+		"materials_dir": "E:\\ai-gen-article-publish\\ai-workflow\\video\\videos\\finance-short-0909\\input\\materials",
+		"require_selected_audio": true
+	},
+	"builtAt": "2026-09-09",
+	"output": "out/final.mp4 (0.28 min)"
+}

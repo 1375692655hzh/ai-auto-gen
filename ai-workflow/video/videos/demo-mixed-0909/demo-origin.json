@@ -1,0 +1,26 @@
+{
+  "generator": "scripts/demo_mixed_video.py",
+  "audio": [
+    {
+      "beat": "b1",
+      "source": "E:\\ai-gen-article-publish\\ai-workflow\\video\\videos\\wb0905205634\\audio\\b1.mp3",
+      "sha256": "cea95674a4fea6a506c3181762cb3039e781d6fead1cf2842ad4b82dde9a8c95"
+    },
+    {
+      "beat": "b2",
+      "source": "E:\\ai-gen-article-publish\\ai-workflow\\video\\videos\\wb0905205634\\audio\\b2.mp3",
+      "sha256": "3e690e4c15cfc57a344ddd431abc57f0cafdbce1882368213c9c2b9c65d35188"
+    },
+    {
+      "beat": "b3",
+      "source": "E:\\ai-gen-article-publish\\ai-workflow\\video\\videos\\wb0907230359\\audio\\b2-s1.mp3",
+      "sha256": "0456abdf15a9448d1afb4bdb1bb0692af8ae9b59130b6176a0f06334f59efe7a"
+    },
+    {
+      "beat": "b4",
+      "source": "E:\\ai-gen-article-publish\\ai-workflow\\video\\videos\\wb0907230359\\audio\\b4-s4.mp3",
+      "sha256": "e7984aeecd1944641d3781035fb4804d50713219a22c509173218e98303ebc72"
+    }
+  ],
+  "visuals": "program-drawn demo assets"
+}

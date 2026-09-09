@@ -1,3 +1,4 @@
+import { captionAt } from "../shared/captions.mjs";
 // 场景模板库（三）：竖版 Shorts（1080×1920）—— vtitle / vstat / vpoints
 // 移植自 ai-video 同名文件；本仓库 SceneProps 无 phrases/reveal 渐进揭示链路，
 // 入场节奏一律回退模板固定 delay。Data 接口在本文件内声明（story-types 契约不动）。
@@ -49,10 +50,7 @@ const VShell: React.FC<{
 	caption?: string | CaptionCue[] | null;
 }> = ({ children, duration, caption }) => {
 	const frame = useCurrentFrame();
-	const captionText = Array.isArray(caption)
-		? (caption.find((c) => frame >= c.start && frame < c.end) ?? caption[caption.length - 1])
-			?.t ?? ""
-		: caption;
+	const captionText = captionAt(caption, frame, duration, useVideoConfig().fps);
 	const fade = interpolate(
 		frame,
 		[0, 10, duration - 10, duration],
@@ -90,6 +88,7 @@ const VShell: React.FC<{
 						style={{
 							maxWidth: 940,
 							backgroundColor: "rgba(7,11,22,0.85)",
+                            color: "#f5f5f5",
 							border: `2px solid ${COLORS.border}`,
 							borderRadius: 18,
 							padding: "16px 40px",
@@ -98,7 +97,7 @@ const VShell: React.FC<{
 							textAlign: "center",
 						}}
 					>
-						{captionText}
+						<span style={{whiteSpace: "pre-wrap"}}>{captionText}</span>
 					</div>
 				</div>
 			) : null}

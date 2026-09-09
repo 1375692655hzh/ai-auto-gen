@@ -260,10 +260,13 @@ class MakeTests(unittest.TestCase):
         req = {"make_id": row["id"], "provider_id": "edge", "voice": "zh-CN-XiaoxiaoNeural"}
         with patch.object(vstudio, "_tts_node", side_effect=self.mock_tts):
             self.assertEqual(vstudio._run_voice(req)[1], 0)
-        asset, _ = vstudio.asset_add(row["id"], "b2", "image.png", b"image")
+        ready = vstudio.make_get(row["id"])
+        for item in ready["voice"]["items"].values():
+            audio = vstudio._voice_file(row["id"], ready["voice"]["voice_key"], item["file"])
+            audio.with_suffix(".cues.json").write_text('{"origin":"provider-alignment","unit":"seconds","cues":[]}', encoding="utf-8")
+        asset, _ = vstudio.asset_add("image.png", b"image")
         vstudio.make_upsert({"id": row["id"], "video": {"beat_overrides": [
-            {"beat_id": "b2", "method": "upload_image", "asset_id": asset["asset_id"]},
-            {"beat_id": "b3", "method": "upload_image", "asset_id": "missing"}]}})
+            {"beat_id": "b2", "method": "upload_image", "asset_id": asset["asset_id"]}]}})
         for exit_code in (0, 3):
             pid = "offline" + str(exit_code)
             vstudio.begin_job("build", {"make_id": row["id"], "project_id": pid, "mode": "build"})
@@ -274,10 +277,12 @@ class MakeTests(unittest.TestCase):
             proj = self.tmp / "projects" / pid
             manifest = json.loads((proj / "audio" / "manifest.json").read_text())
             self.assertEqual(manifest, {b["id"]: vstudio.voice_hash(b["narration"]) for b in row["script"]["beats"]})
+            self.assertTrue(all((proj / "audio" / (b["id"] + ".cues.json")).is_file() for b in row["script"]["beats"]))
+            self.assertEqual((proj / "out" / "发布前核对.md").is_file(), exit_code == 0)
             story = json.loads((proj / "story.json").read_text(encoding="utf-8"))
             self.assertEqual(story["scenes"][1]["template"], "clip")
             self.assertTrue((proj / "input" / "materials" / (asset["asset_id"] + ".png")).is_file())
-            self.assertIn("场景 b3 素材缺失，回退模板", vstudio.status_payload()["build"]["result"]["warnings"])
+            self.assertTrue(json.loads((proj / "project.json").read_text(encoding="utf-8"))["settings"]["require_selected_audio"])
             saved = vstudio.make_get(row["id"])
             self.assertEqual(saved["status"], "built" if exit_code == 0 else "voice_ready")
             self.assertEqual(saved["last_build"]["project_id"], pid)

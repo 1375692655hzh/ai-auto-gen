@@ -69,6 +69,7 @@ def _detect_fallback(base: str, key: str, model: str) -> dict:
 
 def create_app() -> FastAPI:
     app = FastAPI(title="aag-workbench", version="0.1", docs_url=None, redoc_url=None)
+    vstudio.migrate_legacy_assets()
 
     # ── 数据源代理(前端唯一取数口) ──────────────────────────────────────────
     @app.get("/wb-api/v1/{path:path}")
@@ -188,6 +189,42 @@ def create_app() -> FastAPI:
                                  "hint": (result.stderr or result.stdout or "")[-200:]},
                                 status_code=400)
         return {"renamed": 1, "title": title}
+
+    @app.post("/wb-api/open-folder")
+    async def open_folder(request: Request):
+        """在资源管理器中打开工作台自有产出目录（语音稿/成片），只允许白名单内的自有目录。"""
+        import re
+        import subprocess
+        body = await request.json()
+        kind = body.get("kind")
+        make_id = body.get("make_id") or ""
+        project_id = body.get("project_id") or ""
+        do_open = body.get("open", True)
+        if not re.fullmatch(r"[\w\-]*", make_id) or not re.fullmatch(r"[\w\-]*", project_id):
+            return JSONResponse({"error": "bad_id"}, status_code=400)
+        from . import vmake, vstudio
+        target = None
+        if kind == "voice" and make_id:
+            row = vstudio.make_get(make_id)
+            vkey = ((row or {}).get("voice") or {}).get("voice_key") or ""
+            if row and vkey:
+                target = config.DATA_DIR / "video_voice" / make_id / vkey
+            elif make_id:                            # 无激活 take: 回退制作单语音根目录(历史 take)
+                make_root = config.DATA_DIR / "video_voice" / make_id
+                if make_root.is_dir():
+                    target = make_root
+        elif kind == "project_out" and project_id:
+            if not re.fullmatch(r"[\w\-]+", project_id):
+                return JSONResponse({"error": "bad_id"}, status_code=400)
+            target = vmake.VIDEOS_DIR / project_id / "out"
+        if target is None:
+            return JSONResponse({"error": "bad_kind"}, status_code=400)
+        target = target.resolve()
+        if not target.is_dir():
+            return JSONResponse({"error": "folder_not_found", "path": str(target)}, status_code=404)
+        if do_open:
+            subprocess.Popen(["explorer.exe", str(target)])
+        return {"opened": bool(do_open), "path": str(target)}
 
     @app.get("/wb-api/videos/{vid}/file/{name}")
     def video_file(vid: str, name: str):
@@ -596,14 +633,16 @@ def create_app() -> FastAPI:
     @app.put("/wb-api/video-assets")
     async def video_asset_add(request: Request):
         name = request.query_params.get("name", "")
-        mid = request.query_params.get("make_id", "")
-        bid = request.query_params.get("beat_id", "")
         ext = Path(name).suffix.lower().lstrip(".")
-        if ext not in vstudio.ASSET_EXTS:
+        if ext not in vstudio.ASSET_KIND:
             return JSONResponse({"error": "bad_ext"}, status_code=400)
-        if not vstudio.make_get(mid):
-            return JSONResponse({"error": "make_not_found"}, status_code=404)
-        limit = (100 if ext in ("mp4", "webm") else 15) * 1024 * 1024
+        limit = vstudio.ASSET_LIMITS[vstudio.ASSET_KIND[ext]]
+        try:
+            duration_s = float(request.query_params.get("duration_s", ""))
+            if not (-float("inf") < duration_s < float("inf")):
+                duration_s = None
+        except ValueError:
+            duration_s = None
         try:
             length = int(request.headers.get("content-length", "0"))
         except ValueError:
@@ -615,25 +654,84 @@ def create_app() -> FastAPI:
             return JSONResponse({"error": "empty_body"}, status_code=400)
         if len(body) > limit:
             return JSONResponse({"error": "too_large"}, status_code=400)
-        asset, err = vstudio.asset_add(mid, bid, name, body)
+        asset, err = vstudio.asset_add(name, body, duration_s)
         return JSONResponse(err, status_code=400) if err else {"asset": asset}
 
     @app.get("/wb-api/video-assets")
-    def video_assets(make_id: str = ""):
-        return {"assets": vstudio.assets_list(make_id)}
+    def video_assets():
+        return {"assets": vstudio.assets_list()}
 
     @app.get("/wb-api/video-assets/{asset_id}/file")
-    def video_asset_file(asset_id: str, make_id: str = ""):
-        path, _ = vstudio.asset_find(asset_id, make_id)
+    def video_asset_file(asset_id: str):
+        path, _ = vstudio.asset_find(asset_id)
         if not path:
             return JSONResponse({"error": "not_found"}, status_code=404)
         mime = {"png": "image/png", "jpg": "image/jpeg", "jpeg": "image/jpeg", "webp": "image/webp",
-                "mp4": "video/mp4", "webm": "video/webm"}[path.suffix.lstrip(".")]
+                "mp4": "video/mp4", "webm": "video/webm", "mp3": "audio/mpeg",
+                "wav": "audio/wav", "m4a": "audio/mp4"}[path.suffix.lower().lstrip(".")]
         return FileResponse(str(path), media_type=mime)
 
     @app.delete("/wb-api/video-assets/{asset_id}")
-    def video_asset_delete(asset_id: str, make_id: str = ""):
-        return {"removed": 1, "cleared_overrides": vstudio.asset_del(asset_id, make_id)}
+    def video_asset_delete(asset_id: str, force: str = ""):
+        result = vstudio.asset_del(asset_id, force=force.lower() in ("1", "true"))
+        if not result["ok"]:
+            refs = result["refs"]
+            count = len({r["make_id"] for r in refs})
+            names = "、".join(f"{r['title']}×{r['beat_id']}" for r in refs)
+            return JSONResponse({"error": "asset_in_use", "refs": refs,
+                                 "hint": f"被 {count} 个制作引用: {names}"}, status_code=409)
+        return {"removed": 1, "cleared_overrides": result["cleared_overrides"]}
+
+    @app.post("/wb-api/video-assets/{asset_id}/rename")
+    async def video_asset_rename(asset_id: str, request: Request):
+        try:
+            body = await request.json()
+        except ValueError:
+            body = None
+        name = body.get("name") if isinstance(body, dict) else None
+        if not isinstance(name, str) or not name.strip():
+            return JSONResponse({"error": "bad_name"}, status_code=400)
+        asset = vstudio.asset_rename(asset_id, name)
+        return {"asset": asset} if asset else JSONResponse({"error": "asset_not_found"}, status_code=404)
+
+    @app.get("/wb-api/video-templates")
+    def video_templates():
+        return vstudio.templates_catalog()
+
+    @app.post("/wb-api/video-style")
+    async def video_style(request: Request):
+        from . import vmake
+        try:
+            body = await request.json()
+        except ValueError:
+            body = None
+        if not isinstance(body, dict):
+            return JSONResponse({"error": "bad_body"}, status_code=400)
+        vs = config.load().get("video_studio") or {}
+        vs = dict(vs) if isinstance(vs, dict) else {}
+        allowed = {"default_theme": vmake.THEMES, "default_layout": vmake.LAYOUTS,
+                   "default_generation_method": {m["id"] for m in vmake.GENERATION_METHODS} | {"inherit"}}
+        for key, values in allowed.items():
+            if key in body:
+                if not isinstance(body[key], str) or body[key] not in values:
+                    return JSONResponse({"error": "bad_" + key}, status_code=400)
+                vs[key] = body[key]
+        favorites = vs.get("favorites") or []
+        favorites = list(dict.fromkeys(x for x in favorites if isinstance(x, str))) if isinstance(favorites, list) else []
+        if "favorite" in body:
+            favorite = body["favorite"]
+            keys = {c["key"] for c in vstudio.templates_catalog()["cards"]}
+            if (not isinstance(favorite, dict) or not isinstance(favorite.get("key"), str)
+                    or favorite["key"] not in keys or not isinstance(favorite.get("on"), bool)):
+                return JSONResponse({"error": "bad_favorite"}, status_code=400)
+            key = favorite["key"]
+            if favorite["on"] and key not in favorites:
+                favorites.append(key)
+            elif not favorite["on"]:
+                favorites = [x for x in favorites if x != key]
+        vs["favorites"] = favorites
+        saved = config.apply_patch({"video_studio": vs})
+        return {"video_studio": saved["video_studio"]}
 
 
 
@@ -978,8 +1076,16 @@ def create_app() -> FastAPI:
         theme = theme if isinstance(theme, str) and theme in THEMES else LEGACY_PACK_MAP[sp][0]
         layout = layout if isinstance(layout, str) and layout in LAYOUTS else LEGACY_PACK_MAP[sp][1]
         tts_provider = str(body.get("tts_provider") or "edge")
-        if tts_provider not in ("edge", "dashscope"):
+        if tts_provider not in ("edge", "dashscope", "custom"):
             tts_provider = "edge"
+        if theme == "vox-collage" and aspect != "16:9":
+            return JSONResponse({"error": "aspect_unsupported",
+                                 "hint": "VOX 纸拼贴主题仅支持 16:9 画幅，请改选模板动效或切回 16:9"},
+                                status_code=400)
+        if layout == "fast-cut" and aspect != "16:9":
+            return JSONResponse({"error": "aspect_unsupported",
+                                 "hint": "快切编排仅支持 16:9 画幅，请改选其他编排或切回 16:9"},
+                                status_code=400)
         if tts_provider == "dashscope" and not vstudio.build_presets()["dashscope_key_ok"]:
             return JSONResponse({"error": "dashscope_key_missing",
                                  "hint": "DASHSCOPE_API_KEY 未配置（ai-workflow/video/.env）"},

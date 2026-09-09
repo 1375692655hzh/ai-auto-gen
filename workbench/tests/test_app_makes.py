@@ -69,19 +69,28 @@ class AppMakesTests(unittest.TestCase):
         response = self.client.put("/wb-api/video-assets", params={**params, "name": "x.png"}, content=b"png")
         self.assertEqual(response.status_code, 200, response.text)
         asset = response.json()["asset"]
-        path = self.tmp / "video_assets" / row["id"] / (asset["asset_id"] + ".png")
+        path = self.tmp / "video_assets" / (asset["asset_id"] + ".png")
         self.assertEqual(path.read_bytes(), b"png")
         file_url = "/wb-api/video-assets/" + asset["asset_id"]
         self.assertEqual(self.client.get(file_url + "/file", params=params).content, b"png")
         self.assertTrue(self.client.get("/wb-api/video-assets", params=params).json()["assets"][0]["exists"])
-        for ext, limit in (("png", 15), ("mp4", 100)):
+        for ext, limit in (("png", 15), ("mp4", 100), ("mp3", 30)):
             response = self.client.put("/wb-api/video-assets", params={**params, "name": "x." + ext},
                                        content=b"x", headers={"Content-Length": str(limit * 1024 * 1024 + 1)})
             self.assertEqual(response.status_code, 400)
             self.assertEqual(response.json()["error"], "too_large")
-        vstudio.make_upsert({"id": row["id"], "video": {"beat_overrides": [{"beat_id": "b1", "asset_id": asset["asset_id"]}]}})
-        self.assertEqual(self.client.delete(file_url, params=params).json(), {"removed": 1, "cleared_overrides": 1})
+        for ext in ("wav", "m4a"):
+            self.assertEqual(self.client.put("/wb-api/video-assets", params={"name": "x." + ext}, content=b"audio").status_code, 200)
+        vstudio.make_upsert({"id": row["id"], "video": {"beat_overrides": [
+            {"beat_id": "b1", "asset_id": asset["asset_id"], "method": "upload_image", "prompt": "保留"}]}})
+        response = self.client.delete(file_url, params=params)
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(response.json()["error"], "asset_in_use")
+        self.assertEqual(response.json()["refs"][0]["make_id"], row["id"])
+        self.assertEqual(self.client.delete(file_url, params={"force": "1"}).json(), {"removed": 1, "cleared_overrides": 1})
         self.assertFalse(path.exists())
+        self.assertEqual(vstudio.make_get(row["id"])["video"]["beat_overrides"], [
+            {"beat_id": "b1", "method": "upload_image", "prompt": "保留"}])
 
     def test_voice_file_and_path_guard(self):
         url = "/wb-api/video-voice/vmtest/edge-voice/b1.mp3"

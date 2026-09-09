@@ -16,6 +16,8 @@ export const TEMPLATE_IDS = [
 	"vpoints",
 	"paper-board",
 	"clip",
+	"vox-fast-cut",
+	"hand-drawn",
 ];
 
 export const VERTICAL_TEMPLATES = ["vtitle", "vstat", "vpoints"];

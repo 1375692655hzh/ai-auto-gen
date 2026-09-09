@@ -422,6 +422,16 @@ def sources_cmd(args) -> int:
 
 
 def workbench_cmd(args) -> int:
+    # CLI-only isolation for batch acceptance runs; never changes the HTTP server.
+    if getattr(args, "data_dir", None):
+        sys.path.insert(0, str(WB))
+        from server import config, vstudio
+        isolated = Path(args.data_dir).resolve()
+        if (ROOT / "data").resolve() not in isolated.parents:
+            print("--data-dir 必须位于本仓 data/ 内", file=sys.stderr)
+            return EXIT_CONFIG
+        config.DATA_DIR = isolated
+        vstudio.BUILD_LOG_DIR = isolated / "video_builds"
     if args.sub in ("gen-narration", "gen-voice", "test-tts"):
         sys.path.insert(0, str(WB))
         from server import vstudio
@@ -762,7 +772,9 @@ def main() -> int:
     pw_vg = wsub.add_parser("gen-script", help="视频工坊口播脚本生成任务(CLI 子进程入口)")
     for command, desc in (("gen-narration", "视频工坊口播稿生成任务"),
                           ("gen-voice", "视频工坊逐拍语音合成任务")):
-        wsub.add_parser(command, help=desc).add_argument("--json", action="store_true", help="输出单行 JSON")
+        pw_job = wsub.add_parser(command, help=desc)
+        pw_job.add_argument("--json", action="store_true", help="输出单行 JSON")
+        pw_job.add_argument("--data-dir", help="CLI 隔离任务目录（须在本仓 data/ 内）")
     pw_tt = wsub.add_parser("test-tts", help="测试语音供应商与音色连接")
     pw_tt.add_argument("--text", default="", help="自定义试音文本(默认自检句)")
     pw_tt.add_argument("--provider", required=True)
@@ -771,6 +783,7 @@ def main() -> int:
     pw_vg.add_argument("--json", action="store_true", help="输出单行 JSON")
     pw_vb = wsub.add_parser("build-video", help="视频制作渲染编排(CLI 子进程入口, 真渲染分钟级)")
     pw_vb.add_argument("--json", action="store_true", help="输出单行 JSON")
+    pw_vb.add_argument("--data-dir", help="CLI 隔离任务目录（须在本仓 data/ 内）")
     wsub.add_parser("test-llm", help="测试成稿模型连接(最小 ping, JSON 输出)")
     pw_gp = wsub.add_parser("gen-post", help="内容生成成稿编排(CLI 子进程入口: 检索/行情图/技术位/观点聚合/LLM)")
     pw_gp.add_argument("--json", action="store_true", help="输出单行 JSON")

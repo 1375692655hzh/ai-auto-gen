@@ -88,7 +88,7 @@ export const ClipTpl: React.FC<SceneProps> = ({ scene, duration, caption }) => {
 						style={{
 							width: "100%",
 							height: "100%",
-							objectFit: "cover",
+							objectFit: "contain",
 							transform: zoom !== 1 ? `scale(${zoom})` : undefined,
 							transformOrigin: "center",
 						}}
@@ -99,7 +99,7 @@ export const ClipTpl: React.FC<SceneProps> = ({ scene, duration, caption }) => {
 						style={{
 							width: "100%",
 							height: "100%",
-							objectFit: "cover",
+							objectFit: "contain",
 							transform: `${zoom !== 1 ? `scale(${zoom}) ` : ""}${kenBurns(d.kenburns ?? "in", frame, duration)}`,
 						}}
 					/>

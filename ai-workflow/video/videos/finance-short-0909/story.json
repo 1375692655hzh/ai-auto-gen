@@ -1,0 +1,65 @@
+{
+  "meta": {
+    "title": "短场景兜底 · 历史音频验收",
+    "voice": "archived",
+    "fps": 30,
+    "width": 1920,
+    "height": 1080,
+    "format": "16:9",
+    "theme": "terminal-dark",
+    "layout": "auto",
+    "padSeconds": 0.8
+  },
+  "scenes": [
+    {
+      "id": "b1",
+      "template": "title",
+      "narration": "供给放量的同时。",
+      "caption": "供给放量的同时。",
+      "data": {
+        "subtitle1": [
+          {
+            "t": "历史音频验收"
+          }
+        ]
+      }
+    },
+    {
+      "id": "b2",
+      "template": "event",
+      "narration": "传统买家正在撤离。",
+      "caption": "传统买家正在撤离。",
+      "data": {
+        "headline": [
+          {
+            "t": "历史音频验收"
+          }
+        ],
+        "chips": []
+      }
+    },
+    {
+      "id": "b3",
+      "template": "conclusion",
+      "narration": "期限溢价升至百分之零点八三。",
+      "caption": "期限溢价升至百分之零点八三。",
+      "data": {
+        "statements": [
+          {
+            "who": "",
+            "body": [
+              {
+                "t": "期限溢价升至百分之零点八三。"
+              }
+            ]
+          }
+        ],
+        "tagline": [
+          {
+            "t": "期限溢价升至百分之零点八三。"
+          }
+        ]
+      }
+    }
+  ]
+}

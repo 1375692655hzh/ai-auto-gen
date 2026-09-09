@@ -40,14 +40,12 @@ class OverrideTests(unittest.TestCase):
                         self.assertEqual(scene["data"]["kenburns"], "in")
                         self.assertNotIn("start", scene["data"])
 
-    def test_missing_and_unsafe_file_fallback(self):
+    def test_missing_and_unsafe_file_rejected(self):
         with tempfile.TemporaryDirectory() as tmp:
-            baseline, _ = vmake.script_to_story(self.script(), {})
-            for file in ("missing.png", "../outside.png", "C:\\outside.png"):
-                story, warnings = vmake.script_to_story(self.script(), {"materials_dir": tmp,
-                    "beat_overrides": [{"beat_id": "b2", "method": "upload_image", "file": file}]})
-                self.assertEqual(story, baseline)
-                self.assertIn("场景 b2 素材缺失，回退模板", warnings)
+            for file in ("missing.png", "../outside.png", r"C:\outside.png"):
+                with self.assertRaisesRegex(ValueError, "素材缺失或路径非法"):
+                    vmake.script_to_story(self.script(), {"materials_dir": tmp,
+                        "beat_overrides": [{"beat_id": "b2", "method": "upload_image", "file": file}]})
 
     def test_legacy_style_pack(self):
         for pack, theme, layout in (("vox-collage", "vox-collage", "auto"),
@@ -56,22 +54,21 @@ class OverrideTests(unittest.TestCase):
             story, _ = vmake.script_to_story(self.script(), {"style_pack": pack})
             self.assertEqual((story["meta"]["theme"], story["meta"]["layout"]), (theme, layout))
 
-    def test_non_horizontal_ignored(self):
+    def test_non_horizontal_rejected(self):
         for aspect in ("9:16", "1:1", "4:5"):
-            baseline, _ = vmake.script_to_story(self.script(), {"aspect": aspect})
-            story, warnings = vmake.script_to_story(self.script(), {"aspect": aspect,
-                "beat_overrides": [{"beat_id": "b2", "method": "ai_image"}]})
-            self.assertEqual(story, baseline)
-            self.assertIn("编辑生成的逐拍覆盖仅支持 16:9，已忽略", warnings)
+            with self.assertRaisesRegex(ValueError, "不支持画幅"):
+                vmake.script_to_story(self.script(), {"aspect": aspect,
+                    "beat_overrides": [{"beat_id": "b2", "method": "ai_image"}]})
 
-    def test_micro_scene_and_unknown_ignored(self):
+    def test_parent_override_and_unknown_rejected(self):
         script = self.script()
         script["beats"][1]["narration"] = "第一句长旁白完整保留。第二句长旁白继续保留。"
-        story, warnings = vmake.script_to_story(script, {"layout": "fast-cut", "beat_overrides": [
-            {"beat_id": "b2", "method": "ai_image"}, {"beat_id": "missing", "method": "ai_image"}]})
-        self.assertTrue(any("快切微场景" in w for w in warnings))
-        self.assertTrue(any("missing 不存在" in w for w in warnings))
-        self.assertTrue(all(s["template"] != "paper-board" for s in story["scenes"]))
+        story, _ = vmake.script_to_story(script, {"layout": "fast-cut", "beat_overrides": [
+            {"beat_id": "b2", "method": "ai_image"}]})
+        self.assertEqual(story["scenes"][1]["template"], "paper-board")
+        self.assertEqual(story["scenes"][1]["narration"], script["beats"][1]["narration"])
+        with self.assertRaisesRegex(ValueError, "不存在"):
+            vmake.script_to_story(script, {"beat_overrides": [{"beat_id":"missing", "method":"ai_image"}]})
 
 
 if __name__ == "__main__":

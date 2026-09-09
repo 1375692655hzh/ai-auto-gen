@@ -1,3 +1,4 @@
+import { captionAt } from "../shared/captions.mjs";
 import React from "react";
 import { ACTIVE } from "./active-story";
 import {
@@ -152,9 +153,7 @@ export const SceneShell: React.FC<{
 	padding?: number;
 }> = ({ children, duration, caption, padding = 90 }) => {
 	const frame = useCurrentFrame();
-	const captionText = Array.isArray(caption)
-		? (caption.find((c) => frame >= c.start && frame < c.end) ?? caption[caption.length - 1])?.t ?? ""
-		: caption;
+	const captionText = captionAt(caption, frame, duration, useVideoConfig().fps);
 	const fade = interpolate(
 		frame,
 		[0, 10, duration - 10, duration],
@@ -168,7 +167,7 @@ export const SceneShell: React.FC<{
 				paddingTop: padding,
 				paddingLeft: padding,
 				paddingRight: padding,
-				paddingBottom: captionText ? 200 : padding,
+				paddingBottom: (Array.isArray(caption) ? caption.length > 0 : Boolean(caption)) ? 200 : padding,
 				fontFamily: FONT,
 				color: COLORS.text,
 			}}
@@ -189,6 +188,7 @@ export const SceneShell: React.FC<{
 						style={{
 							maxWidth: 1560,
 							backgroundColor: "rgba(7,11,22,0.85)",
+                            color: "#f5f5f5",
 							border: `2px solid ${COLORS.border}`,
 							borderRadius: 18,
 							padding: "16px 40px",
@@ -197,7 +197,7 @@ export const SceneShell: React.FC<{
 							textAlign: "center",
 						}}
 					>
-						{captionText}
+						<span style={{whiteSpace: "pre-wrap"}}>{captionText}</span>
 					</div>
 				</div>
 			) : null}

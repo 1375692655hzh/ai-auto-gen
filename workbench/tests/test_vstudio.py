@@ -85,6 +85,7 @@ class BuildTests(unittest.TestCase):
                 patch.object(vstudio, "load_jobs", return_value={"build": {"request": request}}),
                 patch.object(vmake, "script_to_story", return_value=({"scenes": []}, [])),
                 patch.object(vmake, "create_project"),
+                patch.object(vstudio, "write_review"),
                 patch.object(vmake, "VIDEOS_DIR", videos),
                 patch.object(vstudio, "_fill_collage_images"),
                 patch.object(vstudio, "BUILD_LOG_DIR", MagicMock()),
@@ -123,8 +124,6 @@ class BuildTests(unittest.TestCase):
             ({"aspect": "4:5", "format": "vertical", "fps": 60,
               "theme": "paper-light", "layout": "quote-big", "style_pack": "vox-collage"},
              ("4:5", 60, "paper-light", "quote-big")),
-            ({"format": "vertical", "style_pack": "vox-collage"},
-             ("9:16", 30, "vox-collage", "auto")),
             ({"aspect": [], "format": {}, "fps": 120, "theme": [], "layout": {}},
              ("16:9", 30, "terminal-dark", "auto")),
             ({"theme": "bad", "layout": "bad", "style_pack": "data-dense"},
@@ -147,6 +146,18 @@ class BuildTests(unittest.TestCase):
                     self.assertEqual(tuple(settings[k] for k in ("aspect", "fps", "theme", "layout")),
                                      expected)
                     spawn.assert_called_once()
+            with (
+                patch.object(vstudio, "job_running", return_value=False),
+                patch.object(vstudio, "begin_job") as begin,
+                patch("subprocess.Popen") as spawn,
+            ):
+                response = client.post("/wb-api/video-build", json={
+                    "script": {"format": "vertical", "beats": [{"narration": "测试"}]},
+                    "format": "vertical", "style_pack": "vox-collage"})
+                self.assertEqual(response.status_code, 400, response.text)
+                self.assertIn("16:9", response.json().get("hint", ""))
+                begin.assert_not_called()
+                spawn.assert_not_called()
 
     def test_verify_duration(self):
         root = MagicMock()

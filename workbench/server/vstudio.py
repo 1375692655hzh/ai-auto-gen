@@ -19,6 +19,7 @@ from datetime import datetime
 from pathlib import Path
 
 from . import config, yt_track
+from .finance_compliance import FINANCE_DISCIPLINE, disclaimer_for, write_review
 
 DATA_DIR = Path(__file__).resolve().parents[2] / "data" / "workbench"
 ANALYSES_FILE = DATA_DIR / "video_analyses.json"
@@ -967,6 +968,12 @@ def make_upsert(payload: dict) -> dict | None:
     if mid and not row:
         return None
     if row is None:
+        from .vmake import normalize_theme, normalize_layout, GENERATION_METHODS
+        vs = config.load().get("video_studio") or {}
+        vs = vs if isinstance(vs, dict) else {}
+        gm = str(vs.get("default_generation_method") or "inherit")
+        if gm not in {m["id"] for m in GENERATION_METHODS}:
+            gm = "inherit"
         row = {"id": _new_make_id(), "title": "未命名视频", "status": "editing_narration",
                "created_at": _now(), "updated_at": _now(), "project_id": "",
                "narration": {"source": "", "style_id": "", "ref_text": "", "text": "",
@@ -976,7 +983,9 @@ def make_upsert(payload: dict) -> dict | None:
                "voice": {"profile_id": "", "voice": "", "voice_key": "", "items": {}},
                "assets": [],
                "video": {"mode": "unified", "aspect": "16:9", "fps": 30,
-                         "theme": "terminal-dark", "layout": "auto", "enrich": "plain",
+                         "theme": normalize_theme(vs.get("default_theme")),
+                         "layout": normalize_layout(vs.get("default_layout")), "enrich": "plain",
+                         "generation_method": gm, "image_budget": 8,
                          "hook_index": 0, "beat_overrides": []}}
     if "title" in payload:
         row["title"] = str(payload["title"])
@@ -1028,8 +1037,7 @@ def make_del(mid: str) -> int:
     kept = [r for r in rows if r.get("id") != mid]
     config.save_video_makes(kept)
     if len(kept) != len(rows) and _safe_id(mid):
-        for root in (voice_root(), assets_root()):
-            shutil.rmtree(_safe_path(root, mid), ignore_errors=True)
+        shutil.rmtree(_safe_path(voice_root(), mid), ignore_errors=True)
     return len(rows) - len(kept)
 
 
@@ -1043,20 +1051,15 @@ def make_duplicate(mid: str) -> dict | None:
     row["script_meta"].update(locked=False, locked_at=None)
     row["status"] = "editing_script" if row["narration"]["locked"] and row["script"] else (
         "narration_locked" if row["narration"]["locked"] else "editing_narration")
-    for root, field in ((voice_root(), "voice"), (assets_root(), "assets")):
-        src, dst = _safe_path(root, mid), _safe_path(root, row["id"])
-        try:
-            if src.is_dir():
-                shutil.copytree(src, dst)
-            elif field == "voice":
-                row["voice"]["items"] = {}
-        except OSError:
-            shutil.rmtree(dst, ignore_errors=True)
-            if field == "voice":
-                row["voice"]["items"] = {}
-            else:
-                row["assets"] = []
-                row["video"]["beat_overrides"] = [o for o in row["video"]["beat_overrides"] if not o.get("asset_id")]
+    src, dst = _safe_path(voice_root(), mid), _safe_path(voice_root(), row["id"])
+    try:
+        if src.is_dir():
+            shutil.copytree(src, dst)
+        else:
+            row["voice"]["items"] = {}
+    except OSError:
+        shutil.rmtree(dst, ignore_errors=True)
+        row["voice"]["items"] = {}
     return _make_save(row)
 
 
@@ -1115,61 +1118,151 @@ def unlock_script(mid: str):
     return _make_save(row), None
 
 
-ASSET_EXTS = {"png", "jpg", "jpeg", "webp", "mp4", "webm"}
+ASSET_KIND = {"png": "image", "jpg": "image", "jpeg": "image", "webp": "image",
+              "mp4": "video", "webm": "video",
+              "mp3": "audio", "wav": "audio", "m4a": "audio"}
+ASSET_EXTS = set(ASSET_KIND)
+ASSET_LIMITS = {"image": 15 * 1024 * 1024, "video": 100 * 1024 * 1024, "audio": 30 * 1024 * 1024}
+MAX_ASSETS = 500
+_MIGRATED = False
 
 
-def asset_add(make_id: str, beat_id: str, orig_name: str, body: bytes):
-    row = make_get(make_id)
-    if not row:
-        return None, {"error": "make_not_found"}
+def asset_add(orig_name: str, body: bytes, duration_s=None):
     ext = Path(orig_name).suffix.lower().lstrip(".")
-    if ext not in ASSET_EXTS:
+    if ext not in ASSET_KIND:
         return None, {"error": "bad_ext"}
-    if not _safe_id(make_id):
-        return None, {"error": "bad_id"}
+    rows = config.load_video_assets()
+    if len(rows) >= MAX_ASSETS:
+        return None, {"error": "capacity_limit", "hint": f"素材库最多 {MAX_ASSETS} 条，请先删除不再使用的素材"}
     aid = _id("va")
-    while any(a.get("asset_id") == aid for a in row["assets"]):
+    while any(a.get("asset_id") == aid for a in rows) or asset_find(aid)[0]:
         time.sleep(0.001)
         aid = _id("va")
-    path = _safe_path(assets_root(), make_id, f"{aid}.{ext}")
+    path = _safe_path(assets_root(), f"{aid}.{ext}")
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_bytes(body)
     asset = {"asset_id": aid, "name": orig_name, "ext": ext, "size": len(body),
-             "beat_id": beat_id, "created_at": _now()}
-    row["assets"].append(asset)
-    _make_save(row)
+             "kind": ASSET_KIND[ext], "duration_s": duration_s,
+             "created_at": _now(), "updated_at": _now()}
+    rows.append(asset)
+    config.save_video_assets(rows)
     return asset, None
 
 
-def asset_find(asset_id: str, make_id: str = ""):
-    if not _safe_id(asset_id) or (make_id and not _safe_id(make_id)):
-        return None, make_id
+def asset_find(asset_id: str):
+    if not _safe_id(asset_id):
+        return None, None
     root = assets_root()
-    paths = (_safe_path(root, make_id).glob(f"{asset_id}.*") if make_id
-             else root.glob(f"*/{asset_id}.*"))
-    for p in paths:
-        if p.is_file() and root.resolve() in p.resolve().parents and p.suffix.lstrip(".") in ASSET_EXTS:
-            return p, p.parent.name
-    return None, make_id
+    for pattern in (f"{asset_id}.*", f"*/{asset_id}.*"):
+        for p in root.glob(pattern):
+            kind = ASSET_KIND.get(p.suffix.lower().lstrip("."))
+            if p.is_file() and root.resolve() in p.resolve().parents and kind:
+                return p, kind
+    return None, None
 
 
-def assets_list(make_id: str) -> list:
-    return [{**a, "exists": asset_find(a["asset_id"], make_id)[0] is not None}
-            for a in (make_get(make_id) or {}).get("assets", [])]
+def asset_refs(asset_id: str) -> list:
+    return [{"make_id": row["id"], "title": row.get("title", ""), "beat_id": o.get("beat_id")}
+            for row in config.load_video_makes()
+            for o in (row.get("video") or {}).get("beat_overrides") or []
+            if isinstance(o, dict) and o.get("asset_id") == asset_id]
 
 
-def asset_del(asset_id: str, make_id: str) -> int:
-    path, make_id = asset_find(asset_id, make_id)
-    row = make_get(make_id)
-    if not row:
-        return 0
+def assets_list() -> list:
+    return [{**a, "refs": asset_refs(a.get("asset_id")),
+             "exists": asset_find(a.get("asset_id"))[0] is not None}
+            for a in config.load_video_assets()]
+
+
+def asset_del(asset_id: str, force: bool = False) -> dict:
+    refs = asset_refs(asset_id)
+    if refs and not force:
+        return {"ok": False, "refs": refs}
+    path, _ = asset_find(asset_id)
     if path:
         path.unlink(missing_ok=True)
-    row["assets"] = [a for a in row["assets"] if a.get("asset_id") != asset_id]
-    old = row["video"].get("beat_overrides") or []
-    row["video"]["beat_overrides"] = [o for o in old if o.get("asset_id") != asset_id]
-    _make_save(row)
-    return len(old) - len(row["video"]["beat_overrides"])
+    rows = config.load_video_assets()
+    kept = [a for a in rows if a.get("asset_id") != asset_id]
+    if len(kept) != len(rows):
+        config.save_video_assets(kept)
+    makes, cleared = config.load_video_makes(), 0
+    for row in makes:
+        for o in (row.get("video") or {}).get("beat_overrides") or []:
+            if isinstance(o, dict) and o.get("asset_id") == asset_id:
+                del o["asset_id"]                    # 只解绑素材，保留逐拍编排参数
+                cleared += 1
+                row["updated_at"] = _now()
+    if cleared:
+        config.save_video_makes(makes)
+    return {"ok": True, "cleared_overrides": cleared, "refs": []}
+
+
+def asset_rename(asset_id: str, name: str):
+    if not isinstance(name, str) or not name.strip():
+        return None
+    rows = config.load_video_assets()
+    asset = next((a for a in rows if a.get("asset_id") == asset_id), None)
+    if asset is None:
+        return None
+    asset.update(name=name.strip()[:80], updated_at=_now())
+    config.save_video_assets(rows)
+    return asset
+
+
+def migrate_legacy_assets() -> int:
+    global _MIGRATED
+    if _MIGRATED:
+        return 0
+    _MIGRATED = True
+    root = assets_root()
+    if not root.is_dir():
+        return 0
+    dirs = [p for p in root.iterdir() if p.is_dir() and not p.is_symlink()
+            and root.resolve() in p.resolve().parents]
+    if not dirs:
+        return 0
+    rows = config.load_video_assets()
+    known = {a.get("asset_id") for a in rows}
+    count = 0
+    for folder in dirs:
+        try:
+            files = list(folder.iterdir())
+        except OSError:
+            continue
+        for path in files:
+            ext, aid = path.suffix.lower().lstrip("."), path.stem
+            if ext not in ASSET_KIND or aid in known or not _safe_id(aid):
+                continue
+            try:
+                if not path.is_file() or path.is_symlink() or root.resolve() not in path.resolve().parents:
+                    continue
+                dest = _safe_path(root, f"{aid}.{ext}")
+                if dest.exists():
+                    continue
+                stat = path.stat()
+                shutil.move(str(path), str(dest))
+                stamp = datetime.fromtimestamp(stat.st_mtime).strftime("%Y-%m-%d %H:%M:%S")
+                rows.append({"asset_id": aid, "name": path.name, "ext": ext, "kind": ASSET_KIND[ext],
+                             "size": stat.st_size, "duration_s": None,
+                             "created_at": stamp, "updated_at": stamp})
+                known.add(aid)
+                count += 1
+            except OSError:
+                continue
+        try:
+            folder.rmdir()                          # 仅删除空目录
+        except OSError:
+            pass
+    if count:
+        config.save_video_assets(rows)
+    makes, changed = config.load_video_makes(), False
+    for row in makes:
+        if row.get("assets"):
+            row["assets"] = []
+            changed = True
+    if changed:
+        config.save_video_makes(makes)
+    return count
 
 
 NARRATION_SYSTEM = r"""你是财经口播稿主编。输出且仅输出一个 ```json 代码块，不要解释。
@@ -1179,7 +1272,7 @@ NARRATION_SYSTEM = r"""你是财经口播稿主编。输出且仅输出一个 ``
 ①二元对比壳（不是A而是B）；②命令模板开头（别急着）；③伪洞察标记（真正、其实、本质上、说白了）；④冒号讲义腔；⑤模糊指代（这一点、它）；⑥时态错位（曾经…如今）；⑦没有参照物的空泛比较级（更、明显）；⑧抽象施压（很多人都没意识到）；⑨隐喻口号收尾（起航、破浪）。
 数字写成可念形式，例如百分之十八。节拍短句，每5-8字一顿的口播节奏。
 首句必须是“谁+做了什么+带张力的结果”，结尾悬念收束。paragraphs 3-8 段。
-纯口播禁止 Markdown、角色前缀、镜头指示、元话语。"""
+纯口播禁止 Markdown、角色前缀、镜头指示、元话语。""" + FINANCE_DISCIPLINE
 
 STORYBOARD_SYSTEM = r"""你是口播分镜编辑。输入是已定稿口播稿全文，只输出一个 ```json 代码块。
 输出 wb-video-script/v1：
@@ -1187,7 +1280,7 @@ STORYBOARD_SYSTEM = r"""你是口播分镜编辑。输入是已定稿口播稿�
 铁律：beats[].narration 按顺序拼接（去空白）必须等于口播稿全文（去空白），一字符不许改。
 role 序列首 hook 尾 cta，中段 setup/move/gives/payoff。on_screen 每条≤6词。
 visual_hint/subtitle 必填。hook.variants 恰好3条，type互异，variant[0].text 默认等于首 beat narration。
-只切分并设计画面，不改写、删减或新增口播。"""
+只切分并设计画面，不改写、删减或新增口播。""" + FINANCE_DISCIPLINE
 
 
 def run_narration(request: dict) -> tuple[dict, int]:
@@ -1217,6 +1310,7 @@ def run_narration(request: dict) -> tuple[dict, int]:
             isinstance(p, dict) and isinstance(p.get("text"), str) for p in paragraphs):
         return {"error": "llm_failed", "hint": "模型未返回有效口播稿 JSON"}, 3
     text = "\n\n".join(p["text"] for p in paragraphs)
+    obj.setdefault("disclaimer", disclaimer_for(text, style_id))
     obj.update(schema="wb-narration/v1", title=str(obj.get("title") or "未命名口播稿")[:30],
                format=style["format"], text=text, word_count=_word_count(text))
     if row:
@@ -1284,6 +1378,7 @@ def run_storyboard(request: dict) -> tuple[dict, int]:
     script.update(schema="wb-video-script/v1", style_id="make-storyboard", format=fmt,
                   title=str(script.get("title") or row["title"])[:30],
                   word_count=_word_count(text), duration_est_s=round(_word_count(text)/4.2))
+    script.setdefault("disclaimer", disclaimer_for(text, row["narration"]["style_id"]))
     warnings = script.get("warnings") if isinstance(script.get("warnings"), list) else []
     script["warnings"] = list(dict.fromkeys(warnings + validate_script(script, _STYLES.get(
         row["narration"]["style_id"], _STYLES["recap-ask-conclude"]))))
@@ -1350,19 +1445,22 @@ def _tts_node(scenes: list, out_dir: Path, provider: dict, voice: str, progress:
                             cwd=str(vmake.VIDEO_DIR), env=env, stdout=subprocess.PIPE,
                             stderr=subprocess.STDOUT, text=True, encoding="utf-8", errors="replace",
                             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
-    last, count = "", 0
+    last, count, diagnostics = "", 0, []
     for line in proc.stdout or []:
         if line.strip():
             last = line.strip()
+            diagnostics.append(last.replace(provider.get("api_key") or "\0", "***"))
         if progress and "合成语音" in line:
             count += 1
             tick("voice", "tts", min(95, count * 90 // max(1, len(scenes))), f"合成语音 {count}")
     code = proc.wait()
     if proc.stdout:
         proc.stdout.close()
+    (out_dir / "tts.log").write_text("\n".join(diagnostics), encoding="utf-8")
     if code:
         key = provider.get("api_key") or ""
-        return None, (last.replace(key, "***") if key else last)[-200:] or "tts_failed"
+        detail = next((line for line in reversed(diagnostics) if "TTS 重试" in line or "TTS 失败" in line), last)
+        return None, (detail.replace(key, "***") if key else detail)[-200:] or "tts_failed"
     try:
         result = json.loads(result_json.read_text(encoding="utf-8"))
         if not isinstance(result.get("items"), dict):
@@ -1516,6 +1614,10 @@ def script_add(payload: dict) -> dict:
            "analysis_key": payload.get("analysis_key") or "",
            "draft_id": payload.get("draft_id") or "", "brief": payload.get("brief") or "",
            "script": payload.get("script"), "created_at": now, "updated_at": now}
+    if isinstance(payload.get("disclaimer"), str):
+        row["disclaimer"] = payload["disclaimer"]
+        if isinstance(row["script"], dict):
+            row["script"] = {**row["script"], "disclaimer": row["script"].get("disclaimer", payload["disclaimer"])}
     rows = config.load_video_scripts()
     rows.append(row)
     rows = sorted(rows, key=lambda item: item.get("updated_at") or "", reverse=True)[:MAX_SCRIPTS]
@@ -1649,33 +1751,50 @@ def _gen_collage_image(prompt: str, dest: Path, timeout: int = 150) -> None:
         shutil.move(str(src), str(dest))
 
 
-def _fill_collage_images(project_id: str, story: dict, warnings: list) -> None:
-    """paper-board 场景的拼贴图补齐(幂等: 已存在跳过, 失败场景回退无图)。仅 CLI 进程调用。"""
-    from . import vmake                     # 局部导入: 与 run_build_cli 同纪律
-    scenes = [s for s in story.get("scenes", [])
-              if isinstance(s, dict) and s.get("template") == "paper-board"
-              and isinstance(s.get("data"), dict) and s["data"].get("image_prompt")]
-    todo = [s for s in scenes
-            if not (vmake.VIDEOS_DIR / project_id / s["data"]["image"]).is_file()]
-    if not scenes:
-        return
-    total = len(todo)
-    for i, s in enumerate(todo):
-        tick("build", "collage", 22 + int(26 * i / max(total, 1)),
-             f"生成纸拼贴图 {i + 1}/{total}…(约 40 秒/张)")
-        dest = vmake.VIDEOS_DIR / project_id / s["data"]["image"]
-        try:
-            _gen_collage_image(s["data"]["image_prompt"], dest)
-        except Exception as e:
-            s["data"]["image"] = None
-            warnings.append(f"场景 {s.get('id')} 拼贴图生成失败, 已回退无图版式: {str(e)[:80]}")
-    # 有回退时把 story.json 刷写回项目目录(模板据 image=null 走打字机大字)
-    if any(s["data"].get("image") is None for s in todo):
-        story_path = vmake.VIDEOS_DIR / project_id / "story.json"
-        try:
-            story_path.write_text(json.dumps(story, ensure_ascii=False, indent=1), encoding="utf-8")
-        except Exception:
-            pass
+def _fill_collage_images(project_id: str, story: dict, warnings: list, budget=None) -> None:
+    """CLI only. Content-addressed image cache survives new projects and retries."""
+    from . import vmake
+    budget = 8 if budget is None else int(budget)
+    if budget < 0 or budget > 100:
+        raise ValueError("生图预算必须为 0–100 张")
+    root = (vmake.VIDEOS_DIR / project_id).resolve()
+    cache = config.DATA_DIR / "image_cache"
+    tasks = []
+    for scene in story.get("scenes", []):
+        data = scene.get("data") or {}
+        if scene.get("template") not in ("paper-board", "vox-fast-cut") or not data.get("image_prompt"):
+            continue
+        rel = data.get("image")
+        if not isinstance(rel, str) or not rel or "\\" in rel or ":" in rel:
+            raise ValueError("拼贴素材路径非法")
+        dest = (root / rel).resolve()
+        if root not in dest.parents:
+            raise ValueError("拼贴素材路径越界")
+        digest = hashlib.sha256(json.dumps({"prompt": data["image_prompt"], "model": "doubao-seedream-5.0-lite",
+            "size": "1920x1920"}, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
+        cached = cache / f"{digest}.jpeg"
+        tasks.append((scene, dest, cached))
+    missing = {str(cached) for _, dest, cached in tasks if not cached.is_file()}
+    if len(missing) > budget:
+        raise ValueError(f"生图预算不足：缓存外需 {len(missing)} 张，预算 {budget} 张；请上传图片或调整预算")
+    warnings.append(f"拼贴估算：缓存外最多 {len(missing)} 张；按供应商计费，渲染时长取决于音频与帧率")
+    for scene, dest, cached in tasks:
+        if cached.is_file() and dest.is_file() and hashlib.sha256(dest.read_bytes()).digest() == hashlib.sha256(cached.read_bytes()).digest():
+            continue
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        if not cached.is_file():
+            cache.mkdir(parents=True, exist_ok=True)
+            # Unique temporary output; a failure never becomes a cache hit.
+            with tempfile.TemporaryDirectory(dir=cache) as tmp:
+                pending = Path(tmp) / "image.jpeg"
+                try:
+                    _gen_collage_image(scene["data"]["image_prompt"], pending)
+                    if not pending.is_file() or pending.stat().st_size == 0:
+                        raise ValueError("生成文件为空")
+                    os.replace(pending, cached)
+                except Exception as exc:
+                    raise RuntimeError(f"场景 {scene['id']} 拼贴图生成失败，请重试或上传图片；已完成缓存保留 ({type(exc).__name__})") from exc
+        shutil.copy2(cached, dest)
 
 
 def run_build_cli(args) -> int:
@@ -1705,7 +1824,7 @@ def run_build_cli(args) -> int:
         tick("build", "convert", 15, f"分镜就绪（{len(story['scenes'])} 场）")
         tick("build", "create", 20, "创建项目目录…")
         vmake.create_project(project_id, story, request)
-        _fill_collage_images(project_id, story, warnings)   # paper-board 场景生图(幂等, 失败回退无图)
+        _fill_collage_images(project_id, story, warnings, settings.get("image_budget"))   # paper-board 场景生图(幂等, 失败回退无图)
         cmd = ["node", "scripts/build.mjs", project_id] \
             + (["--estimate"] if mode == "estimate" else [])
         BUILD_LOG_DIR.mkdir(parents=True, exist_ok=True)
@@ -1714,6 +1833,8 @@ def run_build_cli(args) -> int:
         code, hint = _run_build_process(cmd, project_id, log_path, timeout_s)
         # 收尾探测产物
         out_dir = vmake.VIDEOS_DIR / project_id / "out"
+        if code == 0 and mode == "build":
+            write_review(vmake.VIDEOS_DIR / project_id, script)
         mp4s = sorted(p.name for p in out_dir.glob("*.mp4")) if out_dir.is_dir() else []
         verify_warnings = []
         verify_file = out_dir / "verify.json"
@@ -1767,7 +1888,7 @@ def _run_make_build_cli(request: dict) -> int:
         started = True
         provider = next((p for p in (config.load().get("tts") or {}).get("providers", [])
                          if p.get("id") == row["voice"]["profile_id"]), {})
-        settings = {k: row["video"].get(k) for k in ("aspect", "fps", "theme", "layout", "enrich")}
+        settings = {k: row["video"].get(k) for k in ("aspect", "fps", "theme", "layout", "enrich", "generation_method", "image_budget")}
         settings.update(title=row["title"], voice=row["voice"]["voice"],
                         tts_provider=provider.get("engine") or "edge")
         if provider.get("engine") == "custom":
@@ -1778,14 +1899,14 @@ def _run_make_build_cli(request: dict) -> int:
         warnings, overrides, materials = [], [], []
         for override in row["video"].get("beat_overrides") or []:
             override = dict(override)
-            if override.get("method") in ("upload_image", "upload_video"):
-                path, _ = asset_find(override.get("asset_id"), row["id"])
+            if override.get("method") in ("upload_image", "upload_video") or override.get("asset_id"):
+                path, _ = asset_find(override.get("asset_id"))
                 if not path:
-                    warnings.append(f"场景 {override.get('beat_id')} 素材缺失，回退模板")
-                    continue
+                    raise ValueError(f"场景 {override.get('beat_id')} 素材缺失，请重新选择")
                 override["file"] = path.name
                 materials.append(path)
             overrides.append(override)
+        settings["beat_overrides"] = overrides
         # 先转换并创建目录，再复制素材，最后使用真实 materials_dir 验证覆盖。
         tick("build", "convert", 5, "口播脚本转换为分镜…")
         story, notes = vmake.script_to_story(row["script"], settings, row["video"].get("hook_index"))
@@ -1795,7 +1916,7 @@ def _run_make_build_cli(request: dict) -> int:
         material_dir.mkdir(parents=True, exist_ok=True)
         for path in materials:
             shutil.copy2(path, material_dir / path.name)
-        settings.update(beat_overrides=overrides, materials_dir=str(material_dir))
+        settings.update(beat_overrides=overrides, materials_dir=str(material_dir), require_selected_audio=mode == "build")
         # 覆盖层复用首次转换的结果，避免 enrich=llm 重复外呼。
         story, notes = vmake.apply_beat_overrides(story, row["script"], settings, [])
         warnings.extend(notes)
@@ -1809,17 +1930,31 @@ def _run_make_build_cli(request: dict) -> int:
         for scene in story["scenes"]:
             item = row["voice"]["items"].get(scene["id"], {})
             if item.get("hash") != voice_hash(scene["narration"]):
+                if mode == "build":
+                    raise ValueError(f"语音已过期: {scene['id']}，请重新选择匹配 take")
                 continue
             path = _voice_file(row["id"], row["voice"]["voice_key"], item.get("file"))
             if path and _safe_id(scene["id"]):
                 shutil.copy2(path, audio_dir / f"{scene['id']}.mp3")
                 manifest[scene["id"]] = item["hash"]
+                alignment = path.with_suffix(".alignment.json")
+                if alignment.is_file():
+                    shutil.copy2(alignment, audio_dir / f"{scene['id']}.alignment.json")
+                else:
+                    (audio_dir / f"{scene['id']}.alignment.json").unlink(missing_ok=True)
+                cues = path.with_suffix(".cues.json")
+                if cues.is_file():
+                    shutil.copy2(cues, audio_dir / f"{scene['id']}.cues.json")
+                else:
+                    (audio_dir / f"{scene['id']}.cues.json").unlink(missing_ok=True)
+            elif mode == "build":
+                raise ValueError(f"已选语音文件缺失: {scene['id']}，请重新选择 take")
         _atomic_json(audio_dir / "manifest.json", manifest)
         _atomic_json(proj / "story.json", story)
         project = json.loads((proj / "project.json").read_text(encoding="utf-8"))
         project["settings"] = settings
         _atomic_json(proj / "project.json", project)
-        _fill_collage_images(project_id, story, warnings)
+        _fill_collage_images(project_id, story, warnings, settings.get("image_budget"))
         cmd = ["node", "scripts/build.mjs", project_id] + (["--estimate"] if mode == "estimate" else [])
         logs = config.DATA_DIR / "video_builds"
         logs.mkdir(parents=True, exist_ok=True)
@@ -1833,6 +1968,8 @@ def _run_make_build_cli(request: dict) -> int:
             env["CUSTOM_TTS_API_KEY"] = provider["api_key"]   # custom 协议参数走 meta, 密钥走环境
         timeout = BUILD_TIMEOUT_S * (2 if vmake.normalize_fps(settings.get("fps")) == 60 else 1)
         code, hint = _run_build_process(cmd, project_id, logs / f"{project_id}.log", timeout, env=env)
+        if code == 0 and mode == "build":
+            write_review(proj, row["script"])
         mp4s = sorted((proj / "out").glob("*.mp4"))
         try:
             verify = json.loads((proj / "out" / "verify.json").read_text(encoding="utf-8"))
@@ -1898,26 +2035,31 @@ def _run_build_process(cmd: list, project_id: str, log_path: Path,
     return code, hint
 
 
+THEME_SWATCHES = {
+    "terminal-dark": ["#070B16", "#76B900", "#4D9FFF"],
+    "paper-light": ["#F7F4EC", "#2B2A26", "#C7392B"],
+    "ocean-blue": ["#06182E", "#6FD3FF", "#EAF4FF"],
+    "vox-collage": ["#E9DCC3", "#3E2F1D", "#B3352C"],
+}
+
+
 def build_presets() -> dict:
     """制作向导预设：音色清单（按 provider 分组）+ 能力探测（只读，不打印密钥内容）。"""
     from . import vmake
     tts = config.load().get("tts") or config.DEFAULTS["tts"]
     voices = [{"id": v["id"], "name": f"{v['name']}（{p['name']}）", "provider": p["id"],
                "engine": p["engine"]} for p in tts["providers"] if p.get("enabled") for v in p.get("voices", [])]
-    swatches = {
-        "terminal-dark": ["#070B16", "#76B900", "#4D9FFF"],
-        "paper-light": ["#F7F4EC", "#2B2A26", "#C7392B"],
-        "ocean-blue": ["#06182E", "#6FD3FF", "#EAF4FF"],
-        "vox-collage": ["#E9DCC3", "#3E2F1D", "#B3352C"],
-    }
     aspect_labels = {"16:9": "横版", "9:16": "竖版", "1:1": "方形", "4:5": "4:5 竖构图"}
-    return {"voices": voices,
+    return {"generation_methods": vmake.GENERATION_METHODS, "voices": voices,
             "tts": {"default": tts["default"], "providers": [
                 {k: p.get(k) for k in ("id", "name", "engine", "enabled", "voices")} for p in tts["providers"]]},
-            "themes": [{"id": k, "name": v, "swatch": swatches[k],
+            "themes": [{"id": k, "name": v, "swatch": THEME_SWATCHES[k],
+                        "desc": vmake.THEME_META.get(k, {}).get("desc", ""),
                         **({"aspect_limit": "16:9"} if k == "vox-collage" else {})}
                        for k, v in vmake.THEMES.items()],
-            "layouts": [{"id": k, "name": v} for k, v in vmake.LAYOUTS.items()],
+            "layouts": [{"id": k, "name": v, "desc": vmake.LAYOUT_META.get(k, {}).get("desc", "")}
+                        for k, v in vmake.LAYOUTS.items()],
+            "engine_templates": _engine_templates(),
             "aspects": [{"id": k, "label": aspect_labels[k], "dims": list(dims)}
                         for k, dims in vmake.ASPECTS.items()],
             "fps_options": [{"id": 30, "label": "30 fps（标准）"},
@@ -1926,6 +2068,53 @@ def build_presets() -> dict:
             "collage_ready": shutil_which("arkcli"),
             "llm_ready": bool(_translate_cfg(config.load())),
             "max_chars": 20000}
+
+
+def _engine_templates() -> dict:
+    path = Path(__file__).resolve().parents[2] / "ai-workflow/video/scripts/template-ids.mjs"
+    empty = {"ids": [], "vertical_ids": []}
+    try:
+        text = path.read_text(encoding="utf-8")
+        result = {}
+        for key, name in (("ids", "TEMPLATE_IDS"), ("vertical_ids", "VERTICAL_TEMPLATES")):
+            match = re.search(r"export\s+const\s+" + name + r"\s*=\s*\[([^\]]*)\]", text, re.S)
+            if not match:
+                return empty
+            result[key] = re.findall(r"['\"]([^'\"]+)['\"]", match.group(1))
+        return result
+    except (OSError, UnicodeError):
+        return empty
+
+
+def templates_catalog() -> dict:
+    from . import vmake
+    cards = []
+    for kind, registry, meta in (("theme", vmake.THEMES, vmake.THEME_META),
+                                 ("layout", vmake.LAYOUTS, vmake.LAYOUT_META)):
+        for key, name in registry.items():
+            card = {"key": f"{kind}:{key}", "kind": kind, "id": key, "name": name,
+                    "blurb": meta.get(key, {}).get("desc", ""),
+                    "aspects": ["16:9"] if key in ("vox-collage", "fast-cut") else list(vmake.ASPECTS),
+                    "cost": "跟随生成方式", "source": f"vmake.{kind.upper()}S"}
+            if kind == "theme":
+                card["swatch"] = list(THEME_SWATCHES.get(key, []))
+            cards.append(card)
+    for method in vmake.GENERATION_METHODS:
+        if method["id"] in {"inherit", "upload_image", "upload_video", "ai_image"}:
+            continue
+        cards.append({"key": f"method:{method['id']}", "kind": "method", "id": method["id"],
+                      "name": method["name"], "blurb": method.get("desc", ""),
+                      "aspects": list(method["aspects"]), "cost": method["cost"],
+                      "source": "generation_methods"})
+    vs = config.load().get("video_studio") or {}
+    vs = vs if isinstance(vs, dict) else {}
+    gm = str(vs.get("default_generation_method") or "inherit")
+    if gm not in {m["id"] for m in vmake.GENERATION_METHODS}:
+        gm = "inherit"
+    return {"cards": cards, "defaults": {
+        "default_theme": vmake.normalize_theme(vs.get("default_theme")),
+        "default_layout": vmake.normalize_layout(vs.get("default_layout")),
+        "default_generation_method": gm, "favorites": vs.get("favorites") or []}}
 
 
 def shutil_which(cmd: str) -> bool:

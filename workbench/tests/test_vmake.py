@@ -24,65 +24,32 @@ class StoryTests(unittest.TestCase):
             beat["narration"] = "供给洪流正在来袭。赤字已经接近两万亿。利息支出同比增加百分之十五。"
         return script
 
-    def test_fast_cut_splits_sentences(self):
+    def test_fast_cut_preserves_parent_beats(self):
         script = self.fast_cut_script()
-        beats = script["beats"]
-        narrations = [str(b.get("narration") or "") for b in beats]
-        story, warnings = self.convert(script, layout="fast-cut")
-        scenes = story["scenes"]
-        self.assertGreater(len(scenes), len(beats))
-        self.assertTrue(vmake._check_narration_integrity(beats, scenes, narrations))
-        self.assertTrue(all(a["template"] != b["template"] for a, b in zip(scenes, scenes[1:])))
-        self.assertEqual((scenes[0]["id"], scenes[0]["template"]), ("b1", "title"))
-        self.assertEqual((scenes[-1]["id"], scenes[-1]["template"]), ("b6", "conclusion"))
-        self.assertTrue(all(s["template"] in vmake.H_TEMPLATE_WHITELIST for s in scenes))
-        self.assertEqual(story["meta"]["padSeconds"], 0.5)
-        self.assertEqual(len(warnings), 4)
-        self.assertTrue(all(s["caption"] == s["narration"] for s in scenes if "-s" in s["id"]))
-        self.assertEqual(scenes[2]["data"]["bars"][0], {"name": "亿", "pct": 5800})
-        self.assertEqual(beats[1]["on_screen"][0], "上涨35%")
+        story, _ = self.convert(script, layout="fast-cut")
+        self.assertEqual([s["id"] for s in story["scenes"]], [b["id"] for b in script["beats"]])
+        self.assertEqual([s["narration"] for s in story["scenes"]], [b["narration"] for b in script["beats"]])
+        self.assertTrue(all(s["template"] == "vox-fast-cut" for s in story["scenes"]))
 
-    def test_fast_cut_short_fragment_merges(self):
-        for text in ("市场震动。是的。赤字两万亿。利息支出同比增加百分之十五。",
-                     "利息支出同比增加百分之十五。是的。赤字已经接近两万亿。",
-                     " 市场震动！\n是的？赤字两万亿；利息支出同比增加百分之十五。 "):
-            with self.subTest(text=text):
-                script = self.fast_cut_script()
-                script["beats"][2]["narration"] = text
-                story, _ = self.convert(script, layout="fast-cut")
-                micro = [s for s in story["scenes"] if s["id"].startswith("b3-s")]
-                self.assertGreaterEqual(len(micro), 2)
-                self.assertTrue(all(len("".join(s["narration"].split())) >= 8 for s in micro))
-                self.assertEqual("".join(s["narration"] for s in micro), text)
-                self.assertTrue(vmake._check_narration_integrity(script["beats"], story["scenes"]))
+    def test_fast_cut_whitespace_and_punctuation_retained(self):
+        for text in ("市场震动。是的。赤字两万亿。利息支出同比增加百分之十五。", " 市场震动！\n是的？赤字两万亿； "):
+            script = self.fast_cut_script()
+            script["beats"][2]["narration"] = text
+            story, _ = self.convert(script, layout="fast-cut")
+            self.assertEqual(story["scenes"][2]["narration"], text)
+            self.assertEqual(story["scenes"][2]["id"], "b3")
 
-    def test_fast_cut_clause_fallback(self):
-        for narration in (
-            "推手是供给洪流，美国年度赤字接近两万亿美元，利息支出同比增加百分之十五。",
-            " 供给，\n美国年度赤字接近两万亿美元、是的，利息支出同比增加百分之十五。 ",
-        ):
-            with self.subTest(narration=narration):
-                script = self.script()
-                script["beats"][2]["narration"] = narration
-                self.assertEqual(len(vmake._split_sentences(narration)), 1)
-                story, warnings = self.convert(script, layout="fast-cut")
-                micro = [s for s in story["scenes"] if s["id"].startswith("b3-s")]
-                self.assertGreaterEqual(len(micro), 2)
-                self.assertTrue(vmake._check_narration_integrity(script["beats"], story["scenes"]))
-                self.assertEqual("".join("".join(s["narration"].split()) for s in micro),
-                                 "".join(narration.split()))
-                self.assertEqual("".join(vmake._split_clauses(narration)), narration)
-                self.assertTrue(all(len("".join(s["narration"].split())) >= 8 for s in micro))
-                self.assertIn(f"快切：b3 按语逗拆为 {len(micro)} 个微场景", warnings)
-        self.assertEqual(vmake._split_clauses("供给，美国年度赤字接近两万亿美元、是的，利息支出同比增加百分之十五。"),
-                         ["供给，美国年度赤字接近两万亿美元、是的，", "利息支出同比增加百分之十五。"])
+    def test_fast_cut_long_clause_retains_audio_identity(self):
+        script = self.fast_cut_script()
+        text = "供给，美国年度赤字接近两万亿美元、是的，利息支出同比增加百分之十五。"
+        script["beats"][2]["narration"] = text
+        story, _ = self.convert(script, layout="fast-cut")
+        self.assertEqual(story["scenes"][2]["narration"], text)
+        self.assertEqual(story["scenes"][2]["id"], "b3")
 
-    def test_fast_cut_vertical_ignored(self):
-        script = self.fast_cut_script("vertical")
-        baseline, _ = self.convert(script)
-        story, warnings = self.convert(script, layout="fast-cut")
-        self.assertEqual(story, baseline)
-        self.assertTrue(any("9:16 竖版不支持快切编排" in w for w in warnings))
+    def test_fast_cut_vertical_rejected(self):
+        with self.assertRaisesRegex(ValueError, "仅支持 16:9"):
+            self.convert(self.fast_cut_script("vertical"), layout="fast-cut")
 
     def test_fast_cut_single_sentence_beat_not_split(self):
         script = self.fast_cut_script()
@@ -90,7 +57,7 @@ class StoryTests(unittest.TestCase):
         story, _ = self.convert(script, layout="fast-cut")
         scenes = [s for s in story["scenes"] if s["id"] == "b3" or s["id"].startswith("b3-s")]
         self.assertEqual(len(scenes), 1)
-        self.assertEqual((scenes[0]["id"], scenes[0]["template"]), ("b3", "stacked"))
+        self.assertEqual((scenes[0]["id"], scenes[0]["template"]), ("b3", "vox-fast-cut"))
 
     def test_fast_cut_hook_override_skips_llm(self):
         script = self.fast_cut_script()
@@ -104,25 +71,17 @@ class StoryTests(unittest.TestCase):
         self.assertTrue(vmake._check_narration_integrity(script["beats"], story["scenes"], narrations))
         self.assertFalse(vmake._check_narration_integrity(script["beats"], story["scenes"]))
         self.assertEqual(story["scenes"][0]["id"], "b1")
-        self.assertEqual(story["scenes"][-1]["data"]["tagline"], [{"t": "关注后续解读"}])
+        self.assertEqual(story["scenes"][-1]["narration"], script["beats"][-1]["narration"])
         self.assertEqual(story["meta"]["padSeconds"], 0.3)
-        self.assertTrue(any("快切路径暂用确定性版式" in w for w in warnings))
+        self.assertTrue(all(s["template"] == "vox-fast-cut" for s in story["scenes"]))
 
-    def test_data_dense(self):
-        story, warnings = self.convert(style_pack="data-dense")
-        scenes = story["scenes"]
-        self.assertEqual([s["template"] for s in scenes],
-                         ["title", "event", "bars", "rows", "compare", "conclusion"])
-        self.assertTrue(all(s["template"] in vmake.H_TEMPLATE_WHITELIST for s in scenes))
-        bars = scenes[2]["data"]["bars"]
-        self.assertTrue(bars)
-        self.assertTrue(all("name" in b and "pct" in b for b in bars))
-        self.assertEqual(bars, [{"name": "上涨%", "pct": 35}, {"name": "亿", "pct": 5800},
-                                {"name": "趋势延续", "pct": 50}, {"name": "保持关注", "pct": 50}])
-        self.assertEqual(scenes[4]["data"]["left"],
-                         {"title": [{"t": "上涨35%"}], "items": [[{"t": "5800亿"}]]})
-        self.assertIn("right", scenes[4]["data"])
-        self.assertEqual(warnings, [])
+    def test_data_dense_preserves_absolute_labels(self):
+        story, _ = self.convert(style_pack="data-dense")
+        self.assertEqual(story["scenes"][2]["template"], "rows")
+        self.assertIn("5800亿", str(story["scenes"][2]["data"]))
+        data = vmake._data_for("bars", self.script()["beats"][2], "test", self.script(), "16:9")
+        self.assertEqual(data["bars"], [{"name":"上涨35%", "pct":35, "tag":"上涨35%"}])
+        self.assertNotIn(50, [b["pct"] for b in data["bars"]])
 
     def test_quote_big(self):
         story, _ = self.convert(style_pack="quote-big")
@@ -179,8 +138,6 @@ class StoryTests(unittest.TestCase):
 
     def test_legacy_and_precedence(self):
         cases = [
-            ({"format": "vertical", "style_pack": "vox-collage"},
-             ("9:16", 30, "vox-collage", "auto")),
             ({"style_pack": "data-dense"}, ("16:9", 30, "terminal-dark", "data-dense")),
             ({}, ("16:9", 30, "terminal-dark", "auto")),
             ({"aspect": "3:2", "fps": 120}, ("16:9", 30, "terminal-dark", "auto")),
@@ -202,33 +159,23 @@ class StoryTests(unittest.TestCase):
 
     def test_vox_theme(self):
         for aspect in vmake.ASPECTS:
-            with self.subTest(aspect=aspect), patch.object(
-                    vmake, "_llm_compose_scenes", side_effect=AssertionError("不得外呼")):
-                story, warnings = self.convert(
-                    aspect=aspect, theme="vox-collage",
-                    enrich="llm" if aspect == "16:9" else "plain")
-                if aspect == "16:9":
-                    self.assertTrue(all(s["template"] == "paper-board" for s in story["scenes"]))
-                    self.assertTrue(all(s["data"]["image"] and s["data"]["image_prompt"]
-                                        for s in story["scenes"]))
-                    self.assertFalse(any("已忽略拼贴版式" in w for w in warnings))
-                else:
-                    self.assertTrue(any("已忽略拼贴版式" in w for w in warnings))
-                    family = (vmake.V_TEMPLATE_WHITELIST if aspect == "9:16"
-                              else vmake.H_TEMPLATE_WHITELIST)
-                    self.assertTrue(all(s["template"] in family for s in story["scenes"]))
+            if aspect != "16:9":
+                with self.assertRaisesRegex(ValueError, "仅支持 16:9"):
+                    self.convert(aspect=aspect, theme="vox-collage")
+            else:
+                story, _ = self.convert(aspect=aspect, theme="vox-collage")
+                self.assertTrue(all(s["template"] == "vox-fast-cut" for s in story["scenes"]))
+                self.assertTrue(all(s["data"]["image_prompt"] for s in story["scenes"]))
 
     def test_vox_overrides_fast_cut(self):
         story, _ = self.convert(self.fast_cut_script(), theme="vox-collage", layout="fast-cut")
         self.assertEqual(len(story["scenes"]), 6)
-        self.assertTrue(all(s["template"] == "paper-board" for s in story["scenes"]))
+        self.assertTrue(all(s["template"] == "vox-fast-cut" for s in story["scenes"]))
 
     def test_other_horizontal_family_fast_cut(self):
         for aspect in ("1:1", "4:5"):
-            story, _ = self.convert(self.fast_cut_script(), aspect=aspect, layout="fast-cut", fps=60)
-            self.assertGreater(len(story["scenes"]), 6)
-            self.assertEqual(story["meta"]["format"], aspect)
-            self.assertEqual(story["meta"]["fps"], 60)
+            with self.assertRaisesRegex(ValueError, "仅支持 16:9"):
+                self.convert(self.fast_cut_script(), aspect=aspect, layout="fast-cut", fps=60)
 
     def test_normalizers(self):
         for value in (None, [], {}, "bad", 120):
@@ -244,8 +191,8 @@ class StoryTests(unittest.TestCase):
         script["beats"][4]["on_screen"] = []
         script["beats"][2]["on_screen"] = ["35", "增长3.5%"]
         story, _ = self.convert(script, style_pack="data-dense")
-        self.assertEqual(story["scenes"][2]["data"]["bars"],
-                         [{"name": "35", "pct": 35}, {"name": "增长%", "pct": 3.5}])
+        self.assertEqual(story["scenes"][2]["template"], "rows")
+        self.assertIn("增长3.5%", str(story["scenes"][2]["data"]))
         data = story["scenes"][4]["data"]
         self.assertEqual(data["left"], {"title": [{"t": "观点A"}], "items": []})
         self.assertEqual(data["right"], {"title": [{"t": "观点B"}], "items": []})

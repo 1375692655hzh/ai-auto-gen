@@ -1,0 +1,35 @@
+{
+  "script_id": "vs0905205628970",
+  "audio": [
+    {
+      "source": "E:\\ai-gen-article-publish\\ai-workflow\\video\\videos\\wb0905205634\\audio\\b1.mp3",
+      "target": "E:\\ai-gen-article-publish\\ai-workflow\\video\\videos\\finance-acceptance-0909\\audio\\b1.mp3",
+      "sha256": "cea95674a4fea6a506c3181762cb3039e781d6fead1cf2842ad4b82dde9a8c95"
+    },
+    {
+      "source": "E:\\ai-gen-article-publish\\ai-workflow\\video\\videos\\wb0905205634\\audio\\b2.mp3",
+      "target": "E:\\ai-gen-article-publish\\ai-workflow\\video\\videos\\finance-acceptance-0909\\audio\\b2.mp3",
+      "sha256": "3e690e4c15cfc57a344ddd431abc57f0cafdbce1882368213c9c2b9c65d35188"
+    },
+    {
+      "source": "E:\\ai-gen-article-publish\\ai-workflow\\video\\videos\\wb0905205634\\audio\\b3.mp3",
+      "target": "E:\\ai-gen-article-publish\\ai-workflow\\video\\videos\\finance-acceptance-0909\\audio\\b3.mp3",
+      "sha256": "1e9c6c81594dbf2fc651db55acbc187b1ef9c6cbe4cd71b4db726f93c21d1d00"
+    },
+    {
+      "source": "E:\\ai-gen-article-publish\\ai-workflow\\video\\videos\\wb0905205634\\audio\\b4.mp3",
+      "target": "E:\\ai-gen-article-publish\\ai-workflow\\video\\videos\\finance-acceptance-0909\\audio\\b4.mp3",
+      "sha256": "749ae72b1bba1abf19a4931afc3ce4b1d9d6281ef1299d3a21815ef0031ca723"
+    },
+    {
+      "source": "E:\\ai-gen-article-publish\\ai-workflow\\video\\videos\\wb0905205634\\audio\\b5.mp3",
+      "target": "E:\\ai-gen-article-publish\\ai-workflow\\video\\videos\\finance-acceptance-0909\\audio\\b5.mp3",
+      "sha256": "a857fc61b134e6d30a680c68157ad7607d2c20deae8655bc3c7bf412709ae6c9"
+    },
+    {
+      "source": "E:\\ai-gen-article-publish\\ai-workflow\\video\\videos\\wb0905205634\\audio\\b6.mp3",
+      "target": "E:\\ai-gen-article-publish\\ai-workflow\\video\\videos\\finance-acceptance-0909\\audio\\b6.mp3",
+      "sha256": "e6750bf749779a91b9089a9885de7cbcbd5ae58a60d20703823105df097a7f11"
+    }
+  ]
+}

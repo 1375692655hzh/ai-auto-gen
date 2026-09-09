@@ -55,15 +55,6 @@ async function main() {
 		return { ok: true, made };
 	}
 	let r = await synthAll(job.provider, job.voice);
-	if (!r.ok && job.provider === "dashscope") {
-		console.warn(`\n⚠ ${r.failedId} 合成失败，DashScope 不可用 → 自动降级 Edge TTS，整批重跑保持音色一致`);
-		for (const f of r.made) {
-			rmSync(f);
-			delete manifest[path.basename(f, ".mp3")];
-		}
-		saveManifest();
-		r = await synthAll("edge", "zh-CN-XiaoxiaoNeural");
-	}
 	if (!r.ok) throw new Error(`语音合成失败: ${r.failedId}（网络问题可重跑，已有音频会跳过）`);
 	saveManifest();
 	const result = { items: {} };

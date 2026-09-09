@@ -1,6 +1,6 @@
 import msedgeTtsPkg from "msedge-tts";
 const { MsEdgeTTS, OUTPUT_FORMAT } = msedgeTtsPkg;
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync, rmSync } from "node:fs";
 import { createHash } from "node:crypto";
 import path from "node:path";
 
@@ -20,17 +20,46 @@ export const loadEnv = () => {
 	}
 };
 
-export async function synthEdge(text, voice, outFile) {
+export async function synthEdge(text, voice, outFile, {cuesFile = outFile.replace(/\.mp3$/i, ".cues.json")} = {}) {
 	const tts = new MsEdgeTTS();
-	await tts.setMetadata(voice, OUTPUT_FORMAT.AUDIO_24KHZ_48KBITRATE_MONO_MP3);
-	const { audioStream } = tts.toStream(text);
-	const chunks = [];
-	await new Promise((resolve, reject) => {
-		audioStream.on("data", (c) => chunks.push(c));
-		audioStream.on("end", resolve);
-		audioStream.on("error", reject);
-	});
-	writeFileSync(outFile, Buffer.concat(chunks));
+	try {
+		await tts.setMetadata(voice, OUTPUT_FORMAT.AUDIO_24KHZ_48KBITRATE_MONO_MP3,
+			{wordBoundaryEnabled: Boolean(cuesFile), sentenceBoundaryEnabled: false});
+		const {audioStream, metadataStream} = tts.toStream(text);
+		const chunks = [], words = [];
+		let metadataError = false;
+		await new Promise((resolve, reject) => {
+			const timeout = setTimeout(() => {
+				audioStream.destroy();
+				reject(new Error("Edge TTS stream timeout"));
+			}, 120000);
+			const finish = (error) => { clearTimeout(timeout); error ? reject(error) : resolve(); };
+			metadataStream?.on("data", (chunk) => {
+				try {
+					for (const item of JSON.parse(chunk.toString()).Metadata || []) {
+						if (item.Type !== "WordBoundary") continue;
+						const d = item.Data;
+						// Edge offsets and durations are 100 ns ticks relative to this audio.
+						words.push({t: d.text.Text, start: d.Offset / 1e7, end: (d.Offset + d.Duration) / 1e7});
+					}
+				} catch { metadataError = true; }
+			});
+			metadataStream?.on("error", () => { metadataError = true; });
+			audioStream.on("data", (c) => chunks.push(c));
+			audioStream.once("error", finish);
+			// msedge-tts 2.0.7 destroys metadataStream on audio close (no metadata end).
+			audioStream.once("end", () => finish());
+		});
+		writeFileSync(outFile, Buffer.concat(chunks));
+		if (cuesFile && words.length && !metadataError) {
+			writeFileSync(cuesFile, JSON.stringify({origin: "provider-alignment", unit: "seconds",
+				narrationHash: hashNarration(text), cues: words}, null, 2));
+		} else if (cuesFile) {
+			console.warn("Edge 未返回可用词界，字幕将标为 approximate-text-weight");
+		}
+	} finally {
+		tts.close();
+	}
 }
 
 export async function synthDashscope(text, voice, outFile) {
@@ -109,6 +138,9 @@ export async function synthCustom(cfg, voice, text, outFile) {
 }
 
 export async function synthOnce(engine, voice, text, outFile, customCfg) {
+	// Sidecars belong to this exact synthesis. Never reuse timestamps from a previous take/provider.
+	for (const suffix of [".cues.json", ".alignment.json"])
+		rmSync(outFile.replace(/\.mp3$/i, suffix), {force: true});
 	for (let attempt = 1; attempt <= 8; attempt++) {
 		try {
 			if (engine === "custom") {

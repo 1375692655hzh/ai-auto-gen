@@ -1,4 +1,4 @@
-/* 视频页: 热点追踪 + 视频工坊(分析/脚本生成/脚本仓库) + 制作/仓库/追踪账号。 */
+/* 视频页: 热点追踪 + 视频工坊(分析/制作/脚本仓库) + 制作/仓库/追踪账号。 */
 window.WB = window.WB || {};
 WB.pages = WB.pages || {};
 
@@ -20,9 +20,6 @@ WB.pages.video = {
       anUrl: '', anRec: null, anBusy: false, anErr: null, anProgress: null,
       jobPolls: { analyze: null, generate: null, voice: null, build: null },
       styles: [], drafts: [],
-      sg: { brief: '', articleMode: 'none', pasted: '', draftId: '',
-            styleId: 'recap-ask-conclude', analysisKey: '' },
-      sgPreview: null, sgBusy: false, sgProgress: null, sgHookSel: 0,
       scripts: [], scriptSel: null, scriptFilter: '', reusableOnly: false,
       /* ── 追踪账号 ── */
       chs: [], chMeta: null,
@@ -37,8 +34,13 @@ WB.pages.video = {
       buildMode: 'build', buildLogOpen: false, buildLogLines: [], buildLogTruncated: false, buildWarnings: [],
       assetUploadBusy: {}, makeActionBusy: false, saveTimers: {}, savePending: {}, saveChains: {},
       saveVersions: {}, saveState: {}, savedAt: {}, renameDraft: null, renameDraftTitle: '', projTitle: '',
+      voiceFolderPath: '', outFolderPath: '',
       beatCursors: {}, makeJobIds: {}, disposed: false,
-      phTitles: { templates: "模板仓库", materials: "素材仓库" },
+      /* ── 素材 / 模板仓库 ── */
+      libAssets: [], libFilter: 'all', libSearch: '', libUpBusy: false,
+      previewAsset: null, renamingAsset: null, renamingAssetName: '',
+      templatesCards: [], templateDefaults: {}, templateFilter: 'all', templateSearch: '',
+      favBusy: false, styleBusy: false,
     };
   },
   computed: {
@@ -71,11 +73,13 @@ WB.pages.video = {
       return (this.scripts || []).filter((r) =>
         (!this.scriptFilter || r.kind === this.scriptFilter) && (!this.reusableOnly || r.reusable));
     },
-    selectedStyle() {
-      return (this.styles || []).find((s) => s.id === this.sg.styleId) || null;
+    libFiltered() {
+      const q = this.libSearch.toLowerCase();
+      return this.libAssets.filter((a) => (this.libFilter === 'all' || a.kind === this.libFilter) && (a.name || '').toLowerCase().includes(q));
     },
-    analyzedPool() {
-      return (this.pool || []).filter((r) => r.analysis_status === 'ok' || r.analysis_status === 'partial');
+    templatesFiltered() {
+      const q = this.templateSearch.toLowerCase();
+      return this.templatesCards.filter((c) => (this.templateFilter === 'all' || c.kind === this.templateFilter) && ((c.name || '') + ' ' + (c.blurb || '')).toLowerCase().includes(q));
     },
     curMake() { return this.makes.find((m) => m.id === this.cur) || null; },
     makeBeats() { return (this.curMake && this.curMake.script && this.curMake.script.beats) || []; },
@@ -86,6 +90,16 @@ WB.pages.video = {
     makeTheme() { return ((this.presets && this.presets.themes) || []).find((t) => this.curMake && t.id === this.curMake.video.theme); },
     makeBusy() { return this.makeActionBusy || Object.values(this.makeJobIds).includes(this.cur) || Object.keys(this.assetUploadBusy).some((k) => k.startsWith(this.cur + ':') && this.assetUploadBusy[k]); },
     makeVoiceReady() { return this.segBadge(3).cls === 'green'; },
+    /* 本项目产出（第四段出片）：在视频项目列表中定位当前制作单的成片 */
+    makeProject() {
+      const pid = this.curMake && this.curMake.project_id;
+      return pid ? (this.videos.find((v) => v.id === pid) || null) : null;
+    },
+    makeOutUrl() {
+      const p = this.makeProject;
+      if (!p || !p.mp4 || !p.mp4.length) return '';
+      return '/wb-api/videos/' + p.id + '/file/' + (p.mp4.includes('final.mp4') ? 'final.mp4' : p.mp4[0]);
+    },
 
   },
   methods: {
@@ -104,21 +118,18 @@ WB.pages.video = {
         { id: "analysis", title: "视频分析", cnt: this.pool.length || "",
           icon: I('<line x1="12" y1="20" x2="12" y2="10"/><line x1="18" y1="20" x2="18" y2="4"/><line x1="6" y1="20" x2="6" y2="16"/>'),
           onPick: () => { this.tab = "analysis"; } },
-        { id: "script", title: "脚本生成",
-          icon: I('<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/>'),
-          onPick: () => { this.tab = "script"; } },
-        { id: 'scripts', title: '脚本仓库', cnt: this.scripts.length || '',
-          icon: I('<path d="M4 4h16v16H4z"/><path d="M8 8h8M8 12h8M8 16h5"/>'),
-          onPick: () => { this.tab = 'scripts'; } },
         { id: "make", title: "视频制作", cnt: this.videos.length || "",
           icon: I('<rect x="2" y="2" width="20" height="20" rx="2.18"/><line x1="7" y1="2" x2="7" y2="22"/><line x1="17" y1="2" x2="17" y2="22"/><line x1="2" y1="12" x2="22" y2="12"/><line x1="2" y1="7" x2="7" y2="7"/><line x1="2" y1="17" x2="7" y2="17"/><line x1="17" y1="17" x2="22" y2="17"/><line x1="17" y1="7" x2="22" y2="7"/>'),
           onPick: () => { this.tab = "make"; this.loadMakePresets().then(() => { if (this.curMake) this.setMakeDefaults(this.curMake); }); } },
         { id: "templates", title: "模板仓库",
           icon: I('<rect x="3" y="3" width="18" height="18" rx="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="9" y1="21" x2="9" y2="9"/>'),
-          onPick: () => { this.tab = "templates"; } },
+          onPick: () => { this.tab = "templates"; this.loadTemplates(); } },
         { id: "materials", title: "素材仓库",
           icon: I('<path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><polyline points="3.27 6.96 12 12.01 20.73 6.96"/><line x1="12" y1="22.08" x2="12" y2="12"/>'),
-          onPick: () => { this.tab = "materials"; } },
+          onPick: () => { this.tab = "materials"; this.loadLibAssets(); } },
+        { id: 'scripts', title: '脚本仓库', cnt: this.scripts.length || '',
+          icon: I('<path d="M4 4h16v16H4z"/><path d="M8 8h8M8 12h8M8 16h5"/>'),
+          onPick: () => { this.tab = 'scripts'; } },
         { id: "tracked", title: "追踪账号", cnt: this.chs.length || "",
           icon: I('<path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/>'),
           onPick: () => { this.tab = "tracked"; } },
@@ -454,13 +465,12 @@ WB.pages.video = {
         else if (kind === 'voice') this.voiceProgress = job.progress || null;
         else if (task === 'narration') this.narProgress = job.progress || null;
         else if (task === 'storyboard') this.storyProgress = job.progress || null;
-        else this.sgProgress = job.progress || null;
         if (job.running) { this.jobPolls[kind] = setTimeout(tick, 3000); return; }
         this.jobPolls[kind] = null;
         if (kind === 'analyze') this.anBusy = false;
         else if (kind === 'build') this.buildBusy = false;
         else if (kind === 'voice') this.voiceBusy = false;
-        else { this.sgBusy = false; this.narBusy = false; this.storyBusy = false; }
+        else { this.narBusy = false; this.storyBusy = false; }
         delete this.makeJobIds[kind];
         if (job.exit === 0) {
           if (kind === 'analyze') {
@@ -480,8 +490,7 @@ WB.pages.video = {
             await this.refreshMakeJob(job);
             WB.toast(kind === 'voice' ? '语音已生成' : task === 'narration' ? '口播稿已生成' : '分镜脚本已生成');
           } else {
-            this.sgPreview = job.result; this.sgHookSel = 0;
-            WB.toast('脚本已生成，请检查后保存');
+            WB.toast('独立生成页已下线，产物可在脚本仓库查看');
           }
         } else {
           const msg = this.makeError(job.error ? job : { error: '任务失败', hint: job.hint });
@@ -518,42 +527,134 @@ WB.pages.video = {
       catch (e) { this.scripts = []; }
       this.registerSubs();
     },
-    async startGenerate() {
-      if (!(this.styles || []).some((s) => s.id === this.sg.styleId)) {
-        WB.toast('请选择有效的脚本风格'); return;
-      }
-      if (this.sg.articleMode === 'paste' && !this.sg.pasted.trim()) {
-        WB.toast('请粘贴文章稿'); return;
-      }
-      if (this.sg.articleMode === 'draft' && !this.sg.draftId) {
-        WB.toast('请选择图文草稿'); return;
-      }
-      if (this.sg.articleMode === 'none' && !this.sg.brief.trim()) {
-        WB.toast('请填写视频主题'); return;
-      }
+    /* ── 全局素材仓库 ── */
+    async loadLibAssets() {
       try {
-        await WB.api.post('/video-script/generate', {
-          brief: this.sg.brief,
-          draft_id: this.sg.articleMode === 'draft' ? this.sg.draftId : undefined,
-          pasted: this.sg.articleMode === 'paste' ? this.sg.pasted : undefined,
-          style_id: this.sg.styleId, analysis_key: this.sg.analysisKey || undefined,
-        });
-        this.sgBusy = true; this.pollJob('generate');
-      } catch (e) {
-        if (e.status === 409) {
-          WB.toast('脚本生成进行中'); this.sgBusy = true; this.pollJob('generate');
-        } else WB.toast(e.error + (e.hint ? ' — ' + e.hint : ''));
-      }
+        const d = await WB.api.get('/video-assets'); this.libAssets = d.assets || [];
+        if (this.previewAsset) this.previewAsset = this.libAssets.find((a) => a.asset_id === this.previewAsset.asset_id) || null;
+      } catch (e) { WB.toast(this.makeError(e)); }
     },
-    async saveGenerated() {
-      if (!this.sgPreview) return;
+    libKindName(k) { return { image: '图片', video: '视频', audio: '音频' }[k] || k; },
+    fmtSize(n) {
+      if (n == null) return '—';
+      return n >= 1048576 ? (n / 1048576).toFixed(1) + ' MB' : n >= 1024 ? (n / 1024).toFixed(1) + ' KB' : n + ' B';
+    },
+    assetFileUrl(a) { return '/wb-api/video-assets/' + encodeURIComponent(a.asset_id) + '/file'; },
+    libRefsTitle(a) { return (a.refs || []).length ? '被引用: ' + a.refs.map((r) => r.title + '×' + r.beat_id).join('、') : ''; },
+    validLibFile(file, want) {
+      const ext = file.name.split('.').pop().toLowerCase();
+      const kind = ['png','jpg','jpeg','webp'].includes(ext) ? 'image' : ['mp4','webm'].includes(ext) ? 'video' : ['mp3','wav','m4a'].includes(ext) ? 'audio' : '';
+      if (!kind || (want && want !== kind)) { WB.toast(file.name + '：素材格式不支持或与当前方法不符'); return false; }
+      const limit = { image: 15, video: 100, audio: 30 }[kind];
+      if (!file.size || file.size > limit * 1024 * 1024) { WB.toast(file.name + '：文件为空或超过 ' + limit + ' MB'); return false; }
+      return true;
+    },
+    async uploadLibAssets(ev) {
+      const files = Array.from(ev.target.files || []); ev.target.value = '';
+      if (this.libUpBusy || !files.length) return;
+      this.libUpBusy = true;
       try {
-        await WB.api.post('/video-scripts', {
-          kind: 'generated', title: this.sgPreview.title, style_id: this.sgPreview.style_id,
-          analysis_key: this.sg.analysisKey || undefined, script: this.sgPreview,
-        });
-        WB.toast('已存入脚本仓库'); await this.loadScripts();
-      } catch (e) { WB.toast(e.error); }
+        for (const file of files) {
+          if (!this.validLibFile(file)) continue;
+          try {
+            const q = new URLSearchParams({ name: file.name });
+            const resp = await fetch('/wb-api/video-assets?' + q, { method: 'PUT', body: file });
+            const d = await resp.json(); if (!resp.ok) throw d;
+          } catch (e) { WB.toast(file.name + '：' + this.makeError(e)); }
+        }
+        await this.loadLibAssets();
+      } finally { this.libUpBusy = false; }
+    },
+    startRenameAsset(a) { this.renamingAsset = a.asset_id; this.renamingAssetName = a.name; },
+    async saveRenameAsset(a) {
+      const name = this.renamingAssetName.trim();
+      if (!name) { WB.toast('请输入素材名称'); return; }
+      try {
+        await WB.api.post('/video-assets/' + encodeURIComponent(a.asset_id) + '/rename', { name });
+        this.renamingAsset = null; await this.loadLibAssets();
+      } catch (e) { WB.toast(this.makeError(e)); }
+    },
+    async deleteAsset(a) {
+      if (!confirm('删除素材「' + a.name + '」？')) return;
+      try {
+        const path = '/video-assets/' + encodeURIComponent(a.asset_id);
+        let d;
+        try { d = await WB.api.del(path); }
+        catch (e) {
+          if (e.status !== 409) throw e;
+          const refs = (this.libAssets.find((x) => x.asset_id === a.asset_id) || {}).refs || [];
+          if (!confirm('该素材被 ' + refs.length + ' 个制作引用：\n' + refs.map((r) => '· ' + r.title + ' × ' + r.beat_id).join('\n') + '\n强制删除将清空这些拍的素材选择，继续？')) return;
+          d = await WB.api.del(path + '?force=1');
+        }
+        // 同步本地选择，避免后续保存把已清空的引用写回。
+        for (const m of this.makes) {
+          for (const o of (m.video && m.video.beat_overrides) || []) {
+            if (o.asset_id === a.asset_id) delete o.asset_id;
+          }
+        }
+        if (this.previewAsset && this.previewAsset.asset_id === a.asset_id) this.closePreview();
+        if (this.renamingAsset === a.asset_id) this.renamingAsset = null;
+        WB.toast('已删除素材，清空 ' + (d.cleared_overrides || 0) + ' 处逐拍素材选择');
+        await this.loadLibAssets();
+      } catch (e) { WB.toast(this.makeError(e)); }
+    },
+    openPreview(a) { this.previewAsset = a; },
+    closePreview() { this.previewAsset = null; },
+    goMaterials() { this.tab = 'materials'; this.loadLibAssets(); this.registerSubs(); },
+    /* ── 模板仓库 ── */
+    async loadTemplates() {
+      try {
+        const d = await WB.api.get('/video-templates');
+        this.templatesCards = d.cards || []; this.templateDefaults = d.defaults || {};
+        this.registerSubs();
+      } catch (e) { WB.toast(this.makeError(e)); }
+    },
+    cardOf(kind, id) { return this.templatesCards.find((c) => c.kind === kind && c.id === id); },
+    isFav(key) { return (this.templateDefaults.favorites || []).includes(key); },
+    isDefault(kind, id) { return this.templateDefaults['default_' + { theme: 'theme', layout: 'layout', method: 'generation_method' }[kind]] === id; },
+    async toggleFav(card) {
+      if (this.favBusy || this.styleBusy) return;
+      this.favBusy = true;
+      try {
+        const d = await WB.api.post('/video-style', { favorite: { key: card.key, on: !this.isFav(card.key) } });
+        this.templateDefaults = d.video_studio || {};
+      } catch (e) { WB.toast(this.makeError(e)); }
+      finally { this.favBusy = false; }
+    },
+    async setDefault(card) {
+      if (this.styleBusy || this.favBusy) return;
+      this.styleBusy = true;
+      try {
+        const key = 'default_' + { theme: 'theme', layout: 'layout', method: 'generation_method' }[card.kind];
+        const d = await WB.api.post('/video-style', { [key]: card.id });
+        this.templateDefaults = d.video_studio || {};
+        WB.toast('已设为默认，对新建制作生效');
+      } catch (e) { WB.toast(this.makeError(e)); }
+      finally { this.styleBusy = false; }
+    },
+    groupCards(kind) { return this.templatesFiltered.filter((c) => c.kind === kind); },
+    async useScriptInMake(r) {
+      if (!r || !r.script || !this.importScripts.some((x) => x.id === r.id) || this.makeBusy) return;
+      if (!confirm('将导入该脚本：拼接逐拍口播→定稿口播稿→写入分镜并定稿，继续？')) return;
+      this.scriptErr = '';
+      try {
+        this.tab = 'make'; this.registerSubs();
+        // newMake 自带忙碌保护，须在导入置忙前调用。
+        if (!this.curMake) await this.newMake();
+        if (!this.curMake) throw { error: this.makeErr || '新建制作失败' };
+        this.makeActionBusy = true;
+        const id = this.cur, script = JSON.parse(JSON.stringify(r.script));
+        await this.flushMake(id);
+        await WB.api.post('/video-makes/' + id + '/unlock-narration', {});
+        await WB.api.post('/video-makes', { id, title: script.title || r.title,
+          narration: { text: script.beats.map((b) => b.narration || '').join(''), source: 'import', style_id: r.style_id || script.style_id || '' } });
+        await WB.api.post('/video-makes/' + id + '/lock-narration', {});
+        if (this.curMake.script_meta.locked) await WB.api.post('/video-makes/' + id + '/unlock-script', {});
+        await WB.api.post('/video-makes', { id, script });
+        await this.fetchMake(id);
+        WB.toast('已导入到当前制作');
+      } catch (e) { this.scriptErr = this.makeError(e); }
+      finally { this.makeActionBusy = false; }
     },
     async selectScript(r) {
       this.scriptSel = r;
@@ -599,7 +700,7 @@ WB.pages.video = {
         script_meta: { locked: false, ...m.script_meta }, voice: { profile_id: '', voice: '', voice_key: '', items: {}, ...m.voice },
         assets: m.assets || [], voice_bad: m.voice_bad || [],
         video: { mode: 'unified', aspect: '16:9', fps: 30, theme: 'terminal-dark', layout: 'auto',
-          enrich: 'plain', hook_index: 0, beat_overrides: [], ...m.video } };
+          enrich: 'plain', generation_method: 'inherit', image_budget: 8, hook_index: 0, beat_overrides: [], ...m.video } };
     },
     putMake(m) {
       if (!m) throw { error: '未收到制作草稿' };
@@ -836,7 +937,6 @@ WB.pages.video = {
       if (job.running && req.make_id) this.makeJobIds[kind] = req.make_id;
       if (kind === 'generate') {
         this.narBusy = !!job.running && req.task === 'narration'; this.storyBusy = !!job.running && req.task === 'storyboard';
-        this.sgBusy = !!job.running && !this.narBusy && !this.storyBusy;
       } else if (kind === 'voice') this.voiceBusy = !!job.running;
       else if (kind === 'build') { this.buildBusy = !!job.running; this.buildPid = req.project_id || this.buildPid; this.buildMakeId = req.make_id || ''; }
     },
@@ -872,37 +972,64 @@ WB.pages.video = {
     },
     changeMakeAspect() {
       const v = this.curMake.video;
-      if (v.aspect !== '16:9') { v.mode = 'unified'; if (v.layout === 'fast-cut') v.layout = 'auto'; if (v.theme === 'vox-collage') v.theme = 'terminal-dark'; }
+      if (v.aspect !== '16:9') WB.toast('此画幅不支持 VOX / 手绘 / 上传，请明确改选模板动效；不兼容配置会阻止制作');
       this.saveMake();
     },
-    beatOverride(b) { return this.curMake.video.beat_overrides.find((o) => o.beat_id === b.id) || { beat_id: b.id, method: 'template', kenburns: 'in', credit: '', start: 0, end: '' }; },
+    aspectBlocked() {
+      const v = this.curMake.video, aspect = v.aspect, methods = (this.presets && this.presets.generation_methods) || [];
+      const ids = ['vox-fast-cut', 'vox-collage', 'hand-drawn', 'upload_image', 'upload_video', 'ai_image'];
+      const blocked = [];
+      if (v.theme === 'vox-collage' && aspect !== '16:9') blocked.push('VOX 纸拼贴主题');
+      if (v.layout === 'fast-cut' && aspect !== '16:9') blocked.push('快切编排');
+      const def = methods.find((m) => m.id === v.generation_method);
+      if (def && !def.aspects.includes(aspect)) blocked.push(def.name);
+      for (const o of v.beat_overrides || []) {
+        const m = methods.find((x) => x.id === o.method);
+        if (m && !m.aspects.includes(aspect)) blocked.push('第 ' + o.beat_id + ' 拍 · ' + m.name);
+      }
+      if (aspect !== '16:9' && ids.includes(v.generation_method)) blocked.push('当前默认生成方式');
+      return [...new Set(blocked)];
+    },
+    beatOverride(b) { return this.curMake.video.beat_overrides.find((o) => o.beat_id === b.id) || { beat_id: b.id, method: 'inherit', kenburns: 'in', credit: '', start: 0, end: '' }; },
     setBeatOverride(b, key, value) {
       const list = this.curMake.video.beat_overrides; let o = list.find((o) => o.beat_id === b.id);
       if (!o) { o = { ...this.beatOverride(b) }; list.push(o); }
-      if (key === 'method' && o.method !== value) o.asset_id = '';
+      if (key === 'method' && o.method !== value && (o.method === 'upload_video' || value === 'upload_video' || value === 'hand-drawn' || value === 'template' || value === 'inherit')) o.asset_id = '';
       if ((key === 'start' || key === 'end') && value === '') delete o[key]; else o[key] = value;
       this.saveMake();
     },
     beatAssets(b) {
-      const video = this.beatOverride(b).method === 'upload_video';
-      return this.curMake.assets.filter((a) => a.beat_id === b.id && (video ? /^(mp4|webm)$/i : /^(png|jpg|jpeg|webp)$/i).test(String(a.ext).replace(/^\./, '')));
+      const wantVideo = this.beatOverride(b).method === 'upload_video';
+      return (this.libAssets || []).filter((a) => wantVideo ? a.kind === 'video' : a.kind === 'image');
+    },
+    setBeatAsset(b, ev) {
+      const v = ev.target.value;
+      if (v === '__manage__') { ev.target.value = this.beatOverride(b).asset_id || ''; this.goMaterials(); return; }
+      this.setBeatOverride(b, 'asset_id', v);
     },
     async uploadBeatAsset(b, ev) {
       const file = ev.target.files && ev.target.files[0], id = this.cur, method = this.beatOverride(b).method; ev.target.value = '';
-      if (!file) return;
-      if (!(method === 'upload_video' ? /\.(mp4|webm)$/i : /\.(png|jpg|jpeg|webp)$/i).test(file.name)) { WB.toast('素材格式与当前方法不符'); return; }
-      const key = id + ':' + b.id; this.assetUploadBusy[key] = true;
+      const key = id + ':' + b.id;
+      if (!file || this.assetUploadBusy[key]) return;
+      if (!this.validLibFile(file, method === 'upload_video' ? 'video' : 'image')) return;
+      this.assetUploadBusy[key] = true;
       try {
         await this.flushMake(id);
-        const q = new URLSearchParams({ name: file.name, make_id: id, beat_id: b.id });
+        const q = new URLSearchParams({ name: file.name });
         const resp = await fetch('/wb-api/video-assets?' + q, { method: 'PUT', body: file });
         const d = await resp.json(); if (!resp.ok) throw d;
-        const m = this.makes.find((m) => m.id === id);
-        if (m) {
-          m.assets.push(d.asset); let o = m.video.beat_overrides.find((o) => o.beat_id === b.id);
-          if (!o) { o = { beat_id: b.id, method }; m.video.beat_overrides.push(o); }
-          o.asset_id = d.asset.asset_id; this.saveMake(m); await this.flushMake(id);
+        if (this.cur === id) this.setBeatOverride(b, 'asset_id', d.asset.asset_id);
+        else {
+          // 上传期间切换制作，仍写回原制作的拍。
+          const m = this.makes.find((m) => m.id === id);
+          if (m) {
+            let o = m.video.beat_overrides.find((o) => o.beat_id === b.id);
+            if (!o) { o = { beat_id: b.id, method }; m.video.beat_overrides.push(o); }
+            o.asset_id = d.asset.asset_id; this.saveMake(m);
+          }
         }
+        await this.flushMake(id);
+        await this.loadLibAssets();
       } catch (e) { this.makeErr = this.makeError(e); }
       finally { this.assetUploadBusy[key] = false; }
     },
@@ -914,13 +1041,69 @@ WB.pages.video = {
         this.buildLogLines = d.tail || []; this.buildLogTruncated = !!d.truncated;
       } catch (e) { this.buildLogLines = ['(日志读取失败: ' + this.makeError(e) + ')']; }
     },
+    /* ── 产出可达：复制/导出/导入/打开文件夹 ── */
+    downloadFile(name, content, mime) {
+      const blob = new Blob([content], { type: mime });
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob); a.download = name;
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+    },
+    async openMakeFolder(kind) {
+      const body = { kind, make_id: this.cur, project_id: (this.curMake && this.curMake.project_id) || '', open: true };
+      try {
+        const d = await WB.api.post('/open-folder', body);
+        if (kind === 'voice') this.voiceFolderPath = d.path || '';
+        if (kind === 'project_out') this.outFolderPath = d.path || '';
+        WB.toast('已在资源管理器打开');
+      } catch (e) { WB.toast(this.makeError(e)); }
+    },
+    async copyFolderPath(kind) {
+      const body = { kind, make_id: this.cur, project_id: (this.curMake && this.curMake.project_id) || '', open: false };
+      try {
+        const d = await WB.api.post('/open-folder', body);
+        await WB.copyText(d.path || '');
+      } catch (e) { WB.toast(this.makeError(e)); }
+    },
+    copyNarration() { WB.copyText((this.curMake && this.curMake.narration && this.curMake.narration.text) || ''); },
+    exportNarrationTxt() {
+      const t = (this.curMake && this.curMake.narration && this.curMake.narration.text) || '';
+      if (!t.trim()) { WB.toast('口播稿为空'); return; }
+      this.downloadFile((this.curMake.title || '口播稿') + '.txt', t, 'text/plain;charset=utf-8');
+    },
+    copyScriptText() {
+      const beats = (this.curMake.script && this.curMake.script.beats) || [];
+      WB.copyText(beats.map((b) => b.narration).join('\n\n'));
+    },
+    copyScriptJson() { WB.copyText(JSON.stringify(this.curMake.script, null, 2)); },
+    exportScriptJson() {
+      if (!this.curMake.script) { WB.toast('尚无脚本'); return; }
+      this.downloadFile((this.curMake.title || '视频脚本') + '.json',
+        JSON.stringify(this.curMake.script, null, 2), 'application/json');
+    },
+    importScriptJson(ev) {
+      const f = ev.target.files && ev.target.files[0]; ev.target.value = '';
+      if (!f) return;
+      if (this.curMake.script_meta.locked) { WB.toast('脚本已定稿锁定，请先解锁第二段'); return; }
+      const reader = new FileReader();
+      reader.onload = () => {
+        try {
+          const d = JSON.parse(reader.result);
+          if (!Array.isArray(d.beats) || !d.beats.length) { WB.toast('JSON 缺少 beats，无法导入'); return; }
+          this.curMake.script = d;
+          if (this.curMake.script_meta) this.curMake.script_meta.locked = false;
+          this.saveMake(); WB.toast('脚本 JSON 已导入，请检查后重新定稿');
+        } catch (e) { WB.toast('JSON 解析失败: ' + e.message); }
+      };
+      reader.readAsText(f, 'utf-8');
+    },
 
   },
   async mounted() {
     this.registerSubs();
     await Promise.all([
       this.loadPool(), this.loadScripts(), this.loadStyles(), this.loadDrafts(),
-      this.loadVideos(), this.loadMakePresets(), this.loadMakes(),
+      this.loadVideos(), this.loadMakePresets(), this.loadMakes(), this.loadLibAssets(), this.loadTemplates(),
     ]);
     this.loadChannels(); this.loadAnPaths(); this.loadAnHistory();
     this.loadHot();
@@ -1242,52 +1425,11 @@ WB.pages.video = {
       </div>
     </div>
 
-    <!-- ═══ 子页3: 脚本生成 ═══ -->
-    <div v-show="tab==='script'">
-      <div class="card">
-        <h3>生成脚本</h3>
-        <div class="form-row" style="align-items:flex-start"><label>视频主题</label>
-          <textarea v-model="sg.brief" rows="4" style="flex:1" placeholder="一句话说明这期视频讲什么"></textarea></div>
-        <div class="form-row"><label>文章稿</label><div class="radio-group">
-          <label><input type="radio" value="none" v-model="sg.articleMode"> 不使用</label>
-          <label><input type="radio" value="paste" v-model="sg.articleMode"> 粘贴文章</label>
-          <label><input type="radio" value="draft" v-model="sg.articleMode"> 图文草稿</label>
-        </div></div>
-        <div v-if="sg.articleMode==='paste'" class="form-row" style="align-items:flex-start"><label>文章内容</label>
-          <textarea v-model="sg.pasted" rows="6" style="flex:1" placeholder="粘贴文章全文"></textarea></div>
-        <div v-if="sg.articleMode==='draft'" class="form-row"><label>选择草稿</label>
-          <select v-model="sg.draftId" style="min-width:360px"><option value="">请选择</option>
-            <option v-for="d in drafts" :key="d.id" :value="d.id">{{ d.title }} · {{ d.updated_at }}</option></select>
-          <span v-if="!drafts.length" class="muted">图文页还没有草稿</span></div>
-        <div class="form-row"><label>脚本风格</label>
-          <select v-model="sg.styleId" style="min-width:280px"><option v-for="s in styles" :key="s.id" :value="s.id">{{ s.name }} · 约 {{ s.wc[0] }}–{{ s.wc[1] }} 字</option></select></div>
-        <p v-if="selectedStyle" class="muted" style="margin:-4px 0 10px 98px">{{ selectedStyle.prompt }}</p>
-        <div class="form-row"><label>参考分析</label>
-          <select v-model="sg.analysisKey" style="min-width:360px"><option value="">不使用</option>
-            <option v-for="p in analyzedPool" :key="p.id" :value="p.video_id">{{ p.title }}</option></select></div>
-        <button class="btn primary" :disabled="sgBusy" @click="startGenerate">
-          {{ sgBusy ? '生成中…' + (sgProgress && sgProgress.message ? ' ' + sgProgress.message : '') : '生成脚本' }}</button>
-      </div>
-      <div v-if="sgPreview" class="card">
-        <h3>{{ sgPreview.title }}</h3>
-        <div style="display:flex;gap:6px;margin-bottom:10px">
-          <span class="badge blue">{{ sgPreview.format }}</span><span class="badge">{{ sgPreview.duration_est_s }} 秒</span><span class="badge">{{ sgPreview.word_count }} 字</span></div>
-        <div v-if="sgPreview.warnings && sgPreview.warnings.length" class="notice">
-          <div v-for="(w,i) in sgPreview.warnings" :key="i">{{ w }}</div></div>
-        <h3>Hook · {{ sgPreview.hook.type }}</h3>
-        <div v-for="(v,i) in sgPreview.hook.variants" :key="i" class="list-item" :class="{sel:sgHookSel===i}" @click="sgHookSel=i">● {{ v.text || v }}</div>
-        <table class="tbl" style="margin-top:12px"><thead><tr><th>段落</th><th>时长</th><th>口播 / 画面</th></tr></thead>
-          <tbody><tr v-for="b in sgPreview.beats" :key="b.id"><td><span class="badge" :class="b.role==='hook'||b.role==='payoff' ? 'yellow' : 'blue'">{{ b.role }}</span></td>
-            <td class="mono">{{ b.duration_est_s }}s</td><td><div>{{ b.narration }}</div><div v-if="b.on_screen && b.on_screen.length">字幕：{{ b.on_screen.join('、') }}</div><div class="muted">{{ b.visual_hint }}</div></td></tr></tbody></table>
-        <div class="notice" style="margin-top:12px"><strong>CTA · {{ sgPreview.cta.action }}</strong><div>{{ sgPreview.cta.line }}</div></div>
-        <button class="btn primary" @click="saveGenerated">保存到脚本仓库</button>
-      </div>
-    </div>
-
     <!-- ═══ 子页4: 脚本仓库 ═══ -->
     <div v-show="tab==='scripts'" class="two-col">
       <div class="card">
         <h3>脚本仓库({{ scripts.length }})</h3>
+        <p class="muted">可复用资产库——成稿脚本与分析骨架种子；脚本生成已并入视频制作，生成请到【视频制作】。</p>
         <div class="form-row"><select v-model="scriptFilter" style="width:auto">
           <option value="">全部</option><option value="analysis_seed">骨架种子</option><option value="generated">成稿</option></select>
           <span class="switch" :class="{on:reusableOnly}" @click="reusableOnly=!reusableOnly"></span><span>仅可复用</span></div>
@@ -1303,6 +1445,7 @@ WB.pages.video = {
           <div style="display:flex;justify-content:space-between;gap:10px"><h3>{{ scriptSel.title }}</h3>
             <span><span class="switch" :class="{on:scriptSel.reusable}" @click="toggleReusable(scriptSel)"></span> 可复用</span></div>
           <template v-if="scriptSel.kind==='generated' && scriptSel.script">
+            <button class="btn primary" :disabled="makeBusy" @click="useScriptInMake(scriptSel)">用于制作</button>
             <div style="display:flex;gap:6px;margin-bottom:10px"><span class="badge blue">{{ scriptSel.script.format }}</span><span class="badge">{{ scriptSel.script.duration_est_s }} 秒</span><span class="badge">{{ scriptSel.script.word_count }} 字</span></div>
             <div v-if="scriptSel.script.warnings && scriptSel.script.warnings.length" class="notice"><div v-for="(w,i) in scriptSel.script.warnings" :key="i">{{ w }}</div></div>
             <h3>Hook · {{ scriptSel.script.hook.type }}</h3><div v-for="(v,i) in scriptSel.script.hook.variants" :key="i" class="list-item">● {{ v.text || v }}</div>
@@ -1315,21 +1458,92 @@ WB.pages.video = {
             <h3>可复用风格骨架</h3>
             <div v-if="scriptSel.script.reusable"><p><strong>保留：</strong>{{ fmtList(scriptSel.script.reusable.keep) }}</p>
               <div class="notice"><strong>复刻时必须替换：</strong>{{ fmtList(scriptSel.script.reusable.change) }}</div></div>
-            <p class="muted">这是风格骨架种子，可去脚本生成页以 from-analysis 风格展开</p>
+            <p class="muted">这是分析骨架种子；新建制作时选 from-analysis 风格即可引用本骨架展开成稿</p>
           </template>
         </template>
       </div>
     </div>
 
-    <!-- ═══ 子页5/6: 占位 ═══ -->
-    <div v-show="tab==='templates' || tab==='materials'">
+    <!-- ═══ 子页5: 模板仓库 ═══ -->
+    <div v-show="tab==='templates'">
+      <p class="muted">模板来自渲染引擎注册表（主题/编排/生成方式）；收藏与「设为默认」只影响新建制作，不改动已有制作单。</p>
+      <div class="form-row" style="flex-wrap:wrap;gap:8px">
+        <button v-for="k in ['all','theme','layout','method']" :key="k" class="btn" :class="{primary:templateFilter===k}" @click="templateFilter=k">{{ {all:'全部',theme:'视觉主题',layout:'编排策略',method:'生成方式'}[k] }}</button>
+        <input v-model="templateSearch" placeholder="搜索名称或说明" aria-label="搜索模板">
+      </div>
+      <div v-if="!templatesCards.length" class="card empty">暂无模板，请稍后刷新</div>
+      <div v-else-if="!templatesFiltered.length" class="card empty">{{ templateSearch ? '没有匹配「'+templateSearch+'」的模板' : '该分类暂无模板' }}</div>
+      <template v-for="kind in ['theme','layout','method']" :key="kind">
+        <section v-if="groupCards(kind).length">
+          <h3>{{ {theme:'视觉主题',layout:'编排策略',method:'生成方式'}[kind] }}</h3>
+          <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:12px">
+            <div v-for="card in groupCards(kind)" :key="card.key" class="card" :style="isDefault(card.kind,card.id) ? 'border-color:var(--accent)' : ''">
+              <h3 style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">{{ card.name }}
+                <template v-if="card.kind==='theme'"><span v-for="(color,i) in card.swatch || []" :key="i" :style="{backgroundColor:color}" style="display:inline-block;width:14px;height:14px;border-radius:50%;border:1px solid var(--border)"></span></template>
+                <span class="badge">{{ {theme:'主题',layout:'编排',method:'生成方式'}[card.kind] }}</span>
+              </h3>
+              <div style="display:flex;gap:6px;flex-wrap:wrap"><span v-for="aspect in ['16:9','9:16','1:1','4:5']" :key="aspect" class="badge" :class="{muted:!(card.aspects || []).includes(aspect)}" :style="!(card.aspects || []).includes(aspect) ? 'opacity:.4' : ''">{{ aspect }}</span></div>
+              <p class="muted">{{ card.cost }}</p><p>{{ card.blurb }}</p>
+              <div style="display:flex;gap:8px">
+                <button class="btn" :class="isFav(card.key)?'fav-on':''" :style="isFav(card.key) ? 'color:var(--yellow,#d6a93b)' : ''" :aria-label="isFav(card.key)?'取消收藏':'收藏'" :aria-pressed="isFav(card.key)" :disabled="favBusy || styleBusy" @click="toggleFav(card)">{{ isFav(card.key) ? '★' : '☆' }}</button>
+                <button class="btn" :class="{primary:isDefault(card.kind,card.id)}" :disabled="styleBusy || favBusy" @click="setDefault(card)">{{ isDefault(card.kind,card.id) ? '当前默认' : '设为默认' }}</button>
+              </div>
+            </div>
+          </div>
+        </section>
+      </template>
+    </div>
+
+    <!-- ═══ 子页6: 素材仓库 ═══ -->
+    <div v-if="tab==='materials'" class="two-col">
       <div class="card">
-        <h3>{{ phTitles[tab] }}</h3>
-        <div class="stub-wrap">
-          <button class="btn stub" disabled>后续版本开放</button>
-          <div class="stub-tip">该子页在本期只保留占位 —— 热点追踪与追踪账号已可用。</div>
+        <h3>素材仓库({{ libAssets.length }})
+          <label class="btn" :aria-disabled="libUpBusy">{{ libUpBusy ? '上传中…' : '上传素材' }}<input type="file" multiple style="display:none" accept=".png,.jpg,.jpeg,.webp,.mp4,.webm,.mp3,.wav,.m4a" :disabled="libUpBusy" @change="uploadLibAssets($event)"></label>
+        </h3>
+        <div class="form-row" style="flex-wrap:wrap;gap:8px">
+          <button v-for="k in ['all','image','video','audio']" :key="k" class="btn" :class="{primary:libFilter===k}" @click="libFilter=k">{{ k==='all' ? '全部' : libKindName(k) }}</button>
+          <input v-model="libSearch" placeholder="搜索素材名称" aria-label="搜索素材">
+        </div>
+        <div v-if="!libAssets.length" class="empty">还没有素材 —— 上传或从制作页上传会进入这里</div>
+        <div v-else-if="!libFiltered.length" class="empty">没有匹配的素材</div>
+        <div v-for="a in libFiltered" :key="a.asset_id" class="list-item" :class="{sel:previewAsset && previewAsset.asset_id===a.asset_id}">
+          <div style="display:flex;gap:10px;align-items:center">
+            <div style="width:64px;height:48px;flex-shrink:0;display:flex;align-items:center;justify-content:center;overflow:hidden">
+              <img v-if="a.kind==='image'" :src="assetFileUrl(a)" :alt="a.name" loading="lazy" style="width:100%;height:100%;object-fit:cover">
+              <video v-else-if="a.kind==='video'" :src="assetFileUrl(a)" preload="metadata" muted style="width:100%;height:100%;object-fit:cover"></video>
+              <span v-else style="font-size:28px" aria-label="音频">🎧</span>
+            </div>
+            <div style="min-width:0;flex:1">
+              <div class="t"><span :title="a.name">{{ cut(a.name,18) }}</span> <span class="badge">{{ libKindName(a.kind) }}</span>
+                <span v-if="(a.refs || []).length" :title="libRefsTitle(a)" style="color:var(--yellow,#d6a93b)">● {{ a.refs.length }}</span></div>
+              <div class="s muted">{{ fmtSize(a.size) }} · {{ a.created_at }}</div>
+            </div>
+          </div>
+          <div class="form-row" style="gap:6px;margin:8px 0 0">
+            <button class="btn" @click="openPreview(a)">预览</button>
+            <button class="btn" @click="openPreview(a);startRenameAsset(a)">重命名</button>
+            <button class="btn" @click="deleteAsset(a)">删除</button>
+          </div>
         </div>
       </div>
+      <div v-if="previewAsset" class="card">
+        <h3>素材预览 <button class="btn" @click="closePreview">关闭</button></h3>
+        <img v-if="previewAsset.kind==='image'" :src="assetFileUrl(previewAsset)" :alt="previewAsset.name" style="max-width:100%;max-height:420px;object-fit:contain">
+        <video v-else-if="previewAsset.kind==='video'" :key="previewAsset.asset_id" :src="assetFileUrl(previewAsset)" controls preload="metadata" style="width:100%;max-height:420px"></video>
+        <audio v-else-if="previewAsset.kind==='audio'" :key="previewAsset.asset_id" :src="assetFileUrl(previewAsset)" controls preload="metadata" style="width:100%"></audio>
+        <h3 style="overflow-wrap:anywhere">{{ previewAsset.name }}</h3>
+        <p class="muted">{{ libKindName(previewAsset.kind) }} · {{ fmtSize(previewAsset.size) }}<span v-if="previewAsset.duration_s!=null"> · 时长 {{ fmtDur(previewAsset.duration_s) }}</span></p>
+        <p class="muted">上传时间：{{ previewAsset.created_at }}</p>
+        <p v-if="libRefsTitle(previewAsset)" style="overflow-wrap:anywhere">{{ libRefsTitle(previewAsset) }}</p>
+        <div v-if="renamingAsset===previewAsset.asset_id" class="form-row" style="gap:6px;flex-wrap:wrap">
+          <input v-model="renamingAssetName" placeholder="新名称" aria-label="素材新名称" @keyup.enter="saveRenameAsset(previewAsset)" @keyup.esc="renamingAsset=null" style="min-width:0;flex:1">
+          <button class="btn primary" @click="saveRenameAsset(previewAsset)">存</button>
+          <button class="btn" @click="renamingAsset=null">取消</button>
+        </div>
+        <button v-else class="btn" @click="startRenameAsset(previewAsset)">重命名</button>
+        <button class="btn" @click="deleteAsset(previewAsset)">删除</button>
+      </div>
+      <div v-else class="card empty">从左侧选择素材预览</div>
     </div>
 
     <!-- 四段视频制作 -->
@@ -1364,12 +1578,14 @@ WB.pages.video = {
                     <div class="form-row"><label>一句话简报</label><input type="text" v-model="narBrief" placeholder="这期视频讲什么" style="flex:1;min-width:0"></div>
                     <div class="form-row"><label>风格</label><select v-model="curMake.narration.style_id" @change="saveMake()" style="max-width:100%">
                       <option value="" disabled>请选择风格</option><option v-for="s in styles" :key="s.id" :value="s.id">{{ s.name }} · {{ s.wc ? s.wc.join('–') : '默认' }} 字</option></select></div>
-                    <button class="btn primary" :disabled="narBusy || storyBusy || sgBusy || !curMake.narration.style_id || !(narBrief.trim() || curMake.narration.ref_text.trim())" @click="runMakeJob('narration')">{{ narBusy ? '生成中…' : '生成口播稿' }}</button>
+                    <button class="btn primary" :disabled="narBusy || storyBusy || !curMake.narration.style_id || !(narBrief.trim() || curMake.narration.ref_text.trim())" @click="runMakeJob('narration')">{{ narBusy ? '生成中…' : '生成口播稿' }}</button>
                   </template>
                 </template>
                 <div class="muted" style="margin:10px 0 4px">正文</div>
                 <textarea v-model="curMake.narration.text" @input="narrationInput" :readonly="curMake.narration.locked" rows="10" style="width:100%" placeholder="在这里输入或修改口播稿"></textarea>
-                <p class="muted">{{ narrationWords }} 字 · 预估 {{ Math.round(narrationWords / 4.2) }} 秒</p>
+                <p class="muted">{{ narrationWords }} 字 · 预估 {{ Math.round(narrationWords / 4.2) }} 秒
+                  <button class="btn" style="margin-left:8px" @click="copyNarration">复制</button>
+                  <button class="btn" @click="exportNarrationTxt">导出 TXT</button></p>
                 <div v-if="curMake.narration.locked" style="margin-top:10px">
                   <p class="muted mono">已定稿 hash {{ curMake.narration.hash }} · {{ curMake.narration.locked_at }}</p>
                   <button class="btn" @click="makeLock('narration', true)">解锁改稿</button></div>
@@ -1382,13 +1598,21 @@ WB.pages.video = {
               <div v-if="!curMake.narration.locked" class="stub-wrap" style="padding:30px;text-align:center;background:var(--bg-hover);color:var(--text-mute)">先定稿口播稿</div>
               <template v-else>
                 <div v-if="curMake.script_stale" class="notice">口播稿已重定稿，脚本与口播不一致——重新生成或手动对齐后再定稿</div>
+                <div class="form-row" v-if="curMake.script" style="margin-bottom:10px">
+                  <button class="btn" @click="copyNarration">复制口播全文</button>
+                  <button class="btn" @click="copyScriptJson">复制脚本 JSON</button>
+                  <button class="btn" @click="exportScriptJson">导出 JSON</button>
+                  <button class="btn" @click="exportNarrationTxt">导出口播 TXT</button>
+                  <label class="btn">导入 JSON<input type="file" accept=".json" style="display:none" @change="importScriptJson"></label>
+                  <span class="muted">可导出修改后再导入；导入仅改副字段与节拍，口播仍以第一段为准</span></div>
                 <fieldset :disabled="makeBusy" style="border:0;min-width:0;padding:0">
                   <div v-if="!curMake.script_meta.locked" class="form-row">
-                    <button class="btn primary" :disabled="narBusy || storyBusy || sgBusy" @click="runMakeJob('storyboard')">{{ storyBusy ? '分镜生成中…' : curMake.script ? '重新生成分镜脚本' : 'AI 生成分镜脚本' }}</button>
+                    <button class="btn primary" :disabled="narBusy || storyBusy" @click="runMakeJob('storyboard')">{{ storyBusy ? '分镜生成中…' : curMake.script ? '重新生成分镜脚本' : 'AI 生成分镜脚本' }}</button>
                     <select v-model="importId" @change="importMakeScript" style="max-width:100%"><option value="">从脚本仓库导入</option>
                       <option v-for="r in importScripts" :key="r.id" :value="r.id">{{ r.title }}</option></select></div>
                   <div v-if="storyBusy" class="muted">{{ storyProgress && storyProgress.message || '准备中…' }}</div>
                   <template v-if="curMake.script">
+                    <p v-if="curMake.script.disclaimer" class="notice">免责声明：{{ curMake.script.disclaimer }}</p>
                     <fieldset :disabled="curMake.script_meta.locked" style="border:0;min-width:0;padding:0">
                       <div class="form-row"><label>脚本标题</label><input type="text" v-model="curMake.script.title" @input="curMake.title=curMake.script.title;saveMake()" style="flex:1;min-width:0"></div>
                       <div class="muted">开场 Hook 变体</div>
@@ -1432,6 +1656,10 @@ WB.pages.video = {
                   <p class="muted">换音色=全新合成；旧音色文件保留，切回即复用</p>
                   <p v-if="!ttsProviders.length" class="notice">请到 <a href="#/settings">设置 → 语音合成</a> 启用供应商和音色</p>
                   <button class="btn primary" :disabled="voiceBusy || !makeVoices.some(v=>v.id===curMake.voice.voice) || curMake.script_stale" @click="runMakeJob('voice')">{{ voiceBusy ? '生成中…' : '生成语音稿' }}</button>
+                  <div class="form-row" v-if="curMake.voice.voice_key" style="margin-top:8px;align-items:center">
+                    <button class="btn" @click="openMakeFolder('voice')">打开语音文件夹</button>
+                    <button class="btn" @click="copyFolderPath('voice')">复制路径</button>
+                    <span class="muted" style="font-size:11px">可直接复制 mp3 使用</span></div>
                 </fieldset>
                 <p v-if="voiceBusy" class="muted">{{ voiceProgress && voiceProgress.message || '准备中…' }}</p>
                 <div v-for="(b,i) in makeBeats" :key="b.id" style="padding:8px 0;border-bottom:1px solid var(--border)" :style="curMake.voice_bad.includes(b.id) ? {background:'color-mix(in oklch,var(--yellow) 12%,transparent)'} : {}">
@@ -1453,23 +1681,23 @@ WB.pages.video = {
                   <label><input type="radio" value="unified" v-model="curMake.video.mode" @change="saveMake()">统一生成</label>
                   <label><input type="radio" value="edit" v-model="curMake.video.mode" @change="saveMake()" :disabled="curMake.video.aspect!=='16:9'">编辑生成</label></div>
                   <span v-if="curMake.video.aspect!=='16:9'" class="muted">编辑生成仅支持 16:9</span></div>
-                <template v-if="curMake.video.mode==='unified'">
+                  <div v-if="aspectBlocked().length" class="notice">当前画幅不支持：{{ aspectBlocked().join('、') }}。请改选模板动效或切回 16:9；不会静默忽略，制作时会直接报错。</div>
                   <div class="form-row"><label>视觉风格</label><select v-model="curMake.video.theme" @change="saveMake()"><option v-for="t in (presets && presets.themes) || []" :key="t.id" :value="t.id" :disabled="t.aspect_limit && t.aspect_limit!==curMake.video.aspect">{{ t.name }}{{ t.aspect_limit && t.aspect_limit!==curMake.video.aspect ? '（仅 '+t.aspect_limit+'）' : '' }}</option></select>
                     <span v-if="makeTheme" style="display:inline-flex;gap:5px"><span v-for="(color,i) in makeTheme.swatch" :key="i" :style="{backgroundColor:color}" style="display:inline-block;width:14px;height:14px;border-radius:50%;border:1px solid var(--border)"></span></span></div>
                   <div class="form-row"><label>编排策略</label><select v-model="curMake.video.layout" @change="saveMake()"><option v-for="l in (presets && presets.layouts) || []" :key="l.id" :value="l.id" :disabled="l.id==='fast-cut' && curMake.video.aspect!=='16:9'">{{ l.name }}{{ l.id==='fast-cut' && curMake.video.aspect!=='16:9' ? '（仅 16:9）' : '' }}</option></select></div>
                   <div class="form-row"><label>画面编排</label><div class="radio-group"><label><input type="radio" value="llm" v-model="curMake.video.enrich" @change="saveMake()" :disabled="!presets || !presets.llm_ready">AI 编排</label>
                     <label><input type="radio" value="plain" v-model="curMake.video.enrich" @change="saveMake()">简洁</label></div>
                     <span v-if="!presets || !presets.llm_ready" class="muted">AI 编排需先在设置页配置翻译模型</span></div>
-                  <div v-if="curMake.video.theme==='vox-collage'" class="notice">纸拼贴档案（VOX）：每个场景 AI 生成一张纸拼贴海报（约 40 秒/张，走 Ark 套餐额度，失败自动回退无图版式）。
-                    {{ presets && presets.collage_ready===false ? '⚠ 未检测到 arkcli 命令，将全部回退无图版式' : '' }} 建议搭配「VOX 纪录片」脚本风格 + 云扬音色。</div>
-                </template>
-                <div v-else style="overflow-x:auto"><table class="tbl"><thead><tr><th>拍</th><th>生成方法</th><th>素材 / 参数</th></tr></thead><tbody>
+                  <div class="form-row"><label>默认生成方式</label><select v-model="curMake.video.generation_method" @change="saveMake()"><option value="inherit">按主题 / 编排</option><option v-for="m in ((presets && presets.generation_methods) || []).filter(x => ['template','vox-fast-cut','vox-collage','hand-drawn'].includes(x.id))" :key="m.id" :value="m.id" :disabled="!m.aspects.includes(curMake.video.aspect)">{{ m.name }}</option></select></div>
+                  <div class="form-row"><label>本次生图上限</label><input type="number" min="0" max="100" v-model.number="curMake.video.image_budget" @change="saveMake()" placeholder="默认 8 张；0 禁止新生图"></div>
+                  <div class="notice">逐拍选择优先于全片主题。VOX 快切 / 纸拼贴保留完整图片，约每 3–6 秒切换构图；每父拍最多一张新图，重复提示词复用缓存。手绘跟随使用本地 SVG，箭头仅表示原文顺序。字幕无真实对齐轨时按音频时长估算，不重合成已选语音。生图按供应商计费，耗时取决于缓存、音频与帧率。</div>
+                <div v-if="curMake.video.mode==='edit'" style="overflow-x:auto"><table class="tbl"><thead><tr><th>拍</th><th>生成方法</th><th>素材 / 参数</th></tr></thead><tbody>
                   <tr v-for="(b,i) in makeBeats" :key="b.id"><td>{{ i+1 }} · {{ b.id }}</td>
                     <td><select :value="beatOverride(b).method" @change="setBeatOverride(b,'method',$event.target.value)">
-                      <option value="template">模板动画</option><option value="ai_image">AI 生图</option><option value="upload_image">上传图片</option><option value="upload_video">上传视频</option></select></td>
+                      <option v-for="m in (presets && presets.generation_methods) || []" :key="m.id" :value="m.id" :disabled="!m.aspects.includes(curMake.video.aspect)">{{ m.name }}{{ !m.aspects.includes(curMake.video.aspect) ? "（不支持此画幅）" : "" }}</option></select></td>
                     <td>
-                      <template v-if="beatOverride(b).method.startsWith('upload_')">
-                        <select :value="beatOverride(b).asset_id || ''" @change="setBeatOverride(b,'asset_id',$event.target.value)" style="max-width:220px"><option value="">选择该拍素材</option><option v-for="a in beatAssets(b)" :key="a.asset_id" :value="a.asset_id">{{ a.name }}</option></select>
+                      <template v-if="beatOverride(b).method.startsWith('upload_') || beatOverride(b).method==='vox-fast-cut' || beatOverride(b).method==='vox-collage'">
+                        <select :value="beatOverride(b).asset_id || ''" @change="setBeatAsset(b,$event)" style="max-width:220px"><option value="">选择该拍素材</option><option v-for="a in beatAssets(b)" :key="a.asset_id" :value="a.asset_id">{{ a.name }} · {{ fmtSize(a.size) }}</option><option value="__manage__">从素材仓库管理 →</option></select>
                         <label class="btn">{{ assetUploadBusy[cur+':'+b.id] ? '上传中…' : '上传' }}<input type="file" style="display:none" :accept="beatOverride(b).method==='upload_video' ? '.mp4,.webm' : '.png,.jpg,.jpeg,.webp'" @change="uploadBeatAsset(b,$event)"></label>
                       </template>
                       <input v-if="beatOverride(b).method==='ai_image'" type="text" :value="beatOverride(b).prompt || ''" @input="setBeatOverride(b,'prompt',$event.target.value)" :placeholder="(b.visual_hint || '')+' · 纸质拼贴、剪报纹理、档案风格，无文字'" style="width:100%;min-width:180px">
@@ -1490,6 +1718,20 @@ WB.pages.video = {
                 <button class="btn" @click="showMakeBuildLog">{{ buildLogOpen ? '收起日志' : '查看日志' }}</button>
                 <button class="btn primary" :disabled="makeBusy || buildBusy || !curMake.script_meta.locked || curMake.script_stale || (buildMode==='build' && !makeVoiceReady)" @click="runMakeJob('build')">重试</button></div></div>
               <div v-if="buildLogOpen" style="max-height:260px;overflow:auto;margin-top:8px"><p v-if="buildLogTruncated" class="muted">仅显示末尾 {{ buildLogLines.length }} 行</p><pre class="mono" style="white-space:pre-wrap">{{ buildLogLines.join('\\n') }}</pre></div>
+            </div>
+            <div class="card" v-if="curMake.project_id">
+              <h3>本项目产出
+                <span class="muted" style="margin-left:10px;font-weight:400" v-if="makeProject && makeProject.built_at">成片于 {{ makeProject.built_at.slice(0,19).replace('T',' ') }}</span></h3>
+              <template v-if="makeProject">
+                <video v-if="makeOutUrl" :key="makeOutUrl" :src="makeOutUrl" controls preload="metadata" style="max-width:100%;max-height:460px;border-radius:8px"></video>
+                <div class="form-row" style="margin-top:10px;align-items:center">
+                  <button class="btn" @click="openMakeFolder('project_out')">打开成片文件夹</button>
+                  <button class="btn" @click="copyFolderPath('project_out')">复制路径</button>
+                  <a class="btn" v-if="makeProject.has_review" :href="'/wb-api/videos/'+encodeURIComponent(curMake.project_id)+'/file/'+encodeURIComponent('发布前核对.md')" download="发布前核对.md">发布前核对</a>
+                  <span class="muted" style="font-size:11px">含 final.mp4 / 封面 / 字幕 SRT</span></div>
+                <p class="muted" style="margin-top:6px">该成片同时会出现在右侧「视频项目」列表。</p>
+              </template>
+              <div v-else class="muted">本项目尚未出片 —— 第四段点「开始制作」后，成片会出现在这里。</div>
             </div>
           </template>
         </div>

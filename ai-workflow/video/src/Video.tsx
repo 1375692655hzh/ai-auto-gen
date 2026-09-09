@@ -1,7 +1,7 @@
 // 视频装配层：读取 src/active-story.ts（由 scripts/build.mjs 生成）
 // 场景时长由音频时长驱动，字幕与音轨按场景挂载
 import React from "react";
-import { AbsoluteFill, Audio, Sequence, staticFile } from "remotion";
+import { AbsoluteFill, Audio, Freeze, Sequence, staticFile } from "remotion";
 import { ACTIVE, ActiveFrame } from "./active-story";
 import type { SceneProps } from "./story-types";
 import { BarsTpl, CardsTpl, CompareTpl, EventTpl, TitleTpl } from "./templates-core";
@@ -16,6 +16,8 @@ import { VPointsTpl, VStatTpl, VTitleTpl } from "./templates-vertical";
 import { ClipTpl } from "./templates-media";
 import PaperBoardTpl from "./templates-paper";
 import { COLORS } from "./ui";
+
+import {VoxFastCutTpl, HandDrawnTpl} from "./templates-follow";
 
 const TEMPLATES: Record<string, React.FC<SceneProps>> = {
 	title: TitleTpl,
@@ -33,6 +35,8 @@ const TEMPLATES: Record<string, React.FC<SceneProps>> = {
 	vpoints: VPointsTpl,
 	"paper-board": PaperBoardTpl,
 	clip: ClipTpl,
+	"vox-fast-cut": VoxFastCutTpl,
+	"hand-drawn": HandDrawnTpl,
 };
 
 const StageScaler: React.FC<{ children: React.ReactNode }> = ({ children }) => {
@@ -81,11 +85,14 @@ export const Video: React.FC = () => {
 							</Sequence>
 						) : null}
 						<StageScaler>
+							<Freeze frame={(frame.visualDurationInFrames ?? frame.durationInFrames) - 1}
+								active={(f) => f >= (frame.visualDurationInFrames ?? frame.durationInFrames)}>
 							<Comp
 								scene={ACTIVE.story.scenes[index]}
-								duration={frame.durationInFrames}
+								duration={frame.visualDurationInFrames ?? frame.durationInFrames}
 								caption={frame.cues ?? frame.caption}
 							/>
+							</Freeze>
 						</StageScaler>
 					</Sequence>
 				);

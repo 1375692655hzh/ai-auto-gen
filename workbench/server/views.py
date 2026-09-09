@@ -162,6 +162,7 @@ def videos() -> list:
                     if isinstance(verify.get("warnings"), list) else [],
                     "verify_errors": [str(x) for x in verify["errors"]]
                     if isinstance(verify.get("errors"), list) else [],
+                    "has_review": (d / "out" / "发布前核对.md").is_file(),
                     "scenes": len(story.get("scenes", [])) if isinstance(story, dict) else 0})
     out.sort(key=lambda v: (v["date"], v["id"]), reverse=True)
     return out
@@ -172,7 +173,7 @@ def video_file(vid: str, name: str) -> Path | None:
         return None
     for base in (VIDEOS / vid / "out", VIDEOS / vid):
         p = base / name
-        if p.is_file() and p.suffix.lower() in (".mp4", ".png", ".jpg", ".srt"):
+        if p.is_file() and p.suffix.lower() in (".mp4", ".png", ".jpg", ".srt", ".md"):
             return p
     return None
 

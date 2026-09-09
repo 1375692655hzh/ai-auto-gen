@@ -1,7 +1,7 @@
+import { captionAt, splitCaption, visualShots } from "../shared/captions.mjs";
 // 场景模板库（四）：横版纸拼贴档案（VOX 风格）—— paper-board
-// 每 scene 一张 AI 生成的纸拼贴海报（seedream, 1920×1920, 存 videos/<id>/input/collage/），
-// 模板负责：拼贴图"钉入"入场 → 打字机纸条/红章依次钉上 → 微动（呼吸摆动 + Ken Burns）。
-// Data 接口在本文件内声明（story-types 契约不动）；图缺失时回退纯纸板+打字机大字。
+// 父 beat 不拆场景、不重合成语音。同一张拼贴图按 3–6 秒 visualShots 轮换安全构图
+// （object-position 裁切，不伪称图内元素分层）。纸条/红章随 shot 切换。
 import React from "react";
 import {
 	AbsoluteFill,
@@ -25,7 +25,17 @@ export interface PaperBoardData {
 	stamp?: string;
 	/** 无图回退时的打字机大字(通常=scene.title) */
 	fallback_title?: string;
+	/** 各 shot 轮换的档案标签（原文 on_screen，缺省回退 label） */
+	labels?: string[];
 }
+
+/** 安全构图：避开四角极端，只做整图裁切，不拆图层。 */
+const CROPS = [
+	{pos: "24% 30%", scale: 1.22},
+	{pos: "76% 36%", scale: 1.18},
+	{pos: "50% 70%", scale: 1.16},
+	{pos: "42% 22%", scale: 1.24},
+];
 
 /* ---- 档案纸板底色(生成图自带背景, 但无图回退/留边时露出) ---- */
 const PAPER_BG = "linear-gradient(160deg, #ece1c6 0%, #e2d4b2 55%, #d8c9a4 100%)";
@@ -72,27 +82,35 @@ const PaperBoardTpl: React.FC<SceneProps> = ({ scene, duration, caption }) => {
 	const frame = useCurrentFrame();
 	const { fps } = useVideoConfig();
 	const data = (scene.data ?? {}) as PaperBoardData;
+	const cues = Array.isArray(caption) ? caption : [];
+	const shots = visualShots(cues, duration, fps);
+	const index = Math.max(0, shots.findIndex((s) => frame >= s.start && frame < s.end));
+	const shot = shots[index] || {start: 0, end: duration, label: ""};
+	const local = frame - shot.start;
+	const crop = CROPS[index % CROPS.length];
 
-	// 入场: 图 spring 钉入(0-24), 纸条(22-38), 红章(38-52); 之后整体微摆
-	const pin = spring({ frame, fps, config: { damping: 12, stiffness: 110 }, durationInFrames: 24 });
-	const labelIn = interpolate(frame, [22, 38], [0, 1], { extrapolateLeft: "clamp", extrapolateRight: "clamp" });
-	const stampIn = spring({ frame: frame - 38, fps, config: { damping: 9, stiffness: 160 }, durationInFrames: 14 });
-	const sway = Math.sin(frame / 46) * 0.35;               // 微摆(度)
-	const ken = interpolate(frame, [0, duration], [1.07, 1.0]); // Ken Burns 缓推
+	const pin = spring({ frame: local, fps, config: { damping: 12, stiffness: 110 }, durationInFrames: 18 });
+	const labelIn = interpolate(local, [6, 20], [0, 1], { extrapolateLeft: "clamp", extrapolateRight: "clamp" });
+	const stampIn = spring({ frame: local - 14, fps, config: { damping: 9, stiffness: 160 }, durationInFrames: 12 });
+	const sway = Math.sin((shot.start + local) / 46) * 0.35;
+	const ken = interpolate(local, [0, Math.max(1, shot.end - shot.start)], [1.05, 1.0]);
 
-	const captionText = Array.isArray(caption)
-		? (caption.find((c) => frame >= c.start && frame < c.end) ?? caption[caption.length - 1])?.t ?? ""
-		: caption;
+	const captionText = captionAt(caption, frame, duration, fps);
 	const fade = interpolate(frame, [0, 10, duration - 10, duration], [0, 1, 1, 0], {
 		extrapolateLeft: "clamp",
 		extrapolateRight: "clamp",
 	});
-	const label = (data.label || "").slice(0, 12);
+	const labels = (data.labels && data.labels.length ? data.labels : [data.label || ""]).filter(Boolean);
+	const shotLine = splitCaption(shot.label)[0] || "";
+	const label = String(labels[index % Math.max(1, labels.length)] || shotLine.replace(/\n/g, "")).slice(0, 12);
 	const stamp = (data.stamp || "").slice(0, 6);
 
 	return (
 		<AbsoluteFill style={{ background: PAPER_BG, opacity: fade, fontFamily: FONT, overflow: "hidden" }}>
-			{/* 拼贴主图(带纸白边, 轻微右倾, spring 钉入 + 微摆 + Ken Burns) */}
+			<div style={{position: "absolute", top: 36, left: 70, fontSize: 24, letterSpacing: 4, color: "#6a5c48"}}>
+				档案 · {String(index + 1).padStart(2, "0")}/{String(shots.length).padStart(2, "0")}
+			</div>
+			{/* 拼贴主图：整图裁切轮换，不拆图层 */}
 			{data.image ? (
 				<AbsoluteFill style={{ alignItems: "center", justifyContent: "center" }}>
 					<div
@@ -105,11 +123,12 @@ const PaperBoardTpl: React.FC<SceneProps> = ({ scene, duration, caption }) => {
 							padding: 16,
 							boxShadow: "0 18px 46px rgba(70,50,15,0.38)",
 							position: "relative",
+							overflow: "hidden",
 						}}
 					>
 						<Img
 							src={staticFile(data.image)}
-							style={{ width: "100%", height: "100%", objectFit: "cover" }}
+							style={{ width: "100%", height: "100%", objectFit: "cover", objectPosition: crop.pos, transform: `scale(${crop.scale})`, transformOrigin: crop.pos }}
 						/>
 						<Tape style={{ top: -24, left: 60, transform: "rotate(-8deg)" }} delay={10} />
 						<Tape style={{ bottom: -22, right: 48, transform: "rotate(7deg)" }} delay={16} />
@@ -225,7 +244,7 @@ const PaperBoardTpl: React.FC<SceneProps> = ({ scene, duration, caption }) => {
 							textAlign: "center",
 						}}
 					>
-						{captionText}
+						<span style={{whiteSpace: "pre-wrap"}}>{captionText}</span>
 					</div>
 				</div>
 			) : null}

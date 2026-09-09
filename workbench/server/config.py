@@ -308,6 +308,15 @@ def save_video_makes(rows: list) -> list:
     return save_rows("video_makes.json", rows)
 
 
+def load_video_assets() -> list:
+    rows = load_rows("video_assets.json")
+    return rows if isinstance(rows, list) and all(isinstance(r, dict) for r in rows) else []
+
+
+def save_video_assets(rows: list) -> list:
+    return save_rows("video_assets.json", rows)
+
+
 def load_drafts() -> list:
     return load_rows("drafts.json")
 

@@ -101,6 +101,12 @@ export function validateStory(story) {
 		if (s.data === undefined || !isObj(s.data)) {
 			err(`${where}.data 缺失或不是对象（模板渲染会崩）`);
 		} else {
+            for (const key of ["src", "image"]) {
+                const value = s.data[key];
+                if (value != null && (typeof value !== "string" || !/^(materials|input\/collage)\/[a-zA-Z0-9_.-]+$/.test(value) || /(^|\/)\.\.?(\/|$)/.test(value)))
+                    err(`${where} data.${key} 必须是项目内安全素材路径`);
+            }
+            if (["vox-fast-cut", "hand-drawn"].includes(s.template) && aspect !== "16:9") err(`${where} ${s.template} 仅支持 16:9`);
 			if (s.template === "clip") {
 				if (typeof s.data.src !== "string" || !s.data.src.trim())
 					err(`${where}(${s.id}) clip.data.src 必须是非空字符串`);

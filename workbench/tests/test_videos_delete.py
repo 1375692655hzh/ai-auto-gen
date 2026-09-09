@@ -36,7 +36,14 @@ class VideoDeleteTests(unittest.TestCase):
             shutil.rmtree(self.project)
 
     def test_delete_real_cli(self):
-        response = self.client.delete("/wb-api/videos/wbdelete-test")
+        # Execute the real CLI with this test interpreter, independent of Windows
+        # launcher registration. The fixed production argv has its own test below.
+        real_run = subprocess.run
+        def portable_python(argv, **kwargs):
+            self.assertEqual(argv[:2], ["py", "-3.11"])
+            return real_run([sys.executable, *argv[2:]], **kwargs)
+        with patch("subprocess.run", side_effect=portable_python):
+            response = self.client.delete("/wb-api/videos/wbdelete-test")
         self.assertEqual(response.status_code, 200, response.text)
         self.assertEqual(response.json(), {"removed": 1})
         deadline = time.monotonic() + 10

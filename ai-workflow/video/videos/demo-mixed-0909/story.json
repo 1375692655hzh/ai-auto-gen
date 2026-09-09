@@ -1,0 +1,77 @@
+{
+  "meta": {
+    "title": "【验收】混合渲染演示",
+    "voice": "archived-take",
+    "fps": 30,
+    "width": 1920,
+    "height": 1080,
+    "format": "16:9",
+    "theme": "vox-collage",
+    "layout": "auto",
+    "padSeconds": 0.8
+  },
+  "scenes": [
+    {
+      "id": "b1",
+      "template": "vox-fast-cut",
+      "narration": "美股创历史新高，SpaceX概念股SPCX在解禁首日放量上涨百分之十五点八，资金在交易什么？",
+      "caption": "美股创历史新高，SpaceX概念股SPCX在解禁首日放量上涨百分之十五点八，资金在交易什么？",
+      "data": {
+        "image": "materials/va0909012113160.png",
+        "label": "历史音频 · 渲染演",
+        "fallback_title": "混合渲染验收 · 历史音频",
+        "labels": [
+          "历史音频 · 渲染演示"
+        ]
+      }
+    },
+    {
+      "id": "b2",
+      "template": "hand-drawn",
+      "narration": "大盘走强情绪偏热，但SPCX流通盘小，解禁前筹码集中，少量资金就能引发大幅波动。",
+      "caption": "大盘走强情绪偏热，但SPCX流通盘小，解禁前筹码集中，少量资金就能引发大幅波动。",
+      "data": {
+        "labels": [
+          "历史音频 · 渲染演示"
+        ]
+      }
+    },
+    {
+      "id": "b3",
+      "template": "clip",
+      "narration": "美国联邦赤字接近二万亿美元。",
+      "caption": "美国联邦赤字接近二万亿美元。",
+      "data": {
+        "src": "materials/va0909012113164.png",
+        "kind": "image",
+        "zoom": 1,
+        "scrim": "bottom",
+        "headline": [
+          {
+            "t": "历史音频 · 渲染演示"
+          }
+        ],
+        "credit": "程序绘制演示素材；历史音频",
+        "kenburns": "none"
+      }
+    },
+    {
+      "id": "b4",
+      "template": "clip",
+      "narration": "长期盈亏平衡通胀率保持稳定。",
+      "caption": "长期盈亏平衡通胀率保持稳定。",
+      "data": {
+        "src": "materials/va0909012113169.mp4",
+        "kind": "video",
+        "zoom": 1,
+        "scrim": "bottom",
+        "headline": [
+          {
+            "t": "历史音频 · 渲染演示"
+          }
+        ],
+        "credit": "程序绘制演示素材；历史音频"
+      }
+    }
+  ]
+}

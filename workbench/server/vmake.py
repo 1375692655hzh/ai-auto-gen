@@ -8,6 +8,8 @@ LLM 输出不过闸门（逐场景 narration 与输入逐字一致 + 模板白�
 _llm_compose_scenes 是本文件唯一外呼点。
 """
 
+from .generation_methods import GENERATION_METHODS
+
 import json
 import re
 import time
@@ -18,15 +20,7 @@ VIDEO_DIR = REPO / "ai-workflow" / "video"
 VIDEOS_DIR = VIDEO_DIR / "videos"
 
 PAD_SECONDS = 0.8
-FAST_CUT_PAD_SECONDS = 0.5      # 快切微场景密度高，收紧场间停顿
 FAST_CUT_MIN_SENT_CHARS = 8
-FAST_CUT_ROLES = ("setup", "move", "gives", "payoff")
-FAST_CUT_ROTATION = {
-    "setup": ("event", "bars", "cards"),
-    "move": ("stacked", "bars", "compare", "cards"),
-    "gives": ("rows", "checklist", "cards", "bars"),
-    "payoff": ("stacked", "versus", "cards"),
-}
 ASPECTS = {"16:9": (1920, 1080), "9:16": (1080, 1920),
            "1:1": (1080, 1080), "4:5": (1080, 1350)}
 FORMAT_ALIASES = {"horizontal": "16:9", "vertical": "9:16"}
@@ -55,6 +49,18 @@ LAYOUTS = {
     "data-dense": "数据密集",
     "quote-big": "金句大字",
     "fast-cut": "快节奏快切（仅 16:9）",
+}
+THEME_META = {
+    "terminal-dark": {"desc": "午夜深空底色 + 荧光绿/科技蓝高亮，默认全场景通用"},
+    "paper-light": {"desc": "素白纸面简报，柔和高对比，适合日间快讯"},
+    "ocean-blue": {"desc": "深海蓝调渐变，数据图表友好"},
+    "vox-collage": {"desc": "档案纸拼贴美学（VOX），仅 16:9；此主题下全片生成方式选「继承全片默认」会解析为 VOX 拼贴快切"},
+}
+LAYOUT_META = {
+    "auto": {"desc": "AI 按拍角色自动挑选版式"},
+    "data-dense": {"desc": "数据密集：bars/rows/compare 主导，适合多数字段落"},
+    "quote-big": {"desc": "金句大字：versus/stacked 放大金句与对比"},
+    "fast-cut": {"desc": "快节奏快切（仅 16:9）：短镜头高频切换；此编排下「继承全片默认」会解析为 vox-fast-cut"},
 }
 LEGACY_PACK_MAP = {
     "auto": ("terminal-dark", "auto"),
@@ -143,7 +149,7 @@ def _build_meta(script: dict, settings: dict, fmt: str, fps: int, theme: str, la
     title = str(settings.get("title") or script.get("title") or "未命名视频").strip()[:30]
     provider = str(settings.get("tts_provider") or "edge")
     custom_cfg = settings.get("tts_custom") if isinstance(settings.get("tts_custom"), dict) else {}
-    use_dash = provider == "dashscope" and dashscope_key_ok()
+    use_dash = provider == "dashscope"
     if provider == "custom":
         # 自定义 OpenAI 兼容供应商(如 mimo): 音色名自由(冰糖/茉莉…), 协议参数随 meta 透传,
         # api_key 不落 story.json —— 由 run_build_cli 注入 CUSTOM_TTS_API_KEY 环境变量
@@ -157,17 +163,17 @@ def _build_meta(script: dict, settings: dict, fmt: str, fps: int, theme: str, la
         meta_voice = voice
     elif use_dash:
         voice = settings.get("voice") or DEFAULT_DASHSCOPE_VOICE
-        meta_voice = voice if str(voice).startswith("longan") else DEFAULT_DASHSCOPE_VOICE
+        meta_voice = voice
         tts = {"provider": "dashscope", "voice": meta_voice}
     else:
-        # edge 引擎：只认 zh-CN-* 音色，dashscope/自定义音色名落进来会整批失败，兜底回默认
+        # 保留显式音色（包括英语音色），仅缺省时使用默认值
         voice = settings.get("voice") or DEFAULT_EDGE_VOICE
-        meta_voice = voice if str(voice).startswith("zh-CN") else DEFAULT_EDGE_VOICE
+        meta_voice = voice
         tts = None
     meta = {"title": title, "voice": meta_voice, "fps": fps,
             "width": width, "height": height, "format": fmt,
             "theme": theme, "layout": layout,
-            "padSeconds": PAD_SECONDS}
+            "padSeconds": float(settings.get("pad_seconds", PAD_SECONDS))}
     if tts:
         meta["tts"] = tts
     return meta
@@ -226,11 +232,10 @@ def _data_for(template: str, beat: dict, narration: str, script: dict,
     if template == "bars":
         bars = []
         for item in os_items[:5]:
-            number = re.search(r"\d+(?:\.\d+)?", item)
-            name = (item[:number.start()] + item[number.end():]).strip() if number else item
-            bars.append({"name": name or item,
-                         "pct": float(number.group()) if number else 50})
-        return {"headline": _rich(head), "bars": bars}
+            number = re.search(r"(?<![\d.])-?\d+(?:\.\d+)?\s*[%％]", item)
+            if number:
+                bars.append({"name": item, "pct": float(number.group().rstrip("%％ ")), "tag": item})
+        return {"headline": _rich(head), "bars": bars, "raw_labels": os_items[:5]}
     if template in ("compare", "versus"):
         middle = len(os_items) // 2
         panels = []
@@ -291,6 +296,8 @@ def _deterministic_story(script: dict, settings: dict, beats: list,
                 re.search(r"\d", item) for item in _on_screen(beat)):
             template = "vpoints"
             warnings.append(f"场景{i + 1}无数字锚点已改用要点版式")
+        if template == "bars" and not all(re.search(r"\d\s*[%％]", t) for t in _on_screen(beat)):
+            template = "rows"
         narration = narrations[i]
         scenes.append({
             "id": str(beat.get("id") or f"b{i + 1}"),
@@ -337,50 +344,6 @@ def _check_narration_integrity(beats, scenes, narrations=None) -> bool:
     expected = re.sub(r"\s+", "", "".join(narrations))
     actual = re.sub(r"\s+", "", "".join(str(s.get("narration") or "") for s in scenes))
     return actual == expected
-
-
-def _fast_cut_scenes(script, settings, beats, narrations) -> tuple:
-    scenes = []
-    warnings = []
-    prev_template = None
-    for i, beat in enumerate(beats):
-        role = str(beat.get("role") or "")
-        beat_id = str(beat.get("id") or f"b{i + 1}")
-        narration = narrations[i]
-        sents = []
-        split_by = "按句号"
-        if role in FAST_CUT_ROLES:
-            sents = _split_sentences(narration)
-            if len(sents) < 2:
-                sents = _split_clauses(narration)
-                split_by = "按语逗"
-        if len(sents) < 2:
-            template = H_TEMPLATE_BY_ROLE.get(role, "event")
-            scenes.append({
-                "id": beat_id, "template": template, "narration": narration,
-                "caption": str(beat.get("subtitle") or "").strip() or narration,
-                "data": _data_for(template, beat, narration, script, "16:9"),
-            })
-            prev_template = template
-            continue
-        beat_id = re.sub(r"[^a-z0-9-]", "", beat_id.lower()) or f"b{i + 1}"
-        seq = FAST_CUT_ROTATION[role]
-        os_items = beat.get("on_screen") or []
-        for n, sentence in enumerate(sents):
-            template = seq[n % len(seq)]
-            if template == prev_template:
-                template = seq[(n + 1) % len(seq)]
-            rotated_beat = dict(beat)
-            offset = n % len(os_items) if os_items else 0
-            rotated_beat["on_screen"] = os_items[offset:] + os_items[:offset]
-            scenes.append({
-                "id": f"{beat_id}-s{n + 1}", "template": template,
-                "narration": sentence, "caption": sentence,
-                "data": _data_for(template, rotated_beat, sentence, script, "16:9"),
-            })
-            prev_template = template
-        warnings.append(f"快切：{beat_id} {split_by}拆为 {len(sents)} 个微场景")
-    return scenes, warnings
 
 
 COMPOSE_SYSTEM = r"""你是财经短视频分镜排版师。只输出一个 ```json 代码块，不要解释。
@@ -493,10 +456,9 @@ def _script_to_story(script, settings, hook_index=None):
     layout = normalize_layout(settings["layout"]) if settings.get("layout") else legacy_layout
     vox_active = theme == "vox-collage" and fmt == "16:9"
     if theme == "vox-collage" and not vox_active:
-        warnings.append("VOX 纸拼贴主题仅支持 16:9 画幅，已忽略拼贴版式")
-    if layout == "fast-cut" and fmt == "9:16":
-        warnings.append("9:16 竖版不支持快切编排，已忽略")
-        layout = "auto"
+        raise ValueError("VOX 纸拼贴主题仅支持 16:9 画幅")
+    if layout == "fast-cut" and fmt != "16:9":
+        raise ValueError("快切编排仅支持 16:9 画幅")
     # hook 变体覆盖
     hook = script.get("hook") if isinstance(script.get("hook"), dict) else {}
     variants = hook.get("variants") if isinstance(hook.get("variants"), list) else []
@@ -512,20 +474,12 @@ def _script_to_story(script, settings, hook_index=None):
         narrations.append(n)
     if hook_text:
         warnings.append(f"hook 已切换为变体 #{hook_index + 1}")
-    if layout == "fast-cut" and fmt != "9:16" and not vox_active:
-        if settings.get("enrich") == "llm":
-            warnings.append("快切路径暂用确定性版式（AI 编排为 beat 粒度，与句子级微场景暂不兼容）")
-        scenes, fc_warnings = _fast_cut_scenes(script, settings, beats, narrations)
-        warnings.extend(fc_warnings)
-        if not _check_narration_integrity(beats, scenes, narrations):
-            warnings.append("快切拆句完整性校验失败，已回退未拆分版式")
-            story, fallback_warnings = _deterministic_story(
-                script, settings, beats, narrations, fmt, fps, theme, layout)
-            return story, warnings + fallback_warnings
-        meta = _build_meta(script, settings, fmt, fps, theme, layout)
-        meta["padSeconds"] = float(settings.get("pad_seconds") or FAST_CUT_PAD_SECONDS)
-        return {"meta": meta, "scenes": scenes}, warnings
-    if settings.get("enrich") == "llm" and not vox_active:
+    default_method = settings.get("generation_method") or "inherit"
+    if default_method == "inherit":
+        default_method = "vox-fast-cut" if vox_active or layout == "fast-cut" else "template"
+    methods = {o.get("beat_id"): o.get("method") for o in settings.get("beat_overrides", []) if isinstance(o, dict)}
+    needs_template = any((methods.get(b.get("id")) if methods.get(b.get("id")) not in (None, "inherit") else default_method) == "template" for b in beats)
+    if settings.get("enrich") == "llm" and not vox_active and layout != "fast-cut" and needs_template:
         # vox-collage 版式固定(全场景 paper-board), 走确定性派生, 不进 LLM 编排
         story, llm_warnings = _llm_compose_scenes(script, settings, beats, narrations, fmt, fps, theme, layout)
         warnings.extend(llm_warnings)
@@ -543,41 +497,49 @@ def script_to_story(script, settings, hook_index=None):
 
 
 def apply_beat_overrides(story, script, settings, warnings):
-    """对已产出的分镜应用素材层，供 CLI 复制素材后复用，零外呼。"""
-    overrides = (settings or {}).get("beat_overrides") or []
-    if not overrides:
-        return story, warnings
-    if story["meta"]["format"] != "16:9":
-        warnings.append("编辑生成的逐拍覆盖仅支持 16:9，已忽略")
-        return story, warnings
-    scenes = {s["id"]: s for s in story["scenes"]}
+    """父拍不拆分；显式逐拍选择 > 默认生成方式 > 主题/编排默认。"""
+    settings = settings or {}
+    fmt = story["meta"]["format"]
+    registry = {m["id"]: m for m in GENERATION_METHODS}
+    overrides = {str(o.get("beat_id")): o for o in settings.get("beat_overrides", []) if isinstance(o, dict)}
     beats = {str(b.get("id") or f"b{i+1}"): b for i, b in enumerate(script.get("beats") or [])}
-    for override in overrides:
-        if not isinstance(override, dict):
-            continue
-        bid = str(override.get("beat_id") or "")
-        if re.search(r"-s\d+$", bid) or any(s.startswith(bid + "-s") for s in scenes):
-            warnings.append(f"场景 {bid} 为快切微场景，已忽略逐拍覆盖")
-            continue
-        scene, beat = scenes.get(bid), beats.get(bid)
-        if scene is None or beat is None:
-            warnings.append(f"场景 {bid} 不存在，已忽略逐拍覆盖")
-            continue
-        method = override.get("method")
+    scene_ids = {s["id"] for s in story["scenes"]}
+    for bid in overrides.keys() - scene_ids:
+        raise ValueError(f"场景 {bid} 不存在")
+    default = settings.get("generation_method") or "inherit"
+    if default == "inherit":
+        default = "vox-fast-cut" if story["meta"].get("theme") == "vox-collage" or story["meta"].get("layout") == "fast-cut" else "template"
+    for i, scene in enumerate(story["scenes"]):
+        bid = scene["id"]
+        beat = beats[bid]
+        override = overrides.get(bid, {})
+        method = override.get("method") or "inherit"
+        explicit = method != "inherit"
+        method = method if explicit else default
+        if method not in registry or fmt not in registry[method]["aspects"]:
+            raise ValueError(f"场景 {bid} 生成方式 {method} 不支持画幅 {fmt}")
         os_items = _on_screen(beat)
         if method == "template":
+            if explicit or scene["template"] in ("paper-board", "vox-fast-cut", "hand-drawn"):
+                template = _template_for(beat, max(0, i-1), fmt == "9:16", "auto")
+                scene.update(template=template, data=_data_for(template, beat, scene["narration"], script, fmt))
             continue
-        if method in ("upload_image", "upload_video"):
-            file = override.get("file")
+        if method == "hand-drawn":
+            if override.get("file") or override.get("asset_id"):
+                raise ValueError(f"场景 {bid} 手绘规则不接受外部素材，请清除素材选择")
+            scene.update(template=method, data={"labels": os_items})
+            continue
+        file = override.get("file")
+        if method.startswith("upload_") or file:
             materials = settings.get("materials_dir")
-            valid = isinstance(file, str) and bool(file) and Path(file).name == file and not re.search(r"[\\/:]", file)
+            valid = isinstance(file, str) and bool(file) and Path(file).name == file and not re.search(r"[\/:]", file) and file not in (".", "..")
             if valid and materials:
                 root = Path(materials).resolve()
-                path = (root / file).resolve()
-                valid = root in path.parents and path.is_file()
+                target = (root / file).resolve()
+                valid = root in target.parents and target.is_file()
             if not valid:
-                warnings.append(f"场景 {bid} 素材缺失，回退模板")
-                continue
+                raise ValueError(f"场景 {bid} 素材缺失或路径非法，请重新选择素材")
+        if method in ("upload_image", "upload_video"):
             data = {"src": f"materials/{file}", "kind": "image" if method == "upload_image" else "video",
                     "zoom": override.get("zoom") or 1, "scrim": override.get("scrim") or "bottom",
                     "headline": _rich(os_items[0] if os_items else _fallback_head(beat, scene["narration"])),
@@ -585,18 +547,18 @@ def apply_beat_overrides(story, script, settings, warnings):
             if method == "upload_image":
                 data["kenburns"] = override.get("kenburns") or "in"
             else:
-                data.update({k: override[k] for k in ("start", "end") if k in override})
+                data.update({k: override[k] for k in ("start", "end") if isinstance(override.get(k), (int, float))})
             scene.update(template="clip", data=data)
-        elif method == "ai_image":
-            sid = re.sub(r"[^\w-]", "", bid) or "s"
-            subject = str(beat.get("visual_hint") or scene["narration"][:80])
-            scene.update(template="paper-board", data={
-                "image": f"input/collage/{sid}.jpeg",
-                "image_prompt": override.get("prompt") or COLLAGE_STYLE_BLOCK.format(subject=subject),
-                **({"label": os_items[0][:10]} if os_items else {}),
-                "fallback_title": str(script.get("title") or "")[:30]})
+        elif method in ("ai_image", "vox-fast-cut", "vox-collage"):
+            data = _data_for("paper-board", beat, scene["narration"], script, fmt)
+            data["labels"] = os_items
+            if override.get("prompt"):
+                data["image_prompt"] = override["prompt"]
+            if file:
+                data["image"] = f"materials/{file}"
+                data.pop("image_prompt", None)
+            scene.update(template="vox-fast-cut" if method == "vox-fast-cut" else "paper-board", data=data)
     return story, warnings
-
 
 def create_project(project_id, story, request=None) -> Path:
     """落盘 videos/<id>/ 项目目录；只能被 CLI 子进程调用（vstudio.run_build_cli）。"""
