@@ -162,7 +162,7 @@ def _x_cands(items: list) -> list:
         seen.add(sid)
         cands.append({"handle": m.group(1).lower(), "status_id": sid,
                       "time": it.get("time") or "", "url": it.get("url"),
-                      "text": (it.get("text_display") or it.get("text") or "")[:400]})
+                      "text": (it.get("text_display") or it.get("text") or "")[:2000]})
     cands.sort(key=lambda c: c["time"], reverse=True)
     return cands
 
@@ -320,10 +320,17 @@ def translate_pending(cands: list, limit: int = 60) -> dict:
     zh_native = 0
     todo = []
     for c in cands:
-        if c["status_id"] in cache:
+        sid = c["status_id"]
+        full = c["text"] or ""
+        if sid in cache:
+            # 截断时代旧译文补翻(2026-09-09 [:400]→[:2000] 放大后): 旧译文只覆盖前 400 字输入,
+            # 现原文远长于旧译文对应输入即判残缺重翻(中文译文约原文 0.6 长, 2 倍阈值留余量)
+            old = cache.get(sid) or {}
+            if len(full) > 600 and len(old.get("zh") or "") * 2 < len(full):
+                todo.append(c)
             continue
-        if _is_zh(c["text"]):
-            cache[c["status_id"]] = {"zh": c["text"], "ts": now_s}
+        if _is_zh(full):
+            cache[sid] = {"zh": full, "ts": now_s}
             zh_native += 1
         else:
             todo.append(c)
@@ -538,7 +545,7 @@ def build_view(range_h: int = 24, golden: bool = False, market: str = "",
             "status_id": sid, "handle": handle,
             "name": re.sub(r"^X·", "", it.get("source") or "@" + handle),
             "followers": followers, "time": it.get("time"), "age_h": round(age_h, 1),
-            "text": (it.get("text_display") or it.get("text") or "")[:200],
+            "text": (it.get("text_display") or it.get("text") or "")[:2000],
             "text_zh": (texts.get(sid) or {}).get("zh"),
             "finance": bool(sectors or it.get("tickers") or it.get("event_type")),
             "sector_l1": sector_l1,
@@ -673,7 +680,7 @@ def fetch_rss() -> dict:
             mo = re.search(r"https://x\.com/\w+/status/\d+", orig)
             cache["items"][sid] = {
                 "tweet_id": sid, "handle": handle.lower(), "name": name,
-                "text": "\n".join(text_lines)[:400],
+                "text": "\n".join(text_lines)[:2000],
                 "likes": int(me.group(1)) if me else None,
                 "retweets": int(me.group(2)) if me else None,
                 "replies": int(me.group(3)) if me else None,
