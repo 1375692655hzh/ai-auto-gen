@@ -23,6 +23,7 @@ WB.pages.article = {
       xfReco: { since: "12h", sort: "fv", markets: [], sectors: [], golden: false,
                 bigOnly: false, finance: false, items: [], total: 0, meta: {}, loading: false },
       hideP3: false,                     /* FV 视图: 隐藏低值(P3)折叠开关 */
+      xExpanded: {},                     /* 长文卡片展开态: status_id → bool(3行折叠↔全文) */
       /* ── 账号管理(全 X 池只读 + 本地偏好 x_account_prefs.json) ── */
       xaccts: { items: [], meta: {}, q: "", pos: "", followOnly: false, loading: false },
       /* 蹭蹭流量 = SoPilot 热帖 RSS(唯一来源, 不走数据站) */
@@ -63,6 +64,8 @@ WB.pages.article = {
       genHistory: [], historyLoading: false, historyLoaded: false,
       calendarLoading: false, genDownloading: false, tplSuggestion: null,
       manualForm: { show: false, title: "", text: "", time: "", source: "" },
+      /* ── 蹭蹭流量·评论生成: 每帖独立状态机 idle/running/ready/error(MoA 合成设计) ── */
+      replyById: {},
       flows: [], template: "",
       editingId: "", editorTitle: "", editorContent: "",
       drafts: [], runs: [],
@@ -134,6 +137,9 @@ WB.pages.article = {
     /* ── 浏览层按需翻译: 展示回退链 text_zh(服务端) → WB.trans 本地缓存 → 原文;
        trRef 给卡片文本元素挂 {__trItem, __trText}, WB.trans.scan 视口内自动批量翻 ── */
     dispText(r) { return r.text_zh || WB.trans.zh(r.text) || r.text; },
+    /* 长文(>200字)才给展开键: 短推 3 行内显示全, 不浪费按钮 */
+    xLong(r) { return (this.dispText(r) || "").length > 200; },
+    xToggle(r) { this.xExpanded[r.status_id] = !this.xExpanded[r.status_id]; },
     trRef(el, r) {
       if (el) { el.__trItem = r; el.__trText = r.text || ""; el.setAttribute("data-tr", "1"); }
     },
@@ -268,6 +274,23 @@ WB.pages.article = {
     },
     saveXNote(a) { this.saveXPref(a, { note: a.local_note }); },
     xfCopy(r) { WB.copyText(this.dispText(r)); },
+    /* ── 评论生成: 端点同步 spawn CLI(零外呼), 缓存命中秒回; 3 候选复制进 X 卡位 ── */
+    async genReply(r, force) {
+      const st = this.replyById[r.status_id] || {};
+      if (st.state === "running") return;
+      this.replyById[r.status_id] = { ...st, state: "running", msg: "" };
+      try {
+        const d = await WB.api.post("/x-reply", { status_id: r.status_id, force: !!force });
+        this.replyById[r.status_id] = { state: "ready", cands: d.candidates || [],
+          notes: d.notes || "", model: d.model || "", cached: !!d.cached,
+          refuse: !!d.refuse, reason: d.reason || "" };
+      } catch (e) {
+        const msg = (e.error || "生成失败") + (e.hint ? " —— " + e.hint : "");
+        this.replyById[r.status_id] = { state: "error", msg };
+        if (e.error === "no_llm_config") WB.toast("先到设置页配置「成稿模型」");
+      }
+    },
+    copyReply(c) { WB.copyText(c.text); WB.toast("已复制，点「去评论 ↗」直接卡位"); },
     xfToggleChip(key, field, val) {
       const arr = this[key][field];
       const i = arr.indexOf(val);
@@ -825,7 +848,8 @@ WB.pages.article = {
                 <span v-for="t in r.tickers" :key="t" class="badge">{{ t }}</span>
                 <span v-if="r.dup_count > 1" class="badge yellow">同事件 ×{{ r.dup_count }}</span>
               </div>
-              <a class="xhot-text" :href="r.reply_url" target="_blank" rel="noopener"
+              <a class="xhot-text" :class="{ expanded: xExpanded[r.status_id] }"
+                 :href="r.reply_url" target="_blank" rel="noopener"
                  :ref="el => trRef(el, r)"
                  :title="r.text_zh ? '原文: ' + r.text : ''">{{ dispText(r) }}</a>
               <div class="surge-stats">
@@ -833,6 +857,7 @@ WB.pages.article = {
                 <span>🔁 {{ fmtN(r.retweets) }}</span>
                 <span>💬 {{ fmtN(r.replies) }}</span>
                 <span>👁 {{ fmtN(r.views) }}</span>
+                <span v-if="xLong(r)" class="act" @click="xToggle(r)">{{ xExpanded[r.status_id] ? '收起' : '展开全文' }}</span>
               </div>
               <div class="surge-parts muted">
                 参考: <template v-if="r.views_pred != null">预测浏览 {{ fmtN(r.views_pred) }}</template><template v-if="r.reply_exposure != null"> · 评论可蹭 ~{{ fmtN(r.reply_exposure) }} 曝光</template> · {{ r.age_h }}h 前</div>
@@ -882,7 +907,8 @@ WB.pages.article = {
                 <span class="muted">@{{ r.handle }}</span>
                 <span class="muted" style="margin-left:auto">{{ r.time }}</span>
               </div>
-              <a class="xhot-text" :href="r.reply_url" target="_blank" rel="noopener"
+              <a class="xhot-text" :class="{ expanded: xExpanded[r.status_id] }"
+                 :href="r.reply_url" target="_blank" rel="noopener"
                  :ref="el => trRef(el, r)"
                  :title="r.text_zh ? '原文: ' + r.text : ''">{{ dispText(r) }}</a>
               <div class="surge-stats">
@@ -896,9 +922,40 @@ WB.pages.article = {
               </div>
               <div class="news-actions">
                 <a :href="r.reply_url" target="_blank" rel="noopener">去评论 ↗</a>
-                <span class="act" @click="xfCopy(r)">一键复制</span>
+                <span v-if="xLong(r)" class="act" @click="xToggle(r)">{{ xExpanded[r.status_id] ? '收起' : '展开全文' }}</span>
+                <span class="act" @click="genReply(r)">✨写评论</span>
+                <span class="act" @click="xfCopy(r)">复制原帖</span>
                 <span v-if="basketIds[r.status_id]" class="act-done">已加入 ✓</span>
                 <span v-else class="act" @click="addXToPool(r)">＋加入素材</span>
+              </div>
+              <!-- 评论生成(MoA codex+grok+gemini 合成): 3 候选卡片内联, 复制后进 X 卡位 -->
+              <div v-if="replyById[r.status_id] && replyById[r.status_id].state !== 'idle'"
+                   class="reply-box">
+                <div v-if="replyById[r.status_id].state === 'running'" class="muted">
+                  ✨ 评论生成中…(compose 链, 约 5-30 秒)</div>
+                <div v-else-if="replyById[r.status_id].state === 'error'">
+                  <span class="muted">✗ {{ replyById[r.status_id].msg }}</span>
+                  <span class="act" style="margin-left:8px" @click="genReply(r)">重试</span>
+                </div>
+                <template v-else>
+                  <div v-if="replyById[r.status_id].refuse" class="muted">
+                    🛡 {{ replyById[r.status_id].reason || '该帖不适合自动评论(敏感/站队向), 建议点开原帖人工判断' }}</div>
+                  <template v-else>
+                    <div v-for="c in replyById[r.status_id].cands" :key="c.style" class="reply-cand">
+                      <span class="badge blue">{{ c.label }}</span>
+                      <span class="reply-text">{{ c.text }}</span>
+                      <span class="muted reply-wl">{{ c.weighted_len }}/280</span>
+                      <span class="act" @click="copyReply(c)">复制</span>
+                    </div>
+                    <div v-if="replyById[r.status_id].notes" class="muted reply-notes">
+                      ⚠ {{ replyById[r.status_id].notes }}</div>
+                    <div class="reply-foot">
+                      <span class="act" @click="genReply(r, true)">🔄 换一批</span>
+                      <span class="act" @click="replyById[r.status_id].state = 'idle'">收起</span>
+                      <span class="muted" style="margin-left:auto">{{ replyById[r.status_id].model }}</span>
+                    </div>
+                  </template>
+                </template>
               </div>
             </div>
           </div>

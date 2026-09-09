@@ -421,6 +421,7 @@ input[type=radio], input[type=checkbox] { accent-color: var(--accent); }
 .xhot-text { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical;
              overflow: hidden; font-size: 12.5px; line-height: 1.5;
              color: var(--text); text-decoration: none; }
+.xhot-text.expanded { display: block; -webkit-line-clamp: unset; overflow: visible; }
 .xhot-text:hover { color: var(--accent); }
 .xhot-meta { font-size: 11px; margin-top: 2px; }
 /* 「已加入」态(推荐/资讯卡片通用): 灰字不响应点击 */
@@ -472,6 +473,21 @@ input[type=radio], input[type=checkbox] { accent-color: var(--accent); }
 .rv-list { margin-top: 4px; }
 .rv-item { margin: 5px 0; padding: 6px 8px; border: 1px solid var(--border);
   border-radius: 6px; font-size: 12px; }
+/* 蹭蹭流量·评论生成盒(2026-09-09 MoA 合成): 卡片内联, 3 候选逐条复制 */
+.reply-box { margin-top: 6px; padding: 8px 10px; border: 1px solid var(--border);
+  border-radius: var(--r-ctl); background: var(--bg-panel); font-size: 13px; }
+.reply-cand { display: flex; align-items: flex-start; gap: 8px; padding: 6px 0;
+  border-bottom: 1px dashed var(--border-light); }
+.reply-cand:last-of-type { border-bottom: none; }
+.reply-cand .badge { flex: none; margin-top: 1px; }
+.reply-text { flex: 1; min-width: 0; }
+.reply-cand .act { flex: none; }
+.reply-wl { flex: none; font-size: 11px; margin-top: 2px; }
+.reply-notes { margin-top: 6px; font-size: 11.5px; }
+.reply-foot { display: flex; gap: 12px; margin-top: 6px; font-size: 12px;
+  align-items: center; }
+.reply-foot .act { color: var(--accent); cursor: pointer; }
+.reply-foot .act:hover { color: var(--text); }
 .rv-text { margin-top: 3px; color: var(--text-dim); display: -webkit-box;
   -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
 .rv-full { margin-top: 4px; max-height: 140px; overflow-y: auto; font-size: 12px;
