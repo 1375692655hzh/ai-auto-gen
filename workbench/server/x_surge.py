@@ -276,12 +276,16 @@ def collect(range_h: int = 24, limit: int = 300, force: bool = False) -> dict:
 
 # ── 翻译(设置页可配 OpenAI 兼容端点; 缓存 data/workbench/x_surge_texts.json) ──
 _ZH_RE = re.compile(r"[\u4e00-\u9fff]")
+_KANA_RE = re.compile(r"[\u3040-\u30ff]")          # 平假名+片假名: 日文判别(汉字密度高会混过 _ZH_RE)
 
 
 def _is_zh(s: str) -> bool:
-    """粗判已是中文: 每 30 字里有一个汉字就算(标题夹英文缩写不算外文)。"""
+    """粗判已是中文: 每 30 字里有一个汉字就算(标题夹英文缩写不算外文);
+    含日文假名一律不算中文(2026-09-09 NIKKEIxTECH 日文推误判为中文、原样存"译文"事故)。"""
     s = s or ""
-    return bool(s) and len(_ZH_RE.findall(s)) * 30 >= len(s)
+    if not s or _KANA_RE.search(s):
+        return False
+    return len(_ZH_RE.findall(s)) * 30 >= len(s)
 
 
 def _call_translate(base: str, key: str, model: str, text: str, max_tokens: int = 600) -> str | None:

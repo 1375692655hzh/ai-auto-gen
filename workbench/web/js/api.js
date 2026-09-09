@@ -104,7 +104,7 @@ WB.basket = {
    用法: 卡片文本元素挂 :ref="el => trRef(el, item)", 渲染后调 WB.trans.scan(容器);
    回填直接写 item.text_zh(Vue 响应式), 展示/复制/加入素材全链路自动吃到译文。 */
 WB.trans = (function () {
-  const LS_KEY = "wb_trans_cache", LS_MAX = 2000;
+  const LS_KEY = "wb_trans_cache_v2", LS_MAX = 2000;   // v2: 弃用 v1(日文被误判中文, 原文污染缓存)
   let cache = null, seq = 0;
   const seen = new WeakSet();
   let io = null, timer = 0;
@@ -141,9 +141,9 @@ WB.trans = (function () {
       (d.results || []).forEach((res) => {
         const b = batch.find((x) => x.i === res.i);
         if (!b) return;
-        put(b.text, res.zh);
+        if (!res.native) put(b.text, res.zh);   // 原文(native, 如误判过的日文)不落缓存
         const it = b.el.__trItem;
-        if (it && res.zh) {
+        if (it && res.zh && !res.native) {
           if (b.onDone) b.onDone(b.el, it, res.zh);
           else if (!it.text_zh) it.text_zh = res.zh;   // Vue 响应式回填, 模板自动刷新
         }

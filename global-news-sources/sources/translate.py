@@ -87,12 +87,14 @@ def _detect_lang(text: str) -> str:
     total = cjk + latin + kana + hangul
     if total == 0:
         return ""
-    if cjk >= 4 and cjk / total >= 0.3:
-        return "zh"
+    # 假名/谚文优先于 CJK 占比: 日文汉字密度高, 先判 cjk 会把日文误判成中文
+    # (2026-09-09 事故: 日文推被 skip-detected-zh, 原样当"译文"入库 366 条)
     if kana > 3:
         return "ja"
     if hangul > 3:
         return "ko"
+    if cjk >= 4 and cjk / total >= 0.3:
+        return "zh"
     if any(c in _TR_CHARS for c in sample):
         return "tr"
     return "en" if latin else ""

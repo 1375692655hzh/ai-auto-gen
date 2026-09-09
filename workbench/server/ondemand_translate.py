@@ -103,7 +103,7 @@ def translate_batch(items: list) -> dict:
             continue
         i = it.get("i")
         if x_surge._is_zh(text):
-            results.append({"i": i, "hash": _h(text), "zh": text})
+            results.append({"i": i, "hash": _h(text), "zh": text, "native": 1})
             native += 1
             continue
         h = _h(text)
