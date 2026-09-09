@@ -131,7 +131,12 @@ WB.pages.article = {
     },
   },
   methods: {
-    /* ── 壳层子菜单注册(计数随数据更新) ── */
+    /* ── 浏览层按需翻译: 展示回退链 text_zh(服务端) → WB.trans 本地缓存 → 原文;
+       trRef 给卡片文本元素挂 {__trItem, __trText}, WB.trans.scan 视口内自动批量翻 ── */
+    dispText(r) { return r.text_zh || WB.trans.zh(r.text) || r.text; },
+    trRef(el, r) {
+      if (el) { el.__trItem = r; el.__trText = r.text || ""; el.setAttribute("data-tr", "1"); }
+    },
     registerSubs() {
       if (!WB.shell) return;
       if (!location.hash.replace(/^#/, "").startsWith("/article")) return;  // 迟到的异步回调不得覆盖别的页面
@@ -198,6 +203,7 @@ WB.pages.article = {
       }
       st.loading = false;
       this.registerSubs();
+      this.$nextTick(() => WB.trans.scan(this.$el));   // 视口自动翻译新渲染卡片
     },
     /* 蹭蹭流量(RSS 版): 只吃 SoPilot 热帖缓存, 无筛选维度仅四选排序 */
     async loadSurgeRss() {
@@ -209,6 +215,7 @@ WB.pages.article = {
       } catch (e) { st.items = []; }
       st.loading = false;
       this.registerSubs();
+      this.$nextTick(() => WB.trans.scan(this.$el));   // 视口自动翻译新渲染卡片
     },
     /* ── FV 金融价值徽章/明细(对齐 news.js 标签辅助, 双实现保持两处一致) ── */
     tierBadge(t) { return { P0: "red", P1: "yellow", P2: "blue", P3: "" }[t] || ""; },
@@ -260,7 +267,7 @@ WB.pages.article = {
       this.saveXPref(a, { follow: a.follow });
     },
     saveXNote(a) { this.saveXPref(a, { note: a.local_note }); },
-    xfCopy(r) { WB.copyText(r.text_zh || r.text); },
+    xfCopy(r) { WB.copyText(this.dispText(r)); },
     xfToggleChip(key, field, val) {
       const arr = this[key][field];
       const i = arr.indexOf(val);
@@ -274,7 +281,7 @@ WB.pages.article = {
     /* 加入素材: 不跳页(用户还要继续逛), 点过变「已加入」; 行对象凑齐 basket 五字段契约 */
     addXToPool(r) {
       WB.basket.add({ id: r.status_id, time: r.time, source: r.name,
-                      text: r.text_zh || r.text, url: r.reply_url });
+                      text: this.dispText(r), url: r.reply_url });
       this.basketIds[r.status_id] = true;
       this.syncMaterials();
     },
@@ -819,7 +826,8 @@ WB.pages.article = {
                 <span v-if="r.dup_count > 1" class="badge yellow">同事件 ×{{ r.dup_count }}</span>
               </div>
               <a class="xhot-text" :href="r.reply_url" target="_blank" rel="noopener"
-                 :title="r.text_zh ? '原文: ' + r.text : ''">{{ r.text_zh || r.text }}</a>
+                 :ref="el => trRef(el, r)"
+                 :title="r.text_zh ? '原文: ' + r.text : ''">{{ dispText(r) }}</a>
               <div class="surge-stats">
                 <span>👍 {{ fmtN(r.likes) }}</span>
                 <span>🔁 {{ fmtN(r.retweets) }}</span>
@@ -875,7 +883,8 @@ WB.pages.article = {
                 <span class="muted" style="margin-left:auto">{{ r.time }}</span>
               </div>
               <a class="xhot-text" :href="r.reply_url" target="_blank" rel="noopener"
-                 :title="r.text_zh ? '原文: ' + r.text : ''">{{ r.text_zh || r.text }}</a>
+                 :ref="el => trRef(el, r)"
+                 :title="r.text_zh ? '原文: ' + r.text : ''">{{ dispText(r) }}</a>
               <div class="surge-stats">
                 <span>👍 {{ fmtN(r.likes) }}</span>
                 <span>🔁 {{ fmtN(r.retweets) }}</span>

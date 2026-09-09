@@ -113,6 +113,17 @@ WB.pages.news = {
     tab(t) { if (t === "sources" && !this.stats) this.loadStats(); },
   },
   methods: {
+    /* ── 浏览层按需翻译: 数据站 display=zh 已优先给译文, 未译条目(英文原文)视口内兜底翻;
+       回填 item.text=整段译文 且 title 置空(显示层本就 title+' — '+text 拼接, 效果不变),
+       原文仍可从「查看原文(译前)」对照(text_src 不动) ── */
+    trRef(el, it) {
+      if (el) {
+        el.__trItem = it;
+        el.__trText = (it.title ? it.title + " — " : "") + (it.text || "");
+        el.setAttribute("data-tr", "1");
+      }
+    },
+    newsTranslated(el, it, zhText) { it.text = zhText; it.title = ""; },
     sinceValue() {
       const now = new Date();
       const fmt = (d) => d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" +
@@ -153,6 +164,7 @@ WB.pages.news = {
         this.registerSubs();             // 更新左菜单上的命中计数
       } catch (e) { this.error = e; }
       this.loading = false;
+      this.$nextTick(() => WB.trans.scan(this.$el, this.newsTranslated));   // 视口自动翻译未译条目
     },
     reload() { this.items = []; this.nextCursor = ""; this.load(); },
     toggle(group, val) {
@@ -483,7 +495,7 @@ WB.pages.news = {
                 <span v-if="it.event_type" class="badge">{{ it.event_type }}</span>
                 <span v-if="it.dup_count > 1" class="badge yellow">同事件 ×{{ it.dup_count }}</span>
               </div>
-              <div class="news-text" :class="{clamp: bodyClamp(it)}">{{ it.title ? it.title + ' — ' : '' }}{{ it.text }}</div>
+              <div class="news-text" :class="{clamp: bodyClamp(it)}" :ref="el => trRef(el, it)">{{ it.title ? it.title + ' — ' : '' }}{{ it.text }}</div>
               <div class="news-src-text" v-if="expanded[it.id] && it.text_src">{{ it.text_src }}</div>
               <div class="news-actions">
                 <a v-if="it.url" :href="it.url" target="_blank" rel="noopener">原文链接 ↗</a>

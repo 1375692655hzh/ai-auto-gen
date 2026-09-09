@@ -284,11 +284,11 @@ def _is_zh(s: str) -> bool:
     return bool(s) and len(_ZH_RE.findall(s)) * 30 >= len(s)
 
 
-def _call_translate(base: str, key: str, model: str, text: str) -> str | None:
+def _call_translate(base: str, key: str, model: str, text: str, max_tokens: int = 600) -> str | None:
     import urllib.error
     import urllib.request
     body = json.dumps({
-        "model": model, "temperature": 0.2, "max_tokens": 600,
+        "model": model, "temperature": 0.2, "max_tokens": max_tokens,
         "messages": [
             {"role": "system",
              "content": "你是专业财经翻译。把推文翻译成简体中文: 保留专有名词/股票代码/"

@@ -98,3 +98,88 @@ WB.basket = {
   },
   clear() { localStorage.removeItem(this.key); },
 };
+
+/* 浏览层按需翻译(2026-09-09): 视口内缺译文卡片自动批量翻。
+   两层缓存: localStorage(前端零请求) + 服务端哈希缓存(跨会话); 复用 settings.json translate 段(免费链)。
+   用法: 卡片文本元素挂 :ref="el => trRef(el, item)", 渲染后调 WB.trans.scan(容器);
+   回填直接写 item.text_zh(Vue 响应式), 展示/复制/加入素材全链路自动吃到译文。 */
+WB.trans = (function () {
+  const LS_KEY = "wb_trans_cache", LS_MAX = 2000;
+  let cache = null, seq = 0;
+  const seen = new WeakSet();
+  let io = null, timer = 0;
+  let pending = [];                    // [{i, el, text}]
+
+  function load() {
+    if (cache) return cache;
+    try { cache = JSON.parse(localStorage.getItem(LS_KEY) || "{}"); } catch (e) { cache = {}; }
+    return cache;
+  }
+  function persist() {
+    try {
+      const keys = Object.keys(load());
+      if (keys.length > LS_MAX)        // 超上限淘汰最早写入的一半(插入序≈时间序)
+        keys.slice(0, keys.length - LS_MAX).forEach((k) => delete cache[k]);
+      localStorage.setItem(LS_KEY, JSON.stringify(cache));
+    } catch (e) {}
+  }
+  function zh(text) {                   // 取缓存译文; 无则空串
+    if (!text) return "";
+    const z = load()[text];
+    return typeof z === "string" && z ? z : "";
+  }
+  function put(text, zhText) {
+    if (text && zhText) { load()[text] = zhText; persist(); }
+  }
+  function flush() {
+    if (!pending.length) return;
+    const batch = pending; pending = [];
+    fetch("/wb-api/translate", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ items: batch.map((b) => ({ i: b.i, text: b.text })) }),
+    }).then((r) => r.json()).then((d) => {
+      (d.results || []).forEach((res) => {
+        const b = batch.find((x) => x.i === res.i);
+        if (!b) return;
+        put(b.text, res.zh);
+        const it = b.el.__trItem;
+        if (it && res.zh) {
+          if (b.onDone) b.onDone(b.el, it, res.zh);
+          else if (!it.text_zh) it.text_zh = res.zh;   // Vue 响应式回填, 模板自动刷新
+        }
+      });
+    }).catch(() => {});
+  }
+  function schedule(el, text, onDone) {
+    pending.push({ i: seq++, el, text, onDone });
+    clearTimeout(timer);
+    timer = setTimeout(flush, 350);     // 去抖: 一屏卡片合成一批
+  }
+  function observe(el, onDone) {
+    if (!("IntersectionObserver" in window)) { schedule(el, el.__trText, onDone); return; }
+    if (!io) io = new IntersectionObserver((entries) => {
+      entries.forEach((en) => {
+        if (!en.isIntersecting) return;
+        io.unobserve(en.target);
+        schedule(en.target, en.target.__trText, en.target.__trOnDone);
+      });
+    }, { rootMargin: "240px" });        // 预取: 快进视口即翻
+    io.observe(el);
+  }
+  function applyZh(el, item, z) {       // 默认回填: text_zh 优先位
+    if (!item.text_zh) item.text_zh = z;
+  }
+  function scan(root, onDone) {         // 幂等: 渲染后调用, 新元素进观察队列; onDone(el,item,zh) 可定制回填
+    if (!root || !root.querySelectorAll) return;
+    root.querySelectorAll("[data-tr]").forEach((el) => {
+      if (seen.has(el) || !el.__trItem || !el.__trText) return;
+      seen.add(el);
+      const cb = onDone || el.__trOnDone || applyZh;
+      const cached = zh(el.__trText);
+      if (cached) { cb(el, el.__trItem, cached); return; }
+      el.__trOnDone = cb;
+      observe(el, cb);
+    });
+  }
+  return { zh, put, scan };
+})();

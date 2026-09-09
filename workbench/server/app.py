@@ -18,7 +18,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
-from . import config, gcompose, proxy, retrieve, stats, views, vstudio, xaccounts, x_profile_enricher, x_surge, yt_track
+from . import config, gcompose, ondemand_translate, proxy, retrieve, stats, views, vstudio, xaccounts, x_profile_enricher, x_surge, yt_track
 
 WEB = Path(__file__).resolve().parent.parent / "web"
 
@@ -301,6 +301,21 @@ def create_app() -> FastAPI:
             out["error"] = out["error"] or "llm_connection_failed"
             return JSONResponse(out, status_code=400 if p.returncode == 4 else 502)
         return out
+
+    # ── 浏览层按需翻译: 视口内缺译文卡片批量翻, 哈希缓存落盘, 免费链(ondemand_translate) ──
+    @app.post("/wb-api/translate")
+    async def wb_translate(request: Request):
+        try:
+            body = await request.json()
+        except Exception:
+            return JSONResponse({"error": "bad_json"}, status_code=400)
+        items = body.get("items")
+        if not isinstance(items, list) or not items:
+            return JSONResponse({"error": "items 必须是非空数组"}, status_code=400)
+        try:
+            return ondemand_translate.translate_batch(items)
+        except Exception as e:
+            return JSONResponse({"error": f"translate_failed: {e}"}, status_code=500)
 
     @app.get("/wb-api/gen-jobs")
     def gen_jobs():
