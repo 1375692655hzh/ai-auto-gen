@@ -152,7 +152,7 @@ def create_app() -> FastAPI:
         cli = Path(__file__).resolve().parents[2] / "cli.py"
         try:
             result = subprocess.run(
-                ["py", "-3.11", str(cli), "video", "remove", vid],
+                [*config.py_cmd(), str(cli), "video", "remove", vid],
                 capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=60)
         except subprocess.TimeoutExpired:
             return JSONResponse({"error": "remove_timeout"}, status_code=504)
@@ -163,6 +163,20 @@ def create_app() -> FastAPI:
                                  "hint": (result.stderr or result.stdout or "")[-200:]},
                                 status_code=400)
         return {"removed": 1}
+
+    @app.post("/wb-api/videos/{vid}/cover")
+    async def video_cover(vid: str, request: Request):
+        """封面制作：背景+人物形象+标题 → Remotion still 出 out/cover.png。"""
+        import re as _re
+        if not _re.fullmatch(r"[A-Za-z0-9_\-]+", vid):
+            return JSONResponse({"error": "bad_vid"}, status_code=400)
+        body = await request.json()
+        try:
+            return vstudio.run_cover(vid, body)
+        except ValueError as e:
+            return JSONResponse({"error": "cover_rejected", "hint": str(e)[:200]}, status_code=400)
+        except Exception as e:  # 渲染类失败统一 500，hint 带日志尾部
+            return JSONResponse({"error": type(e).__name__, "hint": str(e)[:200]}, status_code=500)
 
     @app.post("/wb-api/videos/{vid}/rename")
     async def video_rename(vid: str, request: Request):
@@ -178,7 +192,7 @@ def create_app() -> FastAPI:
         cli = Path(__file__).resolve().parents[2] / "cli.py"
         try:
             result = subprocess.run(
-                ["py", "-3.11", str(cli), "video", "rename", vid, "--title", title],
+                [*config.py_cmd(), str(cli), "video", "rename", vid, "--title", title],
                 capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=30)
         except subprocess.TimeoutExpired:
             return JSONResponse({"error": "rename_timeout"}, status_code=504)
@@ -292,7 +306,7 @@ def create_app() -> FastAPI:
         cli = Path(__file__).resolve().parents[2] / "cli.py"
         try:
             p = subprocess.run(
-                ["py", "-3.11", str(cli), "workbench", "test-llm"],
+                [*config.py_cmd(), str(cli), "workbench", "test-llm"],
                 capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=40)
         except subprocess.TimeoutExpired:
             return JSONResponse({"ok": False, "model": "", "error": "cli_timeout"}, status_code=504)
@@ -457,7 +471,7 @@ def create_app() -> FastAPI:
         cli = Path(__file__).resolve().parents[2] / "cli.py"
         try:
             p = subprocess.run(
-                ["py", "-3.11", str(cli), "sources", "enable", sid, "on" if on else "off", "--json"],
+                [*config.py_cmd(), str(cli), "sources", "enable", sid, "on" if on else "off", "--json"],
                 capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=30)
         except subprocess.TimeoutExpired:
             return JSONResponse({"error": "cli 调用超时"}, status_code=504)
@@ -511,7 +525,7 @@ def create_app() -> FastAPI:
         cli = Path(__file__).resolve().parents[2] / "cli.py"
         try:
             p = subprocess.run(
-                ["py", "-3.11", str(cli), "workbench", "gen-reply",
+                [*config.py_cmd(), str(cli), "workbench", "gen-reply",
                  "--status-id", sid] + (["--force"] if force else []),
                 capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=90)
         except subprocess.TimeoutExpired:
@@ -624,7 +638,7 @@ def create_app() -> FastAPI:
         cli = Path(__file__).resolve().parents[2] / "cli.py"
         try:
             subprocess.Popen(
-                ["py", "-3.11", str(cli), "workbench", "refresh-yt-track", "--json"],
+                [*config.py_cmd(), str(cli), "workbench", "refresh-yt-track", "--json"],
                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                 creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
         except Exception as e:
@@ -639,7 +653,7 @@ def create_app() -> FastAPI:
         vstudio.begin_job(kind, payload)
         cli = Path(__file__).resolve().parents[2] / "cli.py"
         try:
-            subprocess.Popen(["py", "-3.11", str(cli), "workbench", command, "--json"],
+            subprocess.Popen([*config.py_cmd(), str(cli), "workbench", command, "--json"],
                              stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                              creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
         except OSError:
@@ -912,7 +926,7 @@ def create_app() -> FastAPI:
         body = await request.json()
         cli = Path(__file__).resolve().parents[2] / "cli.py"
         try:
-            tts_args = ["py", "-3.11", str(cli), "workbench", "test-tts",
+            tts_args = [*config.py_cmd(), str(cli), "workbench", "test-tts",
                         "--provider", str(body.get("provider_id") or ""),
                         "--voice", str(body.get("voice") or "")]
             if body.get("text"):
@@ -1002,7 +1016,7 @@ def create_app() -> FastAPI:
         cli = Path(__file__).resolve().parents[2] / "cli.py"
         try:
             subprocess.Popen(
-                ["py", "-3.11", str(cli), "workbench", "analyze-video", "--json"],
+                [*config.py_cmd(), str(cli), "workbench", "analyze-video", "--json"],
                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                 creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
         except Exception as e:
@@ -1073,7 +1087,7 @@ def create_app() -> FastAPI:
         cli = Path(__file__).resolve().parents[2] / "cli.py"
         try:
             subprocess.Popen(
-                ["py", "-3.11", str(cli), "workbench", "gen-script", "--json"],
+                [*config.py_cmd(), str(cli), "workbench", "gen-script", "--json"],
                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                 creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
         except Exception as e:
@@ -1140,10 +1154,10 @@ def create_app() -> FastAPI:
             if not row["script"] or not row["script_meta"]["locked"]:
                 return JSONResponse({"error": "script_not_locked"}, status_code=400)
             mode = body.get("mode") or "build"
-            if mode not in ("build", "estimate"):
+            if mode not in ("build", "estimate", "keyframes", "sample"):
                 mode = "build"
             missing = vstudio.voice_missing(row)
-            if mode == "build" and missing:
+            if mode != "estimate" and missing:
                 return JSONResponse({"error": "voice_missing", "hint": "缺少语音：" + "、".join(missing)}, status_code=400)
             project_id = vstudio._id("wb")
             result = start_video_job("build", {"make_id": row["id"], "project_id": project_id,
@@ -1213,7 +1227,7 @@ def create_app() -> FastAPI:
         cli = Path(__file__).resolve().parents[2] / "cli.py"
         try:
             subprocess.Popen(
-                ["py", "-3.11", str(cli), "workbench", "build-video", "--json"],
+                [*config.py_cmd(), str(cli), "workbench", "build-video", "--json"],
                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                 creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
         except Exception as e:

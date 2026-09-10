@@ -867,8 +867,8 @@ def run_compose_cli(args) -> int:
 
 
 def spawn_cli() -> None:
-    """端点侧: 静默拉起 CLI 子进程(同 vstudio 先例, 固定 py -3.11)。"""
+    """端点侧: 静默拉起 CLI 子进程(同 vstudio 先例; 前缀自适应 Python 版本 config.py_cmd)。"""
     cli = Path(__file__).resolve().parents[2] / "cli.py"
-    subprocess.Popen(["py", "-3.11", str(cli), "workbench", "gen-post", "--json"],
+    subprocess.Popen([*config.py_cmd(), str(cli), "workbench", "gen-post", "--json"],
                      stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                      creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))

@@ -19,7 +19,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from . import x_surge
+from . import config, x_surge
 
 REPO = Path(__file__).resolve().parents[2]
 TASK_BAT = REPO / "bin" / "xsurge_task.bat"
@@ -30,11 +30,10 @@ TASK_NAME = "aag-xsurge-refresh"
 _spawned: dict = {}   # pid -> Popen, 本进程触发过的采集轮(任务计划拉起的靠 psutil 探测)
 
 
-def _python_exe() -> str:
-    """优先 py -3.11(与 xsurge_task.bat 同款), 退 python。"""
-    if os.name == "nt" and shutil.which("py"):
-        return "py", ["-3.11"]
-    return (shutil.which("python") or sys.executable), []
+def _python_exe() -> tuple[str, list]:
+    """CLI 启动前缀走 config.py_cmd 自适应(探 py -3.11, 缺失退本体解释器)。"""
+    cmd = config.py_cmd()
+    return cmd[0], cmd[1:]
 
 
 def _collect_running() -> bool:

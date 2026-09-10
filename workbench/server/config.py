@@ -13,6 +13,7 @@ import json
 import os
 import re
 import shutil
+import sys
 import tempfile
 from pathlib import Path
 
@@ -259,6 +260,32 @@ def apply_patch(patch: dict) -> dict:
 # ── 通用 JSON 清单存取(追踪账号/草稿/自动化任务, 全部原子写) ─────────────────
 
 SEED_DIR = Path(__file__).resolve().parent / "seed"   # 仓内首跑播种源(scripts/sync_seeds.py 生成)
+
+
+# ── CLI 子进程启动前缀(自适应 Python 版本) ──────────────────────────────────
+
+_py_cmd: list | None = None
+
+
+def py_cmd() -> list:
+    """spawn cli.py 的命令前缀: 优先 py -3.11(项目契约), 探测失败退当前解释器。
+
+    分发用户只装 3.12 时, 硬编码 py -3.11 会报 'No suitable Python runtime found',
+    报错文本被端点当 JSON 解析 → invalid_cli_response(2026-09-10 同事事故)。
+    服务端本体解释器必然能跑本仓代码(依赖已装), 是零假设的安全兜底。结果缓存。"""
+    global _py_cmd
+    if _py_cmd is None:
+        import subprocess
+        if os.name == "nt" and shutil.which("py"):
+            try:
+                r = subprocess.run(["py", "-3.11", "-c", "import sys"],
+                                   capture_output=True, timeout=15)
+                _py_cmd = ["py", "-3.11"] if r.returncode == 0 else [sys.executable]
+            except Exception:
+                _py_cmd = [sys.executable]
+        else:
+            _py_cmd = [sys.executable]
+    return list(_py_cmd)
 
 
 def seed_if_missing(name: str) -> bool:
