@@ -539,3 +539,9 @@ input[type=radio], input[type=checkbox] { accent-color: var(--accent); }
 /* 左列增速大数: 与金融价值并列, 绿色醒目 */
 .surge-rank .prob.growth { color: var(--green); font-size: 20px; }
 .surge-rank .prob.growth span { font-size: 11px; }
+
+/* ── 账号追踪: 行内展开详情(accordion; 触发行高亮 + 曲线嵌行下) ── */
+table.tbl tr.sel > td { background: var(--accent-weak); }
+.xt-detail-row > td { padding: 0 10px 12px; }
+.xt-detail { border: 1px solid var(--border); border-radius: var(--r-panel);
+  background: var(--bg); padding: 12px 14px; min-width: 0; }

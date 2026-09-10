@@ -192,8 +192,13 @@ WB.pages.article = {
       const area = barMode ? "" : pts + " " + x(n - 1).toFixed(1) + "," + y(yMin).toFixed(1) +
         " " + x(0).toFixed(1) + "," + y(yMin).toFixed(1);
       const fmt = (v) => this.fmtN(Math.round(v));
-      const yTicks = [yMin + (yMax - yMin) * 0.04, (yMin + yMax) / 2, yMax - (yMax - yMin) * 0.04]
-        .map((v) => ({ y: +y(v).toFixed(1), label: fmt(v) }));
+      /* 恒定序列(冷启动基线/全零增粉)单刻度画中线; 非恒定但 span 极小时按标签去重, 防三刻度同值 */
+      const flat = vals.every((v) => v === vals[0]);
+      const yTicks = (flat
+        ? [vals[0]]
+        : [yMin + (yMax - yMin) * 0.04, (yMin + yMax) / 2, yMax - (yMax - yMin) * 0.04])
+        .map((v) => ({ y: +y(v).toFixed(1), label: fmt(v) }))
+        .filter((t, i, arr) => i === 0 || t.label !== arr[i - 1].label);
       const mid = Math.floor((n - 1) / 2);
       const xTicks = n >= 3
         ? [0, mid, n - 1].map((i) => ({ x: +x(i).toFixed(1), label: s[i].date.slice(5) }))
@@ -499,16 +504,23 @@ WB.pages.article = {
     },
     openXt(a) {
       this.xtSel = this.xtSel === a.handle ? "" : a.handle;
-      if (this.xtSel) this.loadXtDetail();
+      if (this.xtSel) {
+        this.loadXtDetail();
+        /* 展开面板若超出视口下沿, 平滑滚到刚好可见(本可见时不滚动) */
+        this.$nextTick(() => this.$el.querySelector(".xt-detail")
+          ?.scrollIntoView({ block: "nearest", behavior: "smooth" }));
+      }
     },
     async loadXtDetail() {
       this.xtDetail.loading = true;
+      const h = this.xtSel;                        // 快照句柄: 快速切换 A→B 时丢弃 A 的过期响应
       try {
-        const d = await WB.api.get("/xt/accounts/" + this.xtSel + "?days=" + this.xtChart.range);
+        const d = await WB.api.get("/xt/accounts/" + h + "?days=" + this.xtChart.range);
+        if (h !== this.xtSel) return;
         this.xtDetail.account = d.account || null;
         this.xtDetail.series = d.series || [];
-      } catch (e) { this.xtDetail.series = []; }
-      this.xtDetail.loading = false;
+      } catch (e) { if (h === this.xtSel) this.xtDetail.series = []; }
+      if (h === this.xtSel) this.xtDetail.loading = false;
     },
     /* 行内迷你粉丝曲线(近30点; 不足2点不画) */
     xtSparkPts(spark) {
@@ -1735,65 +1747,14 @@ WB.pages.article = {
           上轮采集 {{ xtrack.status.finished_at }}<template v-if="xtrack.status.data_age_min != null">(距今 {{ xtrack.status.data_age_min }} 分钟)</template></span><template v-if="xtrack.status.running">;
           <b style="color:var(--accent)">采集中…</b></template></div>
 
-        <!-- 详情大图(点行展开): 四指标 × 三区间, 手绘 SVG 免图表库 -->
-        <div v-if="xtSel && xtDetail.account"
-             style="border:1px solid var(--border); border-radius:8px; padding:12px 14px; margin-bottom:12px">
-          <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap">
-            <img v-if="xtDetail.account.avatar" :src="xtDetail.account.avatar" alt=""
-                 style="width:34px;height:34px;border-radius:50%">
-            <b>{{ xtDetail.account.name || '@'+xtDetail.account.handle }}</b>
-            <a class="muted" :href="'https://x.com/'+xtDetail.account.handle" target="_blank" rel="noopener">@{{ xtDetail.account.handle }}</a>
-            <span class="mono" style="font-size:14px">粉 {{ fmtN(xtDetail.account.followers) }}</span>
-            <span :style="{color: deltaCls(xtDetail.account.delta_7d)}">近7日 {{ deltaText(xtDetail.account.delta_7d) }}</span>
-            <span class="muted" v-if="xtDetail.account.note">{{ xtDetail.account.note }}</span>
-            <span style="flex:1"></span>
-            <button class="btn" @click="xtSel=''">收起</button>
-          </div>
-          <div class="feed-toolbar" style="margin:10px 0 4px">
-            <span v-for="[m, t] in xtMetrics" :key="m" class="chip" :class="{on: xtChart.metric===m}"
-                  @click="xtChart.metric=m">{{ t }}</span>
-            <span style="flex:1"></span>
-            <span v-for="[r, t] in xtRanges" :key="r" class="chip" :class="{on: xtChart.range===r}"
-                  @click="xtChart.range=r">{{ t }}</span>
-          </div>
-          <div v-if="xtDetail.loading" class="muted">加载中…</div>
-          <div v-else-if="!xtDetail.series.length" class="muted">暂无快照 — 点右上「立即采集」出数</div>
-          <svg v-else-if="xtGeom" :viewBox="'0 0 '+xtGeom.W+' '+xtGeom.H"
-               style="width:100%;height:auto;display:block">
-            <g v-for="(t, i) in xtGeom.yTicks" :key="'y'+i">
-              <line x1="56" x2="744" :y1="t.y" :y2="t.y" stroke="currentColor" stroke-opacity=".12"/>
-              <text :x="52" :y="t.y+4" text-anchor="end" font-size="11"
-                    fill="currentColor" fill-opacity=".55">{{ t.label }}</text>
-            </g>
-            <g v-for="(t, i) in xtGeom.xTicks" :key="'x'+i">
-              <text :x="t.x" y="234" text-anchor="middle" font-size="11"
-                    fill="currentColor" fill-opacity=".55">{{ t.label }}</text>
-            </g>
-            <template v-if="xtGeom.bars.length">
-              <line v-if="xtGeom.zeroY != null && xtGeom.zeroY > 16 && xtGeom.zeroY < 212"
-                    x1="56" x2="744" :y1="xtGeom.zeroY" :y2="xtGeom.zeroY"
-                    stroke="currentColor" stroke-opacity=".3"/>
-              <rect v-for="(b, i) in xtGeom.bars" :key="'b'+i" :x="b.x" :y="b.y" :width="b.w"
-                    :height="b.h" rx="2" opacity=".85"
-                    :fill="b.neg ? 'var(--red)' : 'var(--green)'"><title>{{ b.title }}</title></rect>
-            </template>
-            <template v-else>
-              <polygon :points="xtGeom.area" fill="var(--accent)" opacity=".12"/>
-              <polyline :points="xtGeom.pts" fill="none" stroke="var(--accent)" stroke-width="2"
-                        stroke-linejoin="round"/>
-              <circle v-for="(d, i) in xtGeom.dots" :key="'d'+i" :cx="d.cx" :cy="d.cy" r="2.6"
-                      fill="var(--accent)"><title>{{ d.title }}</title></circle>
-            </template>
-          </svg>
-        </div>
-
         <table class="tbl">
           <thead><tr>
             <th>账号</th><th>粉丝</th><th>今日增粉</th><th>近7日</th>
             <th>今日更新</th><th>今日流量</th><th>近30日粉丝</th><th>采集</th><th>操作</th>
           </tr></thead>
           <tbody>
-            <tr v-for="a in xtrackRows" :key="a.handle"
+            <template v-for="a in xtrackRows" :key="a.handle">
+            <tr :class="{sel: xtSel === a.handle}"
                 :style="{opacity: a.enabled ? '' : .5, cursor: 'pointer'}"
                 @click="openXt(a)">
               <td>
@@ -1831,6 +1792,61 @@ WB.pages.article = {
                 <div class="muted" style="font-size:10.5px" v-if="a.days_n">{{ a.days_n }} 天快照</div>
               </td>
             </tr>
+            <!-- 行内展开(accordion): 曲线详情嵌在触发行正下方, 触发行及以上零位移, 列表顺序恒定 -->
+            <tr v-if="xtSel === a.handle" class="xt-detail-row">
+              <td colspan="9">
+                <div class="xt-detail">
+                  <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap">
+                    <img v-if="xtDetail.account && xtDetail.account.avatar" :src="xtDetail.account.avatar" alt=""
+                         style="width:34px;height:34px;border-radius:50%">
+                    <b>{{ a.name || '@'+a.handle }}</b>
+                    <a class="muted" :href="'https://x.com/'+a.handle" target="_blank" rel="noopener">@{{ a.handle }}</a>
+                    <span class="mono" style="font-size:14px">粉 {{ fmtN(a.followers) }}</span>
+                    <span :style="{color: deltaCls(a.delta_7d)}">近7日 {{ deltaText(a.delta_7d) }}</span>
+                    <span class="muted" v-if="a.note">{{ a.note }}</span>
+                    <span style="flex:1"></span>
+                    <button class="btn" @click.stop="xtSel=''">收起</button>
+                  </div>
+                  <div class="feed-toolbar" style="margin:10px 0 4px">
+                    <span v-for="[m, t] in xtMetrics" :key="m" class="chip" :class="{on: xtChart.metric===m}"
+                          @click="xtChart.metric=m">{{ t }}</span>
+                    <span style="flex:1"></span>
+                    <span v-for="[r, t] in xtRanges" :key="r" class="chip" :class="{on: xtChart.range===r}"
+                          @click="xtChart.range=r">{{ t }}</span>
+                  </div>
+                  <div v-if="xtDetail.loading" class="muted">加载中…</div>
+                  <div v-else-if="!xtDetail.series.length" class="muted">暂无快照 — 点右上「立即采集」出数</div>
+                  <svg v-else-if="xtGeom" :viewBox="'0 0 '+xtGeom.W+' '+xtGeom.H"
+                       style="width:100%;height:auto;display:block">
+                    <g v-for="(t, i) in xtGeom.yTicks" :key="'y'+i">
+                      <line x1="56" x2="744" :y1="t.y" :y2="t.y" stroke="currentColor" stroke-opacity=".12"/>
+                      <text :x="52" :y="t.y+4" text-anchor="end" font-size="11"
+                            fill="currentColor" fill-opacity=".55">{{ t.label }}</text>
+                    </g>
+                    <g v-for="(t, i) in xtGeom.xTicks" :key="'x'+i">
+                      <text :x="t.x" y="234" text-anchor="middle" font-size="11"
+                            fill="currentColor" fill-opacity=".55">{{ t.label }}</text>
+                    </g>
+                    <template v-if="xtGeom.bars.length">
+                      <line v-if="xtGeom.zeroY != null && xtGeom.zeroY > 16 && xtGeom.zeroY < 212"
+                            x1="56" x2="744" :y1="xtGeom.zeroY" :y2="xtGeom.zeroY"
+                            stroke="currentColor" stroke-opacity=".3"/>
+                      <rect v-for="(b, i) in xtGeom.bars" :key="'b'+i" :x="b.x" :y="b.y" :width="b.w"
+                            :height="b.h" rx="2" opacity=".85"
+                            :fill="b.neg ? 'var(--red)' : 'var(--green)'"><title>{{ b.title }}</title></rect>
+                    </template>
+                    <template v-else>
+                      <polygon :points="xtGeom.area" fill="var(--accent)" opacity=".12"/>
+                      <polyline :points="xtGeom.pts" fill="none" stroke="var(--accent)" stroke-width="2"
+                                stroke-linejoin="round"/>
+                      <circle v-for="(d, i) in xtGeom.dots" :key="'d'+i" :cx="d.cx" :cy="d.cy" r="2.6"
+                              fill="var(--accent)"><title>{{ d.title }}</title></circle>
+                    </template>
+                  </svg>
+                </div>
+              </td>
+            </tr>
+            </template>
             <tr v-if="!xtrackRows.length && !xtrack.loading">
               <td colspan="9" class="muted" style="padding:18px 8px">
                 {{ xtrack.count ? '无匹配账号' :
