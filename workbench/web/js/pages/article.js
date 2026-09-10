@@ -68,6 +68,13 @@ WB.pages.article = {
       manualForm: { show: false, title: "", text: "", time: "", source: "" },
       /* ── 蹭蹭流量·评论生成: 每帖独立状态机 idle/running/ready/error(MoA 合成设计) ── */
       replyById: {},
+      /* ── 评论人设(grok v2 评审; 与 server/x_reply.py PERSONAS 对齐, 存 settings.json x_reply.persona) ── */
+      personaPresets: [["macro_flow", "宏观流动性"], ["falsify", "证伪交易员"], ["micro_mech", "定价机制"],
+                       ["odds", "赔率视角"], ["risk_first", "风险官"], ["custom", "自填"]],
+      persona: { id: "falsify", custom: "" }, personaCustomShow: false, personaSaving: false,
+      /* 用户自定义人设卡(settings x_reply.personas, 可增删改; 字段长度与后端 _P_CAPS 对齐) */
+      userPersonas: [],
+      personaEdit: { show: false, id: "", label: "", one_liner: "", lens: "", voice: "", do: "", dont: "" },
       flows: [], template: "",
       editingId: "", editorTitle: "", editorContent: "",
       drafts: [], runs: [],
@@ -332,6 +339,47 @@ WB.pages.article = {
       }
     },
     copyReply(c) { WB.copyText(c.text); WB.toast("已复制，点「去评论 ↗」直接卡位"); },
+    /* 评论人设: 选预设/自填存 settings(服务端生成时读; 人设进缓存 key, 换人设自动重生成) */
+    async pickPersona(id) {
+      this.persona.id = id;
+      this.personaCustomShow = id === "custom";
+      await this.savePersona();
+    },
+    async savePersona() {
+      if (this.personaSaving) return;
+      this.personaSaving = true;
+      try {
+        await WB.api.put("/settings", { x_reply: { persona: { id: this.persona.id, custom: this.persona.custom } } });
+      } catch (e) { WB.toast("人设保存失败: " + ((e && e.error) || "")); }
+      this.personaSaving = false;
+    },
+    /* 用户自定义人设卡: 增删改(settings x_reply.personas 整表替换; 人设进缓存哈希, 改后旧评论自动重生成) */
+    personaLabel(pid) { return (this.userPersonas.find(p => p.id === pid) || {}).label || pid; },
+    newPersona() {
+      this.personaEdit = { show: true, id: "u_" + Date.now().toString(36),
+        label: "", one_liner: "", lens: "", voice: "", do: "", dont: "" };
+    },
+    editPersona(p) { this.personaEdit = { show: true, ...p }; },
+    async savePersonaCard() {
+      const e = this.personaEdit;
+      if (!((e.label || "").trim())) { WB.toast("标签不能为空"); return; }
+      const card = { id: e.id, label: e.label.trim(), one_liner: e.one_liner || "",
+                     lens: e.lens || "", voice: e.voice || "", do: e.do || "", dont: e.dont || "" };
+      const i = this.userPersonas.findIndex(p => p.id === card.id);
+      if (i >= 0) this.userPersonas.splice(i, 1, card); else this.userPersonas.push(card);
+      try {
+        await WB.api.put("/settings", { x_reply: { personas: this.userPersonas } });
+        WB.toast("人设卡已保存"); e.show = false;
+      } catch (err) { WB.toast("保存失败: " + ((err && err.error) || "")); }
+    },
+    async deletePersona(p) {
+      this.userPersonas = this.userPersonas.filter(x => x.id !== p.id);
+      try {
+        await WB.api.put("/settings", { x_reply: { personas: this.userPersonas } });
+        if (this.persona.id === p.id) { this.persona.id = "falsify"; await this.savePersona(); }
+        WB.toast(`人设「${p.label}」已删除`);
+      } catch (err) { WB.toast("删除失败: " + ((err && err.error) || "")); }
+    },
     xfToggleChip(key, field, val) {
       const arr = this[key][field];
       const i = arr.indexOf(val);
@@ -780,6 +828,11 @@ WB.pages.article = {
       if (this.genLangs.some(([v]) => v === defaults.lang)) this.genParams.lang = defaults.lang;
       if (this.genTiers.some(([v]) => v === defaults.tier)) this.genParams.tier = defaults.tier;
       if (this.genTpls.some(t => t.v === defaults.template)) this.genParams.template = defaults.template;
+      const xp = d.x_reply || {};
+      if ((xp.persona || {}).id) this.persona.id = xp.persona.id;
+      this.persona.custom = (xp.persona || {}).custom || "";
+      this.personaCustomShow = this.persona.id === "custom";
+      this.userPersonas = Array.isArray(xp.personas) ? xp.personas : [];
     } catch (e) {} // 取不到设置时保留现有默认值; 草稿恢复在此后覆盖。
     this.registerSubs();
     this.syncMaterials();
@@ -925,6 +978,49 @@ WB.pages.article = {
 
     <!-- ═══ 子页: 蹭蹭流量(SoPilot 热帖 RSS · 评论卡位) ═══ -->
     <div v-show="tab==='surge'">
+      <!-- 评论人设(grok v2): 生成上方自选, 存 settings; 人设进提示词+缓存 key, 换人设旧评论自动失效。
+           内置 5 预设 + 用户自定义卡(可增删改) + 自填补充 -->
+      <div class="persona-bar">
+        <span class="lab">评论人设</span>
+        <span v-for="[pid, label] in personaPresets.filter(c => c[0] !== 'custom')" :key="pid" class="chip"
+              :class="{on: persona.id === pid}" @click="pickPersona(pid)">{{ label }}</span>
+        <span v-for="p in userPersonas" :key="p.id" class="chip has-tools"
+              :class="{on: persona.id === p.id}" @click="pickPersona(p.id)"
+              :title="p.one_liner || p.label">{{ p.label }}
+          <i class="tool" @click.stop="editPersona(p)" title="编辑">✎</i>
+          <i class="tool" @click.stop="deletePersona(p)" title="删除">✕</i>
+        </span>
+        <span class="chip" :class="{on: persona.id === 'custom'}" @click="pickPersona('custom')"
+              title="不建卡, 只写一段口吻补充(≤200字)">自填</span>
+        <span class="chip add" @click="newPersona()" title="新建自定义人设卡">＋ 新建</span>
+        <span class="muted" style="margin-left:auto">复用成稿模型链 · 人设决定评论口吻与判断程序</span>
+      </div>
+      <!-- 人设卡编辑器: 六字段骨架 + 通用兜底 -->
+      <div v-if="personaEdit.show" class="persona-custom">
+        <div class="persona-edit">
+          <label>标签<input v-model="personaEdit.label" maxlength="12" placeholder="如: 期权流"></label>
+          <label>一句话<input v-model="personaEdit.one_liner" maxlength="40" placeholder="如: 只做开盘前后的伽马方向"></label>
+          <label>判断程序<input v-model="personaEdit.lens" maxlength="30" placeholder="如: 伽马挤压/大盘仓位"></label>
+          <label>口吻<input v-model="personaEdit.voice" maxlength="30" placeholder="如: 短促直接, 不给模棱话"></label>
+          <label>本条要做<input v-model="personaEdit.do" maxlength="40" placeholder="如: 给可观察的开仓信号"></label>
+          <label>本条不做<input v-model="personaEdit.dont" maxlength="40" placeholder="如: 喊单/给目标价"></label>
+        </div>
+        <div class="persona-foot">
+          <button class="btn" @click="savePersonaCard()">保存人设卡</button>
+          <span class="act" @click="personaEdit.show = false">取消</span>
+          <span class="muted">留空的字段用通用骨架; 修改自动使该人设的旧评论作废重生成</span>
+        </div>
+      </div>
+      <div v-if="personaCustomShow" class="persona-custom">
+        <textarea v-model="persona.custom" maxlength="200" rows="2"
+                  placeholder="自定义口吻/判断程序, 如: 只做美股的期权流交易员, 关注伽马挤压和大盘仓位, 说话短促直接…(≤200字, 留空则用通用骨架)"></textarea>
+        <div class="persona-foot">
+          <span class="muted">{{ (persona.custom || '').length }}/200</span>
+          <button class="btn" :disabled="personaSaving" @click="savePersona()">
+            {{ personaSaving ? '保存中…' : '保存人设' }}</button>
+          <span class="muted">保存后新点「✨写评论」即生效; 已生成的旧人设评论自动作废重生成</span>
+        </div>
+      </div>
       <div class="feed-toolbar">
         <div class="radio-group">
           <label v-for="[v, t] in rssSortOpts" :key="v">

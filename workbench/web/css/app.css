@@ -474,6 +474,29 @@ input[type=radio], input[type=checkbox] { accent-color: var(--accent); }
 .rv-item { margin: 5px 0; padding: 6px 8px; border: 1px solid var(--border);
   border-radius: 6px; font-size: 12px; }
 /* 蹭蹭流量·评论生成盒(2026-09-09 MoA 合成): 卡片内联, 3 候选逐条复制 */
+/* ── 评论人设选择条(grok v2; 蹭流量页生成上方) ── */
+.persona-bar { display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
+  padding: 8px 10px; margin-bottom: 8px; border: 1px solid var(--border);
+  border-radius: 8px; background: var(--bg-panel); }
+.persona-bar .lab { font-size: 12.5px; font-weight: 600; margin-right: 2px; }
+.persona-bar .chip { position: relative; }
+.persona-bar .chip.has-tools { padding-right: 4px; }
+.persona-bar .chip .tool { font-style: normal; font-size: 10px; margin-left: 3px;
+  opacity: 0; color: var(--accent); cursor: pointer; }
+.persona-bar .chip:hover .tool { opacity: 1; }
+.persona-bar .chip .tool:hover { color: var(--text); }
+.persona-bar .chip.add { border-style: dashed; color: var(--accent); }
+.persona-edit { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px 10px; }
+.persona-edit label { display: flex; align-items: center; gap: 6px; font-size: 12px; }
+.persona-edit input { flex: 1; min-width: 0; background: var(--bg); color: var(--text);
+  border: 1px solid var(--border); border-radius: 6px; padding: 5px 7px; font-size: 12.5px; }
+.persona-custom { padding: 8px 10px; margin-bottom: 8px; border: 1px dashed var(--border);
+  border-radius: 8px; background: var(--bg-panel); }
+.persona-custom textarea { width: 100%; box-sizing: border-box; resize: vertical;
+  background: var(--bg); color: var(--text); border: 1px solid var(--border);
+  border-radius: 6px; padding: 6px 8px; font-size: 12.5px; font-family: inherit; }
+.persona-foot { display: flex; align-items: center; gap: 10px; margin-top: 6px;
+  font-size: 12px; }
 .reply-box { margin-top: 6px; padding: 8px 10px; border: 1px solid var(--border);
   border-radius: var(--r-ctl); background: var(--bg-panel); font-size: 13px; }
 .reply-cand { display: flex; align-items: flex-start; gap: 8px; padding: 6px 0;

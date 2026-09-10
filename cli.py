@@ -481,6 +481,10 @@ def workbench_cmd(args) -> int:
         sys.path.insert(0, str(WB))
         from server import gcompose
         return gcompose.run_compose_cli(args)
+    if args.sub == "gen-reply":
+        sys.path.insert(0, str(WB))
+        from server import x_reply
+        return x_reply.run_reply_cli(args)
     if args.sub == "refresh-x-surge":
         sys.path.insert(0, str(WB))
         from server import x_surge
@@ -787,6 +791,12 @@ def main() -> int:
     wsub.add_parser("test-llm", help="测试成稿模型连接(最小 ping, JSON 输出)")
     pw_gp = wsub.add_parser("gen-post", help="内容生成成稿编排(CLI 子进程入口: 检索/行情图/技术位/观点聚合/LLM)")
     pw_gp.add_argument("--json", action="store_true", help="输出单行 JSON")
+    pw_gr = wsub.add_parser("gen-reply", help="蹭蹭流量·评论生成(CLI 子进程入口: 按 status_id 取 RSS 快照→compose 链出 3 候选)")
+    pw_gr.add_argument("--status-id", required=True, help="SoPilot 热帖 status_id(纯数字)")
+    pw_gr.add_argument("--force", action="store_true", help="忽略缓存重新生成")
+    pw_gr.add_argument("--persona-id", default=None, help="人设预设 id(默认读 settings.json x_reply.persona, 缺省 falsify)")
+    pw_gr.add_argument("--persona-custom", default=None, help="自定义人设文本(≤200字, 作为所选预设的补充)")
+    pw_gr.add_argument("--json", action="store_true", help="输出单行 JSON(本就是, 习惯兼容)")
 
     p_k = sub.add_parser("skills", help="把 skills/ 安装到本机 agent 技能目录")
     ksub = p_k.add_subparsers(dest="sub", required=True)
