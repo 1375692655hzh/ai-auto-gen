@@ -541,6 +541,7 @@ WB.pages.article = {
       }
     },
     copyReply(c) { WB.copyText(c.text); WB.toast("已复制，点「去评论 ↗」直接卡位"); },
+    copyPostLink(r) { WB.copyText(r.reply_url); WB.toast("已复制帖子链接"); },
     /* 评论人设: 选预设/自填存 settings(服务端生成时读; 人设进缓存 key, 换人设自动重生成) */
     async pickPersona(id) {
       this.persona.id = id;
@@ -1166,8 +1167,9 @@ WB.pages.article = {
               </div>
               <div class="surge-parts muted">
                 参考: <template v-if="r.views_pred != null">预测浏览 {{ fmtN(r.views_pred) }}</template><template v-if="r.reply_exposure != null"> · 评论可蹭 ~{{ fmtN(r.reply_exposure) }} 曝光</template> · {{ r.age_h }}h 前</div>
-              <div class="news-actions">
+              <div class="news-actions blocks">
                 <a :href="r.reply_url" target="_blank" rel="noopener">去评论 ↗</a>
+                <span class="act" @click="copyPostLink(r)">复制链接</span>
                 <span class="act" @click="xfCopy(r)">一键复制</span>
                 <span v-if="basketIds[r.status_id]" class="act-done">已加入 ✓</span>
                 <span v-else class="act" @click="addXToPool(r)">＋加入素材</span>
@@ -1274,8 +1276,9 @@ WB.pages.article = {
                 <span v-if="r.views_pred != null">预测浏览 {{ fmtN(r.views_pred) }}</span>
                 <span v-if="r.exposure != null" class="exposure">评论可蹭 ~{{ fmtN(r.exposure) }} 曝光</span>
               </div>
-              <div class="news-actions">
+              <div class="news-actions blocks">
                 <a :href="r.reply_url" target="_blank" rel="noopener">去评论 ↗</a>
+                <span class="act" @click="copyPostLink(r)">复制链接</span>
                 <span v-if="xLong(r)" class="act" @click="xToggle(r)">{{ xExpanded[r.status_id] ? '收起' : '展开全文' }}</span>
                 <span class="act" @click="genReply(r)">✨写评论</span>
                 <span class="act" @click="xfCopy(r)">复制原帖</span>

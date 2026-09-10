@@ -204,6 +204,13 @@ select[multiple] option { padding: 3px var(--s2); border-radius: var(--s1); }
 .news-actions { margin-top: 7px; display: flex; gap: var(--s4); font-size: 12px; }
 .news-actions span.act { color: var(--accent); cursor: pointer; }
 .news-actions span.act:hover { color: var(--text); }
+/* 图文页 X 帖操作: 离散方块按钮(限定 .blocks 修饰类, news.js 信息流保持行内链) */
+.news-actions.blocks { gap: 6px; flex-wrap: wrap; }
+.news-actions.blocks > a, .news-actions.blocks > span.act {
+  border: 1px solid var(--border); border-radius: var(--r-ctl); background: var(--bg-card);
+  padding: 3px 10px; line-height: 1.5; text-decoration: none; white-space: nowrap; }
+.news-actions.blocks > a:hover, .news-actions.blocks > span.act:hover {
+  border-color: var(--accent); color: var(--accent); background: transparent; }
 .tickers { display: flex; gap: 5px; flex-wrap: wrap; margin-top: 6px; }
 /* 双框信息流卡片(2026-09-03 双标签制: 左=来源信息, 右=内容信息, 标签分区独立) */
 .nc-grid    { display: grid; grid-template-columns: 188px minmax(0, 1fr); gap: var(--s3); }
