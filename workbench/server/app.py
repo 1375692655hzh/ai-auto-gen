@@ -382,13 +382,22 @@ def create_app() -> FastAPI:
         return {"started": True}
 
     @app.post("/wb-api/test-llm")
-    def test_llm():
+    async def test_llm(request: Request):
         import subprocess
+        model_id = ""
+        try:                                        # 可选 body: {"model_id": "..."} 只测指定链位
+            body = await request.json()
+            if isinstance(body, dict):
+                model_id = str(body.get("model_id") or "")
+        except Exception:
+            pass
         cli = Path(__file__).resolve().parents[2] / "cli.py"
+        cmd = [*config.py_cmd(), str(cli), "workbench", "test-llm"]
+        if model_id:
+            cmd += ["--model-id", model_id]
         try:
             p = subprocess.run(
-                [*config.py_cmd(), str(cli), "workbench", "test-llm"],
-                capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=40)
+                cmd, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=40)
         except subprocess.TimeoutExpired:
             return JSONResponse({"ok": False, "model": "", "error": "cli_timeout"}, status_code=504)
         except OSError:

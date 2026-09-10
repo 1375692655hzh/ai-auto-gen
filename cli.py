@@ -459,24 +459,42 @@ def workbench_cmd(args) -> int:
         try:
             # 不透传传输层输出或异常, 防止供应商响应泄露密钥。
             with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
-                cfg = config.load().get("compose") or {}
-                base, key, model = (str(cfg.get(k) or "").strip()
-                                    for k in ("base_url", "api_key", "model"))
-                if not all((base, key, model)):
+                chain = config.compose_chain()
+                want = str(getattr(args, "model_id", "") or "")
+                if want:
+                    chain = [m for m in config.compose_chain()
+                             if m["id"] == want]        # 测指定链位(含停用位, 取原始配置)
+                    if not chain:                       # 停用/三项不全被过滤 → 从原始段找
+                        for m in (config.load().get("compose") or {}).get("models") or []:
+                            if isinstance(m, dict) and m.get("id") == want:
+                                chain = [{"id": want, "name": str(m.get("name") or want),
+                                          "base_url": str(m.get("base_url") or "").strip(),
+                                          "api_key": str(m.get("api_key") or "").strip(),
+                                          "model": str(m.get("model") or "").strip(),
+                                          "extra_body": m.get("extra_body")
+                                          if isinstance(m.get("extra_body"), dict) else {}}]
+                if not chain:
                     code, error = 4, "no_llm_config"
                 else:
-                    eb = cfg.get("extra_body")
-                    # max_tokens 给足 512: 推理模型即使关思考也可能先烧百余 reasoning token,
-                    # 8 会被吃光导致误判连接失败
-                    content, err = vstudio.chat_completions_ex(base, key, model,
-                            [{"role": "user", "content": "ping"}],
-                            temperature=0, max_tokens=512, timeout=25,
-                            extra=eb if isinstance(eb, dict) else None)
-                    if content:
-                        code, error = 0, ""
-                    elif err:
-                        # 分类提示(401=key错/404=路径错/10061=系统代理), 安全不含 key
-                        code, error = 3, err
+                    last_err = ""
+                    for m in chain:
+                        model = f"{m['name']} · {m['model']}" if m.get("name") else m["model"]
+                        if not all((m["base_url"], m["api_key"], m["model"])):
+                            last_err = "no_llm_config"
+                            continue
+                        # max_tokens 给足 512: 推理模型即使关思考也可能先烧百余 reasoning token,
+                        # 8 会被吃光导致误判连接失败
+                        content, err = vstudio.chat_completions_ex(m["base_url"], m["api_key"],
+                                m["model"], [{"role": "user", "content": "ping"}],
+                                temperature=0, max_tokens=512, timeout=25,
+                                extra=m.get("extra_body") or None)
+                        if content:
+                            code, error = 0, ""
+                            break
+                        last_err = err or last_err      # 分类提示(401=key错/404=路径错), 安全不含 key
+                    if code != 0:
+                        code, error = (4, "no_llm_config") if last_err == "no_llm_config" \
+                            else (3, last_err or "llm_connection_failed")
         except Exception:
             pass
         print(json.dumps({"ok": code == 0, "model": model, "error": error}))
@@ -802,7 +820,8 @@ def main() -> int:
     pw_vb = wsub.add_parser("build-video", help="视频制作渲染编排(CLI 子进程入口, 真渲染分钟级)")
     pw_vb.add_argument("--json", action="store_true", help="输出单行 JSON")
     pw_vb.add_argument("--data-dir", help="CLI 隔离任务目录（须在本仓 data/ 内）")
-    wsub.add_parser("test-llm", help="测试成稿模型连接(最小 ping, JSON 输出)")
+    pw_tl = wsub.add_parser("test-llm", help="测试成稿模型连接(最小 ping, JSON 输出; 缺省按链优先级试到通)")
+    pw_tl.add_argument("--model-id", default="", help="只测指定链位 id(含停用位)")
     pw_gp = wsub.add_parser("gen-post", help="内容生成成稿编排(CLI 子进程入口: 检索/行情图/技术位/观点聚合/LLM)")
     pw_gp.add_argument("--json", action="store_true", help="输出单行 JSON")
     pw_gr = wsub.add_parser("gen-reply", help="蹭蹭流量·评论生成(CLI 子进程入口: 按 status_id 取 RSS 快照→compose 链出 3 候选)")

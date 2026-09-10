@@ -486,6 +486,18 @@ def _llm(cfg3, system: str, user: str, max_tokens: int = 2000, timeout: int = 12
                                     0.4, max_tokens, timeout, extra=extra)
 
 
+def _llm_chain(chain: list, system: str, user: str, max_tokens: int = 2000,
+               timeout: int = 120) -> tuple[str | None, dict | None]:
+    """成稿模型链调用(2026-09-10 多元化): 按优先级依次尝试, 前一失败自动落下一。
+    → (内容|None, 实际命中的链位|None)。"""
+    for m in chain:
+        raw = _llm((m["base_url"], m["api_key"], m["model"], m.get("extra_body")),
+                   system, user, max_tokens, timeout)
+        if raw:
+            return raw, m
+    return None, None
+
+
 def _parse_json(raw: str) -> dict | None:
     decoder = json.JSONDecoder()
     for m in re.finditer(r"\{", raw or ""):
@@ -705,13 +717,10 @@ def run_compose(request: dict) -> tuple[dict, int]:
     pid = "p" + time.strftime("%m%d%H%M%S")
     cfg = config.load()
     source_pref = (cfg.get("market") or {}).get("source_pref", "auto")
-    t = cfg.get("compose") or {}                   # 成稿专用链(2026-09-07 拍板: 独立配置,
-    cfg3 = (str(t.get("base_url") or ""), str(t.get("api_key") or ""),
-            str(t.get("model") or ""))             # 不回落翻译链, 不动翻译额度)
-    if not all(cfg3):
+    chain = config.compose_chain(cfg)              # 成稿模型链(2026-09-10 多元化:
+    if not chain:                                  #  列表序=优先级, 失败自动落下一; 不回落翻译链)
         return {"error": "no_llm_config",
-                "hint": "到设置页配置「成稿模型」(内容生成专用, 独立于翻译链)"}, 4
-    cfg3 = (*cfg3, t.get("extra_body") if isinstance(t.get("extra_body"), dict) else None)
+                "hint": "到设置页配置「成稿模型」(内容生成专用, 独立于翻译链, 可配多条按优先级兜底)"}, 4
 
     notes, contexts, images, ta = [], [], [], {}
     tick("retrieve", 5, "素材识别与信息补全")
@@ -770,9 +779,9 @@ def run_compose(request: dict) -> tuple[dict, int]:
         analyst = _finnhub_view(tickers[0], str((cfg.get("finnhub") or {}).get("api_key") or "")) \
             if tickers else ""
         if bigv or inst:
-            raw = _llm(cfg3, _AGG_SYS,
-                       _AGG_USER.format(bigv=_fmt_rows(bigv, OPINION_CAP),
-                                        inst=_fmt_rows(inst, OPINION_CAP)))
+            raw, _used = _llm_chain(chain, _AGG_SYS,
+                                    _AGG_USER.format(bigv=_fmt_rows(bigv, OPINION_CAP),
+                                                     inst=_fmt_rows(inst, OPINION_CAP)))
             opinions = _parse_json(raw or "")
             if not opinions:
                 notes.append("观点聚合 LLM 未返回有效 JSON, 已跳过")
@@ -787,7 +796,9 @@ def run_compose(request: dict) -> tuple[dict, int]:
     system, user = _compose_prompt(params, mats, contexts[:10],
                                    _tech_text(ta), opinions, tickers)
     limit = TIER_LIMIT[params["tier"]]
-    raw = _llm(cfg3, system, user, 4000 if params["tier"] == "paid" else 1500)
+    raw, used = _llm_chain(chain, system, user, 4000 if params["tier"] == "paid" else 1500)
+    if used and chain and used["id"] != chain[0]["id"]:
+        notes.append(f"成稿模型链头未命中, 实际用「{used['name']}」({used['model']})")
     draft = _parse_json(raw or "")
     thread = []
     if params["template"] == "thread-post":
@@ -815,9 +826,10 @@ def run_compose(request: dict) -> tuple[dict, int]:
             notes.append("已剥离素材带入的外部链接(成稿不带链接, 出处以文字注明)")
         if weighted_len(text) > limit:                 # 修复调用限时 60s(免费池可能滴流挂起),
             tick("compose", 88, "字数超限, 压缩修复")      # 失败即放弃修复 → 句读硬截断保底
-            fix = _llm(cfg3, _X_STYLE,
-                       f"把下面的帖子压缩到 X 计权 {limit} 以内(CJK 每字计 2), 保留核心事实与观点, "
-                       f"保留内联 $cashtag, 语言与风格不变, 不带任何链接, 只输出压缩后的正文:\n\n{text}", 1200, 60)
+            fix, _ = _llm_chain(chain, _X_STYLE,
+                                f"把下面的帖子压缩到 X 计权 {limit} 以内(CJK 每字计 2), 保留核心事实与观点, "
+                                f"保留内联 $cashtag, 语言与风格不变, 不带任何链接, 只输出压缩后的正文:\n\n{text}",
+                                1200, 60)
             fix = _strip_urls((fix or "").strip().strip('"'))
             if fix and weighted_len(fix) <= limit:
                 text = fix
@@ -838,6 +850,9 @@ def run_compose(request: dict) -> tuple[dict, int]:
               "params": params, "modules": modules, "tickers": tickers,
               "weighted_len": max(map(weighted_len, thread)) if thread else weighted_len(text), "limit": limit,
               "notes": notes, "created_at": _now()}
+    if used:
+        result["model"] = used["model"]
+        result["model_name"] = used["name"]
     if thread:
         result["thread"] = thread
     (POSTS_DIR / f"{pid}.json").write_text(json.dumps(result, ensure_ascii=False, indent=1),

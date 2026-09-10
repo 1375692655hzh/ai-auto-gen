@@ -301,7 +301,8 @@ def cache_get(sid: str) -> dict | None:
     item = snapshot(sid)
     if not entry or not item:
         return None
-    t = config.load().get("compose") or {}
+    chain = config.compose_chain()
+    t = chain[0] if chain else {}                   # 缓存键以链头为准(改优先级=换链头=旧评论作废)
     pid, pr, _ = resolve_persona()
     return entry["result"] if entry.get("key") == _cache_key(item, t, pid, pr) else None
 
@@ -349,10 +350,11 @@ def run_reply(sid: str, force: bool = False, persona_id=None, custom=None) -> tu
     if not item:
         return {"error": "no_post",
                 "hint": "该帖已离榜或不在 RSS 缓存(48h), 刷新列表后重试"}, 4
-    t = config.load().get("compose") or {}
-    if not all(str(t.get(k) or "").strip() for k in ("base_url", "api_key", "model")):
+    chain = config.compose_chain()
+    if not chain:
         return {"error": "no_llm_config",
-                "hint": "到设置页配置「成稿模型」(评论生成与成稿共用此链)"}, 4
+                "hint": "到设置页配置「成稿模型」(评论生成与成稿共用此链, 可配多条按优先级兜底)"}, 4
+    t = chain[0]                                    # 缓存键以链头为准
     pid, pr, pnote = resolve_persona(persona_id, custom)
     key = _cache_key(item, t, pid, pr)
     d = _load_cache()
@@ -361,11 +363,10 @@ def run_reply(sid: str, force: bool = False, persona_id=None, custom=None) -> tu
         return entry["result"], 0
 
     system, user, lang = build_prompt(item, pr)
-    cfg4 = (str(t["base_url"]), str(t["api_key"]), str(t["model"]),
-            t.get("extra_body") if isinstance(t.get("extra_body"), dict) else None)
-    raw = gcompose._llm(cfg4, system, user, max_tokens=900, timeout=60)
+    raw, used = gcompose._llm_chain(chain, system, user, max_tokens=900, timeout=60)
     if raw is None:
-        return {"error": "llm_failed", "hint": "成稿模型无响应, 稍后再试"}, 3
+        return {"error": "llm_failed", "hint": "成稿模型链全部无响应, 稍后再试"}, 3
+    used_model = str((used or {}).get("model") or t.get("model") or "")
     draft = gcompose._parse_json(raw)
     if not isinstance(draft, dict):
         return {"error": "llm_parse_failed", "hint": "模型未按 JSON 契约返回, 可点换一批重试"}, 3
@@ -373,7 +374,7 @@ def run_reply(sid: str, force: bool = False, persona_id=None, custom=None) -> tu
     if draft.get("refuse"):
         result = {"status_id": sid, "refuse": True, "lang": lang,
                   "reason": str(draft.get("reason") or "")[:120],
-                  "model": str(t.get("model") or ""), "created_at": _fmt(now)}
+                  "model": used_model, "created_at": _fmt(now)}
     else:
         cands, notes = _validate(draft.get("comments"))
         if not cands:
@@ -382,7 +383,7 @@ def run_reply(sid: str, force: bool = False, persona_id=None, custom=None) -> tu
         if pnote:
             notes = (notes + "；" if notes else "") + pnote
         result = {"status_id": sid, "lang": lang, "persona": pid, "candidates": cands,
-                  "notes": notes, "model": str(t.get("model") or ""),
+                  "notes": notes, "model": used_model,
                   "created_at": _fmt(now)}
     d["replies"][sid] = {"key": key, "created_at_epoch": now, "result": result}
     _save_cache(d)

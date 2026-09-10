@@ -41,7 +41,7 @@
 | `python cli.py workbench analyze-video [--force]` / `gen-script` | 视频工坊：YouTube 视频分析(Gemini 看片→字幕→元数据降级链)与脚本生成(muse) | **真外呼 LLM/YouTube** |
 | `python cli.py workbench build-video [--json]` | 视频制作渲染编排（workbench→CLI 子进程入口：脚本转分镜→建项目→node build.mjs 真渲染，分钟级；日志落 data/workbench/video_builds/） | **真渲染**，写 videos/&lt;project_id&gt;/ 与日志 |
 | `python cli.py workbench gen-post [--json]` | 内容生成成稿编排（workbench→CLI 子进程入口：retrieve 补全→yfinance/东财行情→mplfinance K线图→摆动点支撑阻力→大V/机构观点聚合→LLM 按 X风格/语种/字数档成稿；产物 gen_posts+gen_assets；详见 docs/workbench-moa/21-24） | **真外呼行情+LLM**，写 data/workbench/gen_* |
-| `python cli.py workbench test-llm` | 成稿模型连接测试（设置页「测试连接」按钮的后端：读 compose 段发最小 ping，输出 JSON，不透传传输层异常防泄露 key） | 调 1 次成稿 LLM |
+| `python cli.py workbench test-llm [--model-id <id>]` | 成稿模型连接测试（设置页「测试连接」按钮的后端：读 compose 模型链按优先级试到通，--model-id 只测指定链位；输出 JSON，不透传传输层异常防泄露 key） | 调 1 次成稿 LLM |
 | `python cli.py workbench status [--json]` | 工作台/数据源双探活 + 设置有效性 | 无 |
 
 ## 目录地图（三板块 + 兄弟仓，可单独下载）

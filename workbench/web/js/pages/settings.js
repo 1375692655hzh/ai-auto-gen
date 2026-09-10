@@ -24,6 +24,7 @@ WB.pages.settings = {
       yHasKey: false, yKeyTail: "",
       gHasKey: false, gKeyTail: "",
       cHasKey: false, cKeyTail: "", composeExtra: "",
+      composeRemoved: [], llmTests: {}, llmTesting: "",
       fHasKey: false, fKeyTail: "",
       llmTest: false, llmTestResult: null,
       ttsRemoved: [], ttsTests: {}, ttsTesting: "",
@@ -80,6 +81,24 @@ WB.pages.settings = {
       this.cHasKey = (d.compose || {}).has_key; this.cKeyTail = (d.compose || {}).key_tail;
       const ebl = (d.compose || {}).extra_body;
       this.composeExtra = ebl && Object.keys(ebl).length ? JSON.stringify(ebl) : "";
+      // 成稿模型链(2026-09-10 多元化): 列表序=优先级; 已保存的默认折叠(locked+open=false)
+      const cms = ((d.compose || {}).models || []).map((m) => ({
+        id: m.id, name: m.name || m.id, base_url: m.base_url || "", api_key: "",
+        model: m.model || "", enabled: m.enabled !== false,
+        extraText: m.extra_body && Object.keys(m.extra_body).length ? JSON.stringify(m.extra_body) : "",
+        has_key: !!m.has_key, key_tail: m.key_tail || "", locked: true, open: false,
+      }));
+      if (!cms.length && ((d.compose || {}).base_url || (d.compose || {}).model)) {
+        cms.push({                                   // 旧单配置 → 预填成一条待保存的链位
+          id: "default", name: "默认成稿模型", base_url: d.compose.base_url || "",
+          api_key: "", model: d.compose.model || "", enabled: true,
+          extraText: this.composeExtra, has_key: this.cHasKey, key_tail: this.cKeyTail,
+          locked: false, open: true,
+        });
+      }
+      this.s.compose = { ...(d.compose || {}), models: cms };
+      this.composeRemoved = [];
+      this.llmTests = {};
       this.fHasKey = (d.finnhub || {}).has_key; this.fKeyTail = (d.finnhub || {}).key_tail;
       const tts = d.tts || {};
       this.s.tts = {
@@ -120,14 +139,8 @@ WB.pages.settings = {
       }
     },
     async save() {
-      let extraBody = {};
-      if ((this.composeExtra || "").trim()) {
-        try { extraBody = JSON.parse(this.composeExtra); }
-        catch (e) { WB.toast("厂商私有参数不是合法 JSON, 未保存"); return; }
-        if (!extraBody || typeof extraBody !== "object" || Array.isArray(extraBody)) {
-          WB.toast("厂商私有参数必须是 JSON 对象"); return;
-        }
-      }
+      let composePayload;
+      try { composePayload = this.composePayload(); } catch (e) { WB.toast(e.message); return; }
       const ids = [];
       for (const p of this.s.tts.providers || []) {
         if (!this.ttsIdOk(p.id)) { WB.toast("供应商 id 只能是字母数字下划线或短横线: " + (p.id || "(空)")); return; }
@@ -149,10 +162,7 @@ WB.pages.settings = {
           gemini: { api_key: (this.s.gemini || {}).api_key || '',
                     model: (this.s.gemini || {}).model || 'gemini-3.6-flash' },
           analysis_paths: { paths: (this.s.analysis_paths || {}).paths || ["", "", "", ""] },
-          compose: { base_url: (this.s.compose || {}).base_url || "",
-                     api_key: (this.s.compose || {}).api_key || "",
-                     model: (this.s.compose || {}).model || "",
-                     extra_body: extraBody },
+          compose: composePayload,
           finnhub: { api_key: (this.s.finnhub || {}).api_key || "" },
           market: { ...this.s.market },
           gen_defaults: { ...this.s.gen_defaults },
@@ -166,8 +176,7 @@ WB.pages.settings = {
         this.yHasKey = (d.youtube || {}).has_key; this.yKeyTail = (d.youtube || {}).key_tail;
         if (this.s.gemini) this.s.gemini.api_key = '';
         this.gHasKey = (d.gemini || {}).has_key; this.gKeyTail = (d.gemini || {}).key_tail;
-        if (this.s.compose) this.s.compose.api_key = "";
-        this.cHasKey = (d.compose || {}).has_key; this.cKeyTail = (d.compose || {}).key_tail;
+        this.applyComposePublic(d.compose);
         if (this.s.finnhub) this.s.finnhub.api_key = "";
         this.fHasKey = (d.finnhub || {}).has_key; this.fKeyTail = (d.finnhub || {}).key_tail;
         this.applyTtsPublic(d.tts);
@@ -193,23 +202,103 @@ WB.pages.settings = {
       }
       this.testing = false;
     },
-    async testLlm() {
-      this.llmTest = true; this.llmTestResult = null;
-      try {
+    /* ── 成稿模型链(2026-09-10 多元化): 多条按优先级兜底, 显示逻辑同 TTS(填好折叠) ── */
+    composePayload() {
+      const ids = [];
+      const models = [];
+      for (const m of (this.s.compose || {}).models || []) {
+        if (!this.ttsIdOk(m.id)) throw new Error("模型标识只能是字母数字下划线或短横线: " + (m.id || "(空)"));
+        if (ids.includes(m.id)) throw new Error("模型标识重复: " + m.id);
+        ids.push(m.id);
         let eb = {};
-        if ((this.composeExtra || "").trim()) {
-          try { eb = JSON.parse(this.composeExtra); } catch (e) { eb = undefined; }
-          if (eb === undefined) { WB.toast("厂商私有参数不是合法 JSON"); this.llmTest = false; return; }
+        if ((m.extraText || "").trim()) {
+          try { eb = JSON.parse(m.extraText); }
+          catch (e) { throw new Error("「" + (m.name || m.id) + "」的私有参数不是合法 JSON"); }
+          if (!eb || typeof eb !== "object" || Array.isArray(eb))
+            throw new Error("「" + (m.name || m.id) + "」的私有参数必须是 JSON 对象");
         }
-        const saved = await WB.api.put("/settings", { compose: { ...this.s.compose, extra_body: eb } });
-        this.s.compose.api_key = "";
-        this.cHasKey = (saved.compose || {}).has_key;
-        this.cKeyTail = (saved.compose || {}).key_tail;
-        const d = await WB.api.post("/test-llm", {});
-        this.llmTestResult = { ok: d.ok, text: d.ok ? "连接正常 · " + d.model : d.error };
+        models.push({ id: m.id, name: (m.name || "").trim() || m.id,
+                      base_url: (m.base_url || "").trim(), api_key: m.api_key || "",
+                      model: (m.model || "").trim(), enabled: !!m.enabled, extra_body: eb });
+      }
+      return { models, remove_ids: this.composeRemoved.slice() };
+    },
+    applyComposePublic(compose) {
+      const pub = compose || {};
+      const byId = {};
+      (pub.models || []).forEach((m) => { byId[m.id] = m; });
+      ((this.s.compose || {}).models || []).forEach((m) => {
+        m.api_key = "";
+        m.locked = true;
+        const row = byId[m.id] || {};
+        m.has_key = !!row.has_key; m.key_tail = row.key_tail || "";
+      });
+      this.composeRemoved = [];
+    },
+    addComposeTemplate(kind) {
+      const TPL = {
+        deepseek: { name: "DeepSeek", base_url: "https://api.deepseek.com/v1",
+                    model: "deepseek-v4-flash" },
+        omniroute: { name: "OmniRoute 免费位(muse)", base_url: "http://127.0.0.1:20128/v1",
+                     model: "oc/muse-spark-1.2-contributor-free" },
+      };
+      const tpl = TPL[kind];
+      if (!tpl) return;
+      const rows = (this.s.compose || {}).models || [];
+      if (rows.some((m) => m.base_url === tpl.base_url && m.model === tpl.model)) {
+        WB.toast("已存在同地址同模型的「" + tpl.name + "」, 无需重复添加");
+        return;
+      }
+      const ids = new Set(rows.map((m) => m.id));
+      let n = 1, id = kind;
+      while (ids.has(id)) { n += 1; id = kind + "-" + n; }
+      rows.push({ id, name: tpl.name, base_url: tpl.base_url, api_key: "", model: tpl.model,
+                  enabled: true, extraText: "", has_key: false, key_tail: "",
+                  locked: false, open: true });
+      this.s.compose.models = rows;
+      WB.toast(tpl.name + " 模板已填好 —— 补上 API Key 后点保存设置");
+    },
+    addComposeModel() {
+      const rows = (this.s.compose || {}).models || [];
+      const ids = new Set(rows.map((m) => m.id));
+      let n = 1, id = "model";
+      while (ids.has(id)) { n += 1; id = "model-" + n; }
+      rows.push({ id, name: "自定义模型", base_url: "", api_key: "", model: "",
+                  enabled: true, extraText: "", has_key: false, key_tail: "",
+                  locked: false, open: true });
+      this.s.compose.models = rows;
+      this.composeRemoved = this.composeRemoved.filter((x) => x !== id);
+    },
+    removeComposeModel(m) {
+      if (!confirm("删除成稿模型「" + (m.name || m.id) + "」？已保存的 Key 会一并丢掉。")) return;
+      this.s.compose.models = this.s.compose.models.filter((x) => x.id !== m.id);
+      if (!this.composeRemoved.includes(m.id)) this.composeRemoved.push(m.id);
+    },
+    moveCompose(m, dir) {
+      const rows = this.s.compose.models || [];
+      const i = rows.findIndex((x) => x.id === m.id);
+      const j = i + dir;
+      if (i < 0 || j < 0 || j >= rows.length) return;
+      rows.splice(i, 1); rows.splice(j, 0, m);
+      this.s.compose.models = rows.slice();
+    },
+    toggleComposeOpen(m) { m.open = m.open === true ? false : true; },
+    async testCompose(m) {
+      this.saving = true;
+      try {
+        const saved = await WB.api.put("/settings", { compose: this.composePayload() });
+        this.applyComposePublic(saved.compose);
+      } catch (e) { WB.toast("保存失败: " + (e.error || e.message)); this.saving = false; return; }
+      this.saving = false;
+      this.llmTesting = m.id;
+      this.llmTests = { ...this.llmTests, [m.id]: { testing: true } };
+      try {
+        const d = await WB.api.post("/test-llm", { model_id: m.id });
+        this.llmTests = { ...this.llmTests, [m.id]: { ok: true, text: "连接正常 · " + d.model } };
       } catch (e) {
-        this.llmTestResult = { ok: false, text: e.error || "连接测试失败" };
-      } finally { this.llmTest = false; }
+        this.llmTests = { ...this.llmTests, [m.id]: { ok: false, text: e.error || "连接测试失败" } };
+      }
+      this.llmTesting = "";
     },
     ttsIdOk(v) { return /^[\w-]+$/.test(String(v || "")); },
     engineVoices(engine) {
@@ -501,37 +590,72 @@ WB.pages.settings = {
       <button class="btn primary" :disabled="saving" @click="save">保存设置</button>
     </div>
 
-    <!-- 4. 成稿模型(内容生成专用 LLM, 独立于翻译链, 不动翻译额度) -->
+    <!-- 4. 成稿模型链(内容生成专用 LLM, 多条按优先级兜底, 独立于翻译链) -->
     <div class="card" v-show="sec==='compose'">
-      <h3>成稿模型 <span class="muted">内容生成页·开始生成专用 · 独立计费</span></h3>
+      <h3>成稿模型 <span class="muted">内容生成/评论生成/copylab 专用 · 列表序=优先级, 前一失败自动落下一 · 独立计费</span></h3>
       <div class="key-guide">
-        <b>注册来源:</b> 同翻译模型 ——
+        <b>注册来源:</b>
         <a href="https://platform.deepseek.com" target="_blank" rel="noopener">DeepSeek 开放平台</a>
-        或任意 OpenAI 兼容服务。<br>
-        <b>说明:</b> 只服务内容生成页「开始生成」的成稿环节, 独立计费不动翻译额度;
-        配置仅存本工作台, 单独部署工作台的用户照常可用。
+        或任意 OpenAI 兼容服务(通义/Kimi/智谱等); 也可用 OmniRoute 免费位(模板一键填)。<br>
+        <b>说明:</b> 可配多条, <b>上面一条优先</b>, 挂了/超时自动用下一条, 不动翻译额度;
+        配置仅存本工作台, 单独部署工作台的用户照常可用。填好保存后卡片自动折叠。
       </div>
 
-      <div class="form-row"><label>接口地址</label>
-        <input type="text" v-model="s.compose.base_url" placeholder="OpenAI 兼容接口, 如 https://api.deepseek.com"
-               style="width:320px"></div>
-      <div class="form-row"><label>API Key</label>
-        <input type="password" v-model="s.compose.api_key"
-               :placeholder="cHasKey ? '已配置(尾号 ' + cKeyTail + '), 留空保持不变' : 'sk-...'"
-               style="width:320px">
-        <span class="muted">仅存本机服务端, 不回显明文</span></div>
-      <div class="form-row"><label>模型</label>
-        <input type="text" v-model="s.compose.model" placeholder="如 deepseek-v4-flash"
-               style="width:220px"></div>
-      <div class="form-row"><label>私有参数</label>
-        <input type="text" v-model="composeExtra" style="width:420px"
-               placeholder='选填 JSON, 如智谱推理模型 {"thinking": {"type": "disabled"}} 防思考吃光字数'>
-        <span class="muted">原样并入请求体, 一般用不上</span></div>
-      <p class="muted">未配置时「开始生成」报配置缺失, 不回落翻译链</p>
-      <button class="btn" :disabled="llmTest || saving" @click="testLlm">{{ llmTest ? '测试中…' : '测试连接' }}</button>
-      <div v-if="llmTestResult" class="test-result" :class="llmTestResult.ok ? 'ok' : 'fail'">
-        {{ llmTestResult.ok ? '✓ ' : '✗ ' }}{{ llmTestResult.text }}</div>
-      <button class="btn primary" :disabled="saving" @click="save">保存设置</button>
+      <div v-for="(m, mi) in (s.compose.models || [])" :key="m.id"
+           style="margin:12px 0;border:1px dashed var(--border);border-radius:8px">
+        <div style="display:flex;align-items:center;gap:8px;padding:9px 10px;cursor:pointer;flex-wrap:wrap"
+             @click="toggleComposeOpen(m)">
+          <span class="badge">P{{ mi + 1 }}</span>
+          <span style="font-weight:600">{{ m.name || m.id }}</span>
+          <span class="badge">{{ m.model || '未填模型' }}</span>
+          <span class="badge" :class="m.enabled ? 'green' : ''">{{ m.enabled ? '启用' : '停用' }}</span>
+          <span style="margin-left:auto;display:flex;gap:4px" @click.stop>
+            <button class="btn" style="padding:2px 8px" :disabled="mi===0" @click="moveCompose(m, -1)" title="上移=提高优先级">↑</button>
+            <button class="btn" style="padding:2px 8px" :disabled="mi===(s.compose.models||[]).length-1" @click="moveCompose(m, 1)" title="下移=降低优先级">↓</button>
+          </span>
+          <span class="muted" style="font-size:11px">{{ m.open ? '收起 ▲' : '展开编辑 ▼' }}</span>
+        </div>
+        <div v-show="m.open" style="padding:0 10px 10px">
+        <div class="form-row"><label>标识</label>
+          <input type="text" v-model="m.id" :readonly="m.locked" placeholder="字母数字下划线或短横线"
+                 style="width:180px">
+          <span class="muted">{{ m.locked ? '已保存的标识不可改' : '保存后锁定' }}</span></div>
+        <div class="form-row"><label>显示名</label>
+          <input type="text" v-model="m.name" placeholder="自己认得的名字, 如 DS主力 / GLM兜底" style="width:220px">
+          <label><input type="checkbox" v-model="m.enabled"> 启用</label></div>
+        <div class="form-row"><label>接口地址</label>
+          <input type="text" v-model="m.base_url" placeholder="OpenAI 兼容接口, 如 https://api.deepseek.com/v1"
+                 style="width:320px"></div>
+        <div class="form-row"><label>API Key</label>
+          <input type="password" v-model="m.api_key"
+                 :placeholder="m.has_key ? '已配置(尾号 ' + m.key_tail + '), 留空保持不变' : 'sk-...'"
+                 style="width:320px">
+          <span class="muted">仅存本机服务端, 不回显明文</span></div>
+        <div class="form-row"><label>模型</label>
+          <input type="text" v-model="m.model" placeholder="如 deepseek-v4-flash"
+                 style="width:220px"></div>
+        <div class="form-row"><label>私有参数</label>
+          <input type="text" v-model="m.extraText" style="width:420px"
+                 placeholder='选填 JSON, 如智谱推理模型 {"thinking": {"type": "disabled"}} 防思考吃光字数'>
+          <span class="muted">原样并入请求体, 一般用不上</span></div>
+        <div class="form-row">
+          <button class="btn" :disabled="llmTesting===m.id || saving" @click="testCompose(m)">
+            {{ llmTesting===m.id ? '测试中…' : '测试连接' }}</button>
+          <button class="btn" @click="removeComposeModel(m)">删除模型</button>
+        </div>
+        <div v-if="llmTests[m.id] && !llmTests[m.id].testing" class="test-result"
+             :class="llmTests[m.id].ok ? 'ok' : 'fail'">
+          {{ llmTests[m.id].ok ? '✓ ' : '✗ ' }}{{ llmTests[m.id].text }}</div>
+        </div>
+      </div>
+      <p v-if="!(s.compose.models || []).length" class="muted">
+        尚未配置成稿模型 —— 点下方模板或空白模型添加; 未配置时「开始生成」报配置缺失, 不回落翻译链</p>
+      <div class="form-row">
+        <button class="btn" @click="addComposeTemplate('deepseek')">＋ DeepSeek 模板</button>
+        <button class="btn" @click="addComposeTemplate('omniroute')">＋ OmniRoute 免费位模板</button>
+        <button class="btn" @click="addComposeModel">＋ 空白模型</button>
+        <button class="btn primary" :disabled="saving" @click="save">{{ saving ? '保存中…' : '保存设置' }}</button>
+      </div>
     </div>
 
     <!-- 5. Finnhub(内容生成·聚合分析增强, 投行评级/目标价, 仅美股) -->

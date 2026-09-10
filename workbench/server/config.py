@@ -70,7 +70,11 @@ DEFAULTS = {
         "api_key": "",                              # 未配置则生成报 no_llm_config, 不回落翻译链)
         "model": "",
         "extra_body": {},                           # 厂商私有请求参数(选填), 如智谱推理模型
-    },                                              # {"thinking": {"type": "disabled"}} 防思考吃光 max_tokens
+                                                    # {"thinking": {"type": "disabled"}} 防思考吃光 max_tokens
+        "models": [],                               # 2026-09-10 多元化: 成稿模型链, 列表序=优先级,
+                                                    # 依次尝试前一失败自动落下一; 顶层四字段为旧单
+                                                    # 配置遗留, 读取一律走 compose_chain()
+    },
     "finnhub": {                                    # 内容生成·聚合分析增强(投行评级/目标价, 仅美股)
         "api_key": "",                              # 免费档 finnhub.io 注册即得, 仅存服务端打码回显
     },
@@ -104,6 +108,19 @@ def load() -> dict:
             for slot in DEFAULTS["translate"]["models"]:
                 if slot["model"] not in have:
                     tr["models"].append(dict(slot))
+        # 成稿模型链实体化迁移(2026-09-10): 存档 compose 无 models 键(升级前)而旧单
+        # 配置有值 → 合成链头一条进 merged; 下次任意保存即固化, 老用户零感知。
+        # 此后链以 models 为准: 用户在 UI 删光链位 ≠ 旧单配置回魂。
+        sc = saved.get("compose") if isinstance(saved.get("compose"), dict) else {}
+        mc = merged.get("compose") or {}
+        if "models" not in sc and not mc.get("models"):
+            base, key, model = (str(mc.get(k) or "").strip()
+                                for k in ("base_url", "api_key", "model"))
+            if all((base, key, model)):
+                mc["models"] = [{"id": "default", "name": "默认成稿模型", "enabled": True,
+                                 "base_url": base, "api_key": key, "model": model,
+                                 "extra_body": mc.get("extra_body")
+                                 if isinstance(mc.get("extra_body"), dict) else {}}]
         return merged
     except Exception:
         return json.loads(json.dumps(DEFAULTS))     # 深拷贝出厂默认
@@ -124,6 +141,34 @@ def save(cfg: dict) -> dict:
 def _settings_file() -> Path:
     # 保留旧调用方 patch SETTINGS_FILE 的兼容性；DATA_DIR 改写时随之隔离。
     return DATA_DIR / "settings.json" if DATA_DIR != REPO / "data" / "workbench" else SETTINGS_FILE
+
+
+def compose_chain(cfg: dict | None = None) -> list:
+    """成稿模型链: 按优先级(列表序)返回启用的模型
+    [{id, name, base_url, api_key, model, extra_body}]。
+
+    升级前的旧单配置由 load() 实体化进 models(下次保存即固化); 这里只在拿到
+    未经 load() 的裸配置(无 models 键)时才兜底读顶层旧字段。"""
+    c = (cfg or load()).get("compose") or {}
+    out = []
+    for m in c.get("models") or []:
+        if not isinstance(m, dict) or not m.get("enabled", True):
+            continue
+        base, key, model = (str(m.get(k) or "").strip() for k in ("base_url", "api_key", "model"))
+        if not all((base, key, model)):
+            continue                                    # 三项不全的链位视为未配好, 跳过
+        eb = m.get("extra_body")
+        out.append({"id": str(m.get("id") or ""), "name": str(m.get("name") or m.get("id") or ""),
+                    "base_url": base, "api_key": key, "model": model,
+                    "extra_body": dict(eb) if isinstance(eb, dict) else {}})
+    if not out and "models" not in c:
+        base, key, model = (str(c.get(k) or "").strip() for k in ("base_url", "api_key", "model"))
+        if all((base, key, model)):
+            eb = c.get("extra_body")
+            out.append({"id": "default", "name": "默认成稿模型", "base_url": base,
+                        "api_key": key, "model": model,
+                        "extra_body": dict(eb) if isinstance(eb, dict) else {}})
+    return out
 
 
 def public_view(cfg: dict) -> dict:
@@ -158,6 +203,12 @@ def public_view(cfg: dict) -> dict:
     v["compose"]["api_key"] = ""
     v["compose"]["has_key"] = bool(ckey)
     v["compose"]["key_tail"] = ckey[-4:] if ckey else ""
+    for m in (v.get("compose") or {}).get("models") or []:   # 链位 key 同打码
+        if isinstance(m, dict):
+            mk = m.get("api_key") or ""
+            m["api_key"] = ""
+            m["has_key"] = bool(mk)
+            m["key_tail"] = mk[-4:] if mk else ""
     fkey = (v.get("finnhub") or {}).get("api_key") or ""
     v["finnhub"]["api_key"] = ""
     v["finnhub"]["has_key"] = bool(fkey)
@@ -226,6 +277,27 @@ def _tts_fix_default(tts: dict) -> dict:
     return tts
 
 
+def _compose_model(prev, incoming: dict) -> dict | None:
+    """白名单合并一条成稿模型; id 非法则丢弃。api_key 缺省/空串保持原值;
+    extra_body 必须是 dict(前端已校验 JSON)。"""
+    prev = prev if isinstance(prev, dict) else {}
+    mid = incoming.get("id")
+    if not _tts_id_ok(mid):
+        return None
+    name = incoming["name"] if "name" in incoming else prev.get("name") or mid
+    enabled = incoming["enabled"] if "enabled" in incoming else prev.get("enabled", True)
+    base_url = incoming["base_url"] if "base_url" in incoming else prev.get("base_url", "")
+    model = incoming["model"] if "model" in incoming else prev.get("model", "")
+    eb = incoming.get("extra_body", prev.get("extra_body"))
+    api_key = prev.get("api_key") or ""
+    if incoming.get("api_key"):
+        api_key = str(incoming["api_key"])
+    return {"id": mid, "name": str(name or mid).strip()[:40] or mid,
+            "enabled": bool(enabled), "base_url": str(base_url or ""),
+            "api_key": api_key, "model": str(model or ""),
+            "extra_body": dict(eb) if isinstance(eb, dict) else {}}
+
+
 def apply_patch(patch: dict) -> dict:
     """设置页保存: api_key 留空表示保持不变(前端不持有明文)。"""
     patch = dict(patch or {})
@@ -252,7 +324,37 @@ def apply_patch(patch: dict) -> dict:
         if "default" in incoming and isinstance(incoming["default"], dict):
             tts["default"] = incoming["default"]
         patch["tts"] = _tts_fix_default(tts)
-    for sec in ("source", "translate", "youtube", "gemini", "compose", "finnhub"):
+    if isinstance(patch.get("compose"), dict):
+        incoming = patch["compose"]
+        compose = json.loads(json.dumps(load().get("compose") or {}))
+        if "models" in incoming:                      # 链式保存: 按 id 合并, 列表序=优先级
+            models = {m["id"]: m for m in compose.get("models") or []
+                      if isinstance(m, dict) and m.get("id")}
+            for rid in incoming.get("remove_ids") or []:
+                if isinstance(rid, str):
+                    models.pop(rid, None)
+            ordered = []
+            for m in incoming.get("models") or []:
+                if not isinstance(m, dict):
+                    continue
+                m = dict(m)
+                m.pop("has_key", None)
+                m.pop("key_tail", None)
+                if m.get("api_key") == "":
+                    m.pop("api_key")
+                row = _compose_model(models.pop(m.get("id"), None), m)
+                if row:
+                    ordered.append(row)
+            compose["models"] = ordered
+            patch["compose"] = compose
+        else:                                          # 旧单配置字段级保存(兼容老调用)
+            s = dict(incoming)
+            if "api_key" in s and not s["api_key"]:
+                s.pop("api_key")
+            patch["compose"] = s if s else None
+            if not s:
+                patch.pop("compose", None)
+    for sec in ("source", "translate", "youtube", "gemini", "finnhub"):
         s = dict(patch.get(sec) or {})
         if "api_key" in s and not s["api_key"]:
             s.pop("api_key")

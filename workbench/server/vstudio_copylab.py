@@ -273,11 +273,10 @@ def run(target: dict, key: str, request: dict) -> tuple[dict, int]:
     """copylab 工作流主入口(仅 CLI 进程)。target 已由 vstudio._target 解析。"""
     attempted = []
     # 2026-09-10 用户拍板: LLM 步走成稿模型(compose 段), 不再挂翻译段
-    tcfg = config.load().get("compose") or {}
-    base, tkey, tmodel = (str(tcfg.get(k) or "") for k in ("base_url", "api_key", "model"))
-    if not (base and tkey and tmodel):
+    chain = config.compose_chain()
+    if not chain:
         return {"error": "no_compose_config",
-                "hint": "copylab 走成稿模型, 到设置页配置成稿模型(GLM/DeepSeek 等)"}, 4
+                "hint": "copylab 走成稿模型, 到设置页配置成稿模型(GLM/DeepSeek 等, 可配多条按优先级兜底)"}, 4
 
     vstudio.tick("analyze", "copylab", 8, "yt-dlp 取元数据/字幕…")
     with tempfile.TemporaryDirectory() as tmp:
@@ -312,18 +311,22 @@ def run(target: dict, key: str, request: dict) -> tuple[dict, int]:
                  .replace("{{CHAPTERS}}", chapters)
                  .replace("{{RHYTHM}}", rhythm_summary(rhythm))
                  .replace("{{TRANSCRIPT}}", transcript_txt))
-    raw = vstudio.chat_completions(base, tkey, tmodel,
-                                   [{"role": "user", "content": prompt}],
-                                   0.1, 8000, 300,
-                                   extra=tcfg.get("extra_body")
-                                   if isinstance(tcfg.get("extra_body"), dict) else None)
+    raw, used = None, None
+    for m in chain:                                 # 成稿模型链: 前一失败自动落下一
+        raw = vstudio.chat_completions(m["base_url"], m["api_key"], m["model"],
+                                       [{"role": "user", "content": prompt}],
+                                       0.1, 8000, 300, extra=m.get("extra_body") or None)
+        if raw:
+            used = m
+            break
     if not raw:
-        attempted.append({"tier": "llm", "result": "failed", "evidence": "文本模型未返回内容"})
+        attempted.append({"tier": "llm", "result": "failed", "evidence": "文本模型链全部未返回内容"})
         rec = vstudio._analysis_record(target, key, attempted, "failed", "copylab", "",
-                                       {"rhythm": rhythm}, error="文本模型未返回内容")
+                                       {"rhythm": rhythm}, error="文本模型链全部未返回内容")
         vstudio._save_analysis(rec)
         return rec, 3
-    attempted.append({"tier": "llm", "result": "success", "evidence": f"{tmodel} · {len(raw)} 字"})
+    attempted.append({"tier": "llm", "result": "success",
+                      "evidence": f"{used['name']}({used['model']}) · {len(raw)} 字"})
 
     vstudio.tick("analyze", "copylab", 80, "引用核验(机器核对)…")
     result = verify(raw, segments, d)
