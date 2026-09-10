@@ -305,7 +305,51 @@ def chat_completions(base: str, key: str, model: str, messages: list,
                      extra: dict | None = None) -> str | None:
     """OpenAI 兼容 /chat/completions；仅由 CLI 主流程调用。
     extra = 厂商私有参数原样合并进请求体(如智谱推理模型 {"thinking": {"type": "disabled"}}
-    防 reasoning_content 吃光 max_tokens 返回空 content); 未配置则行为不变。"""
+    防 reasoning_content 吃光 max_tokens 返回空 content); 未配置则行为不变。
+    双路径: 默认 opener(吃 Windows 系统代理)传输层失败 → 强制直连重试(2026-09-10 智谱
+    接不进事故: 系统代理挂着但代理进程已关, urllib 读注册表代理全被拒连)。"""
+    return chat_completions_ex(base, key, model, messages, temperature,
+                               max_tokens, timeout, extra)[0]
+
+
+def _classify_llm_err(e: Exception) -> str:
+    """传输/HTTP 错误 → 面向用户的分类提示(不回显 key, 不透传原始输出防泄露)。"""
+    import urllib.error
+    if isinstance(e, urllib.error.HTTPError):
+        try:
+            detail = (e.read().decode("utf-8", "replace") or "")[:120].strip()
+        except Exception:
+            detail = ""
+        if detail.startswith("<"):
+            detail = ""                              # 网关 HTML 错误页没信息量
+        suffix = f": {detail}" if detail else ""
+        if e.code in (401, 403):
+            return f"key 无效或无权限(HTTP {e.code}){suffix}"
+        if e.code in (404, 405):                     # 裸域名 POST 常回 405
+            return (f"base_url 路径不对(HTTP 404)——本站会在地址后拼 /chat/completions: "
+                    f"智谱须填 https://open.bigmodel.cn/api/paas/v4, "
+                    f"DeepSeek 填 https://api.deepseek.com, OpenAI 填 …/v1{suffix}")
+        if e.code == 429:
+            return f"限频或额度不足(HTTP 429){suffix}"
+        return f"供应商返回 HTTP {e.code}{suffix}"
+    msg = str(e)
+    if "10061" in msg or "ConnectionRefused" in msg or "actively refused" in msg:
+        return "连接被拒——十有八九是系统代理开着但代理软件没跑(浏览器能开网页、后台程序全被拒), 关系统代理或先开代理软件"
+    if "timed out" in msg or "timeout" in msg.lower():
+        return "连接超时——国内服务(智谱/DeepSeek)被系统代理拦? 关代理直连; 境外服务(OpenAI)则必须走代理"
+    if "SSL" in msg or "reset" in msg.lower() or "disconnected" in msg.lower():
+        return "TLS 握手/连接被掐——系统代理或网络环境拦截此域名, 试试代理开关切换"
+    if "getaddrinfo failed" in msg or "name or service not known" in msg.lower():
+        return "域名解析失败——检查 base_url 拼写与本机 DNS"
+    return f"网络传输失败({type(e).__name__})"
+
+
+def chat_completions_ex(base: str, key: str, model: str, messages: list,
+                        temperature: float, max_tokens: int, timeout: int,
+                        extra: dict | None = None) -> tuple[str | None, str | None]:
+    """chat_completions 的诊断版: → (content|None, err|None)。
+    err 为面向用户的安全分类(供 test-llm 透传); content 为空时给推理模型提示。"""
+    import urllib.error
     import urllib.request
     payload = {"model": model, "temperature": temperature,
                "max_tokens": max_tokens, "messages": messages}
@@ -315,12 +359,31 @@ def chat_completions(base: str, key: str, model: str, messages: list,
     req = urllib.request.Request(
         base.rstrip("/") + "/chat/completions", data=body,
         headers={"Content-Type": "application/json", "Authorization": f"Bearer {key}"})
+    note = ""
     try:
-        with urllib.request.urlopen(req, timeout=timeout) as response:
-            data = json.loads(response.read())
-        return (data["choices"][0]["message"]["content"] or "").strip() or None
-    except Exception:
-        return None
+        response = urllib.request.urlopen(req, timeout=timeout)   # 默认: 尊重系统代理/环境
+    except urllib.error.HTTPError as e:
+        return None, _classify_llm_err(e)       # 已到服务端, 无需重试
+    except Exception as e1:
+        try:                                     # 传输层失败 → 强制直连重试(绕过系统代理)
+            response = urllib.request.build_opener(
+                urllib.request.ProxyHandler({})).open(req, timeout=timeout)
+            note = "(经强制直连成功——你的系统代理在拦此域名, 建议代理规则把它设 DIRECT)"
+        except urllib.error.HTTPError as e:
+            return None, _classify_llm_err(e)
+        except Exception as e2:
+            return None, (_classify_llm_err(e2) +
+                          "; 默认/直连两路都不通——检查 base_url 与网络")
+    try:
+        data = json.loads(response.read())
+        content = ((data.get("choices") or [{}])[0].get("message") or {}).get("content")
+    except Exception as e:
+        return None, f"响应解析失败({type(e).__name__})"
+    content = (content or "").strip()
+    if not content:
+        return None, ("返回空 content——推理模型? 在成稿设置 extra_body 填 "
+                      '{"thinking":{"type":"disabled"}}(智谱)') + note
+    return content, note or None
 
 
 _VIDEO_MIME = {".mp4": "video/mp4", ".m4v": "video/mp4", ".mov": "video/quicktime",
@@ -1874,6 +1937,76 @@ def _write_project_claims(proj: Path, script: dict) -> None:
         return
     payload = {"schema": "wb-video-claims/v1", "claims": claims}
     _atomic_json(proj / "claims.json", payload)
+
+
+def run_cover(project_id: str, payload: dict) -> dict:
+    """封面制作：背景+人物形象+标题 → cover.json + cover.mjs → out/cover.png。
+    素材来自全局素材库(asset_id)，拷贝进项目 cover_assets/ 后由 Remotion still 出图。"""
+    from . import vmake
+    if not _safe_id(project_id):
+        raise ValueError("bad_project_id")
+    title = str(payload.get("title") or "").strip()
+    if not title:
+        raise ValueError("标题必填")
+    if len(title) > 120:
+        raise ValueError("标题过长（≤120 字，用 \\n 分行、**文字** 高亮）")
+    proj = (vmake.VIDEOS_DIR / project_id).resolve()
+    if vmake.VIDEOS_DIR.resolve() not in proj.parents or not proj.is_dir():
+        raise ValueError("项目不存在")
+    spec: dict = {"title": title}
+    for key in ("kicker", "sub"):
+        value = str(payload.get(key) or "").strip()
+        if value:
+            spec[key] = value[:80]
+    story_file = proj / "story.json"
+    if story_file.is_file():
+        try:
+            meta = (json.loads(story_file.read_text(encoding="utf-8")) or {}).get("meta") or {}
+            spec["width"] = int(meta.get("width") or 1920)
+            spec["height"] = int(meta.get("height") or 1080)
+        except (ValueError, OSError):
+            pass
+    cover_dir = proj / "cover_assets"
+    cover_dir.mkdir(parents=True, exist_ok=True)
+    for key, field in (("bg", "bg_asset_id"), ("person", "person_asset_id")):
+        asset_id = str(payload.get(field) or "").strip()
+        if not asset_id:
+            continue
+        path, _ = asset_find(asset_id)
+        if not path:
+            raise ValueError(f"素材缺失: {asset_id}")
+        if ASSET_KIND.get(path.suffix.lower().lstrip(".")) != "image":
+            raise ValueError(f"素材非图片: {asset_id}")
+        dst = cover_dir / f"{key}{path.suffix.lower()}"
+        shutil.copy2(path, dst)
+        spec[key] = f"cover_assets/{dst.name}"
+    _atomic_json(proj / "cover.json", spec)
+    log_path = config.DATA_DIR / "video_builds" / f"{project_id}.log"
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    cmd = ["node", "scripts/cover.mjs", project_id]
+    video_dir = Path(__file__).resolve().parents[2] / "ai-workflow" / "video"
+    with open(log_path, "a", encoding="utf-8") as log:
+        log.write(f"\n===== cover {datetime.now().isoformat(timespec='seconds')} =====\n")
+        proc = subprocess.Popen(cmd, cwd=str(video_dir), stdout=subprocess.PIPE,
+                                stderr=subprocess.STDOUT, encoding="utf-8", errors="replace")
+        try:
+            out, _ = proc.communicate(timeout=300)
+        except subprocess.TimeoutExpired:
+            subprocess.run(["taskkill", "/T", "/F", "/PID", str(proc.pid)], capture_output=True)
+            raise ValueError("封面渲染超时（5 分钟）")
+        log.write(out or "")
+    if proc.returncode != 0 or not (proj / "out" / "cover.png").is_file():
+        tail = "\n".join((out or "").strip().splitlines()[-5:])
+        raise ValueError(f"封面渲染失败（exit {proc.returncode}）：{tail[:200]}")
+    project_file = proj / "project.json"
+    if project_file.is_file():
+        try:
+            project = json.loads(project_file.read_text(encoding="utf-8"))
+            project["coverMadeAt"] = datetime.now().isoformat(timespec="seconds")
+            _atomic_json(project_file, project)
+        except (ValueError, OSError):
+            pass
+    return {"output": "out/cover.png", "title": title}
 
 
 def run_build_cli(args) -> int:

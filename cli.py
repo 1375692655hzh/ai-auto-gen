@@ -468,11 +468,15 @@ def workbench_cmd(args) -> int:
                     eb = cfg.get("extra_body")
                     # max_tokens 给足 512: 推理模型即使关思考也可能先烧百余 reasoning token,
                     # 8 会被吃光导致误判连接失败
-                    if vstudio.chat_completions(base, key, model,
+                    content, err = vstudio.chat_completions_ex(base, key, model,
                             [{"role": "user", "content": "ping"}],
                             temperature=0, max_tokens=512, timeout=25,
-                            extra=eb if isinstance(eb, dict) else None):
+                            extra=eb if isinstance(eb, dict) else None)
+                    if content:
                         code, error = 0, ""
+                    elif err:
+                        # 分类提示(401=key错/404=路径错/10061=系统代理), 安全不含 key
+                        code, error = 3, err
         except Exception:
             pass
         print(json.dumps({"ok": code == 0, "model": model, "error": error}))

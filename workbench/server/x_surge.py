@@ -316,25 +316,14 @@ def translate_chain(cfg: dict) -> list:
 
 
 def _call_translate(base: str, key: str, model: str, text: str, max_tokens: int = 600) -> str | None:
-    import urllib.error
-    import urllib.request
-    body = json.dumps({
-        "model": model, "temperature": 0.2, "max_tokens": max_tokens,
-        "messages": [
-            {"role": "system",
-             "content": "你是专业财经翻译。把推文翻译成简体中文: 保留专有名词/股票代码/"
-                        "链接/数字原样, 语气从简, 只输出译文, 不要任何解释。"},
-            {"role": "user", "content": text}],
-    }).encode("utf-8")
-    req = urllib.request.Request(
-        base.rstrip("/") + "/chat/completions", data=body,
-        headers={"Content-Type": "application/json", "Authorization": f"Bearer {key}"})
-    try:
-        with urllib.request.urlopen(req, timeout=30) as r:
-            d = json.loads(r.read())
-        return (d["choices"][0]["message"]["content"] or "").strip() or None
-    except Exception:
-        return None
+    """走 vstudio.chat_completions 统一通道(双路径: 系统代理拦截自动直连重试, 2026-09-10)。"""
+    from . import vstudio
+    return vstudio.chat_completions(base, key, model, [
+        {"role": "system",
+         "content": "你是专业财经翻译。把推文翻译成简体中文: 保留专有名词/股票代码/"
+                    "链接/数字原样, 语气从简, 只输出译文, 不要任何解释。"},
+        {"role": "user", "content": text}],
+        temperature=0.2, max_tokens=max_tokens, timeout=30)
 
 
 def translate_pending(cands: list, limit: int = 60) -> dict:

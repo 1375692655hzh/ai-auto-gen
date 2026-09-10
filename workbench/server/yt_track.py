@@ -230,28 +230,19 @@ def _insight_hot_vids(store: dict, en_ids: set, now: float) -> list:
 
 def _call_insight(base: str, key: str, model: str, title: str, kind: str,
                   tags: list, desc: str) -> str | None:
-    """OpenAI 兼容 /chat/completions(复用 settings.translate 段), 返回模型原文。"""
-    import urllib.request
-    body = json.dumps({
-        "model": model, "temperature": 0.3, "max_tokens": 300,
-        "messages": [
-            {"role": "system",
-             "content": "你是财经视频编辑。根据标题/标签/简介开头, 用一句中文概括该视频讲什么。"
-                        "只输出 JSON: {\"summary\":\"≤40字\",\"tags\":[\"≤8字主题词\"]}, "
-                        "tags 给2-4个, 不要解释。"},
-            {"role": "user",
-             "content": f"标题: {title}\n类型: {kind}\n标签: {', '.join(tags[:8]) or '无'}\n"
-                        f"简介开头: {desc or '无'}"}],
-    }).encode("utf-8")
-    req = urllib.request.Request(
-        base.rstrip("/") + "/chat/completions", data=body,
-        headers={"Content-Type": "application/json", "Authorization": f"Bearer {key}"})
-    try:
-        with urllib.request.urlopen(req, timeout=30) as r:
-            d = json.loads(r.read())
-        return (d["choices"][0]["message"]["content"] or "").strip() or None
-    except Exception:
-        return None
+    """OpenAI 兼容 /chat/completions(复用 settings.translate 段), 返回模型原文。
+    走 vstudio.chat_completions 统一通道(双路径: 系统代理拦截自动直连重试);
+    函数内延迟 import 防 vstudio→yt_track 模块环。"""
+    from . import vstudio
+    return vstudio.chat_completions(base, key, model, [
+        {"role": "system",
+         "content": "你是财经视频编辑。根据标题/标签/简介开头, 用一句中文概括该视频讲什么。"
+                    "只输出 JSON: {\"summary\":\"≤40字\",\"tags\":[\"≤8字主题词\"]}, "
+                    "tags 给2-4个, 不要解释。"},
+        {"role": "user",
+         "content": f"标题: {title}\n类型: {kind}\n标签: {', '.join(tags[:8]) or '无'}\n"
+                    f"简介开头: {desc or '无'}"}],
+        temperature=0.3, max_tokens=300, timeout=30)
 
 
 def _parse_insight(text: str) -> dict | None:
