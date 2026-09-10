@@ -1,58 +1,59 @@
 {
-	"id": "demo-mixed-0909",
-	"title": "【验收】混合渲染演示",
-	"status": "built",
-	"note": "向导确认即审核（workbench 创建）；draft=待审 reviewed=可制作 built=已出片",
-	"created": "2026-09-09",
-	"date": "2026-09-09",
-	"origin": "workbench",
-	"settings": {
-		"aspect": "16:9",
-		"fps": 30,
-		"theme": "vox-collage",
-		"layout": "auto",
-		"enrich": "plain",
-		"generation_method": "inherit",
-		"image_budget": 0,
-		"title": "【验收】混合渲染演示",
-		"voice": "archived-take",
-		"tts_provider": "edge",
-		"beat_overrides": [
-			{
-				"beat_id": "b1",
-				"method": "vox-fast-cut",
-				"file": "va0909012113160.png",
-				"kenburns": "none",
-				"credit": "程序绘制演示素材；历史音频",
-				"asset_id": "va0909012113160"
-			},
-			{
-				"beat_id": "b2",
-				"method": "hand-drawn",
-				"kenburns": "none",
-				"credit": "程序绘制演示素材；历史音频"
-			},
-			{
-				"beat_id": "b3",
-				"method": "upload_image",
-				"file": "va0909012113164.png",
-				"kenburns": "none",
-				"credit": "程序绘制演示素材；历史音频",
-				"asset_id": "va0909012113164"
-			},
-			{
-				"beat_id": "b4",
-				"method": "upload_video",
-				"file": "va0909012113169.mp4",
-				"kenburns": "none",
-				"credit": "程序绘制演示素材；历史音频",
-				"asset_id": "va0909012113169"
-			}
-		],
-		"materials_dir": "E:\\ai-gen-article-publish\\ai-workflow\\video\\videos\\demo-mixed-0909\\input\\materials",
-		"require_selected_audio": true
-	},
-	"builtAt": "2026-09-10",
-	"output": "out/final.mp4 (0.56 min)",
-	"qaStatus": "built"
+  "id": "demo-mixed-0909",
+  "title": "【验收】混合渲染演示",
+  "status": "built",
+  "note": "向导确认即审核（workbench 创建）；draft=待审 reviewed=可制作 built=已出片",
+  "created": "2026-09-09",
+  "date": "2026-09-09",
+  "origin": "workbench",
+  "settings": {
+    "aspect": "16:9",
+    "fps": 30,
+    "theme": "vox-collage",
+    "layout": "auto",
+    "enrich": "plain",
+    "generation_method": "inherit",
+    "image_budget": 0,
+    "title": "【验收】混合渲染演示",
+    "voice": "archived-take",
+    "tts_provider": "edge",
+    "beat_overrides": [
+      {
+        "beat_id": "b1",
+        "method": "vox-fast-cut",
+        "file": "va0909012113160.png",
+        "kenburns": "none",
+        "credit": "程序绘制演示素材；历史音频",
+        "asset_id": "va0909012113160"
+      },
+      {
+        "beat_id": "b2",
+        "method": "hand-drawn",
+        "kenburns": "none",
+        "credit": "程序绘制演示素材；历史音频"
+      },
+      {
+        "beat_id": "b3",
+        "method": "upload_image",
+        "file": "va0909012113164.png",
+        "kenburns": "none",
+        "credit": "程序绘制演示素材；历史音频",
+        "asset_id": "va0909012113164"
+      },
+      {
+        "beat_id": "b4",
+        "method": "upload_video",
+        "file": "va0909012113169.mp4",
+        "kenburns": "none",
+        "credit": "程序绘制演示素材；历史音频",
+        "asset_id": "va0909012113169"
+      }
+    ],
+    "materials_dir": "E:\\ai-gen-article-publish\\ai-workflow\\video\\videos\\demo-mixed-0909\\input\\materials",
+    "require_selected_audio": true
+  },
+  "builtAt": "2026-09-10",
+  "output": "out/final.mp4 (0.56 min)",
+  "qaStatus": "built",
+  "coverMadeAt": "2026-09-10T18:05:52"
 }

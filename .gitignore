@@ -52,3 +52,4 @@ Thumbs.db
 # 视频项目素材媒体(二进制不入库; 项目 json/md 照常提交)
 /ai-workflow/video/videos/*/input/materials/
 /ai-workflow/video/videos/*/materials/
+/ai-workflow/video/videos/*/cover_assets/
