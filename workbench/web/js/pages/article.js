@@ -1,6 +1,6 @@
-/* 图文页: 五子页容器(推荐信息 / 蹭蹭流量 / 内容生成 / 内容发布 / 自动化任务);
+/* 图文页: 六子页容器(推荐信息 / 蹭蹭流量 / 内容生成 / 内容发布 / 自动化任务 / 账号管理);
    结构定稿 = MoA 汇总(05-codex/06-cursor/07-主控):
-   账号追踪/账号管理已于 2026-09-10 迁往追踪页(track.js)。
+   账号追踪已迁追踪页(track.js); 账号管理 2026-09-11 经用户指令原样还原(29cab41 误摘)。
    · 跨页素材通道 = WB.basket(localStorage, 与资讯页素材篮打通)
    · 真实数据: /recommend 打分排序 / drafts CRUD / ledger 只读 / automation CRUD
    · 桩: 真生成 / 真发布(--draft 红线) / 真实调度 —— 全部灰显附 CLI 提示 */
@@ -15,6 +15,9 @@ WB.pages.article = {
       dict: { markets: [] },
       tagEnums: { positionings: ["官方", "机构", "大V", "快讯源", "新闻源"],
                   item_types: ["聚合", "快讯", "资讯", "分析"] },
+      /* ── 账号管理(全 X 池只读 + 本地偏好 x_account_prefs.json) ── */
+      xaccts: { items: [], meta: {}, q: "", pos: "", followOnly: false, loading: false },
+      xBusyId: "",   /* 看与不看开关进行中的 handle */
       /* ── 推荐信息/蹭蹭流量(X 统一数据面: 同一加载器, 两份预设状态) ──
          reco=选素材视角(默认时间序), surge=卡位视角(默认起爆序); 全部只显示 X 条目 */
       sinceOpts: [["1h", "近1小时"], ["6h", "近6小时"], ["12h", "近12小时"], ["24h", "近1天"], ["48h", "近2天"]],
@@ -70,9 +73,13 @@ WB.pages.article = {
       personaPresets: [["macro_flow", "宏观流动性"], ["falsify", "证伪交易员"], ["micro_mech", "定价机制"],
                        ["odds", "赔率视角"], ["risk_first", "风险官"], ["custom", "自填"]],
       persona: { id: "falsify", custom: "" }, personaCustomShow: false, personaSaving: false,
-      /* 用户自定义人设卡(settings x_reply.personas, 可增删改; 字段长度与后端 _P_CAPS 对齐) */
+      personaOpen: false,                          /* 选择栏展开态 */
+      /* 内置人设卡全字段(/wb-api/x-reply/personas 下发, 右栏详情展示+播种用) */
+      personaCards: {},
+      personasSeeded: false,
+      /* 人设库(settings x_reply.personas): 统一用户卡 {id,label,one_liner,prompt},
+         预设播种后人人平等可删改; prompt 非空时服务端直接当整段提示词用 */
       userPersonas: [],
-      personaEdit: { show: false, id: "", label: "", one_liner: "", lens: "", voice: "", do: "", dont: "" },
       flows: [], template: "",
       editingId: "", editorTitle: "", editorContent: "",
       drafts: [], runs: [],
@@ -92,6 +99,30 @@ WB.pages.article = {
     tab(t) { if (t === "gen" && !this.historyLoaded) this.loadGenHistory(); },
   },
   computed: {
+    /* 账号管理行过滤: 关键词(名称/handle/市场) + 定位 chips + 仅看关注; 排序服务端已定 */
+    xacctRows() {
+      const q = this.xaccts.q.trim().toLowerCase();
+      let rows = this.xaccts.items;
+      if (this.xaccts.pos) rows = rows.filter((a) => a.positioning === this.xaccts.pos);
+      if (this.xaccts.followOnly) rows = rows.filter((a) => a.follow);
+      if (q) rows = rows.filter((a) =>
+        (a.name || "").toLowerCase().includes(q) ||
+        (a.handle || "").toLowerCase().includes(q) ||
+        (a.markets || []).some((m) => m.toLowerCase().includes(q)));
+      return rows;
+    },
+    /* 当前人设: 用户卡 > 内置卡 > 自填 */
+    curPersona() {
+      const id = this.persona.id;
+      const up = this.userPersonas.find((p) => p.id === id);
+      if (up) return { kind: "user", card: up, label: up.label || id };
+      if (id === "custom") return { kind: "custom", label: "自填" };
+      const c = this.personaCards[id];
+      if (c) return { kind: "builtin", label: c.label || id };
+      return { kind: "builtin", label: this.personaLabel(id) };
+    },
+    /* 选中卡的响应式引用(编辑面板 v-model 就地改, 保存时整库 PUT) */
+    curCard() { return this.userPersonas.find((p) => p.id === this.persona.id) || null; },
     wordCount() { return (this.editorContent || "").length; },
     onModules() { return this.modules.filter((m) => m.on).map((m) => m.id); },
     /* X 计权字数(与 server gcompose.weighted_len 同规则: CJK/emoji×2, URL 恒=23) */
@@ -159,7 +190,46 @@ WB.pages.article = {
         { id: "auto", title: "自动化任务", cnt: this.tasks.length || "",
           icon: I('<circle cx="12" cy="12" r="9"/><polyline points="12 7 12 12 15.5 14"/>'),
           onPick: () => { this.tab = "auto"; } },
+        { id: "xaccts", title: "账号管理", cnt: this.xaccts.meta.count || "",
+          icon: I('<path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/>'),
+          onPick: () => { this.tab = "xaccts"; } },
       ], this.tab);
+    },
+    /* ── 账号管理: 全池只读, 关注/本地备注写 data/workbench/x_account_prefs.json ── */
+    async loadXaccts() {
+      this.xaccts.loading = true;
+      try {
+        const d = await WB.api.get("/x-accounts-manage");
+        this.xaccts.items = d.accounts || [];
+        this.xaccts.meta = { count: d.count, followed_n: d.followed_n,
+                             disabled_n: d.disabled_n, err: "" };
+      } catch (e) {
+        this.xaccts.items = [];
+        this.xaccts.meta = { ...(this.xaccts.meta || {}), err: (e && e.error) || "接口不可用" };
+      }
+      this.xaccts.loading = false;
+      this.registerSubs();
+    },
+    async saveXPref(a, patch) {
+      try { await WB.api.post("/x-account-pref", { handle: a.handle, ...patch }); }
+      catch (e) { WB.toast("保存失败: " + (e.error || "")); }
+    },
+    toggleXFollow(a) {
+      a.follow = !a.follow;                              // 乐观更新, 失败由 toast 提示
+      this.xaccts.meta.followed_n = (this.xaccts.meta.followed_n || 0) + (a.follow ? 1 : -1);
+      this.saveXPref(a, { follow: a.follow });
+    },
+    saveXNote(a) { this.saveXPref(a, { note: a.local_note }); },
+    /* 看与不看: 停用后该账号内容从推荐信息/蹭蹭流量消失且不再采集(本地偏好, 池文件不动) */
+    async toggleXEnabled(a) {
+      if (!a.pool_enabled) { WB.toast("该账号在池内被停用, 须改池文件或 local 覆盖启用"); return; }
+      this.xBusyId = a.handle;
+      try {
+        const d = await WB.api.post("/x-accounts/" + a.handle + "/enabled", { on: !a.enabled });
+        a.enabled = d.enabled;
+        this.xaccts.meta.disabled_n = Math.max(0, (this.xaccts.meta.disabled_n || 0) + (d.enabled ? -1 : 1));
+      } catch (e) { WB.toast("切换失败: " + (e.error || "")); }
+      this.xBusyId = "";
     },
     go(t) { this.tab = t; if (WB.shell) WB.shell.setSub(t); },
 
@@ -311,32 +381,66 @@ WB.pages.article = {
       } catch (e) { WB.toast("人设保存失败: " + ((e && e.error) || "")); }
       this.personaSaving = false;
     },
-    /* 用户自定义人设卡: 增删改(settings x_reply.personas 整表替换; 人设进缓存哈希, 改后旧评论自动重生成) */
+    /* 人设库: 增删改(settings x_reply.personas 整表替换; 人设进缓存哈希, 改后旧评论自动重生成) */
     personaLabel(pid) { return (this.userPersonas.find(p => p.id === pid) || {}).label || pid; },
+    presetCard(pid) { return this.personaCards[pid] || {}; },
     newPersona() {
-      this.personaEdit = { show: true, id: "u_" + Date.now().toString(36),
-        label: "", one_liner: "", lens: "", voice: "", do: "", dont: "" };
+      const card = { id: "u_" + Date.now().toString(36), label: "新人设", one_liner: "", prompt: "" };
+      this.userPersonas.push(card);
+      this._saveLib().then(() => {
+        this.persona.id = card.id; this.personaCustomShow = false;
+        this.personaOpen = false; this.savePersona();
+        WB.toast("已新建, 在下方填概要与提示词");
+      });
     },
-    editPersona(p) { this.personaEdit = { show: true, ...p }; },
-    async savePersonaCard() {
-      const e = this.personaEdit;
-      if (!((e.label || "").trim())) { WB.toast("标签不能为空"); return; }
-      const card = { id: e.id, label: e.label.trim(), one_liner: e.one_liner || "",
-                     lens: e.lens || "", voice: e.voice || "", do: e.do || "", dont: e.dont || "" };
-      const i = this.userPersonas.findIndex(p => p.id === card.id);
-      if (i >= 0) this.userPersonas.splice(i, 1, card); else this.userPersonas.push(card);
-      try {
-        await WB.api.put("/settings", { x_reply: { personas: this.userPersonas } });
-        WB.toast("人设卡已保存"); e.show = false;
-      } catch (err) { WB.toast("保存失败: " + ((err && err.error) || "")); }
+    async saveCurCard() {
+      const c = this.curCard;
+      if (!c) return;
+      if (!((c.label || "").trim())) { WB.toast("名称不能为空"); return; }
+      c.label = c.label.trim();
+      await this._saveLib();
+      WB.toast("人设已保存");
+    },
+    async _saveLib() {
+      try { await WB.api.put("/settings", { x_reply: { personas: this.userPersonas } }); }
+      catch (err) { WB.toast("保存失败: " + ((err && err.error) || "")); }
     },
     async deletePersona(p) {
       this.userPersonas = this.userPersonas.filter(x => x.id !== p.id);
       try {
         await WB.api.put("/settings", { x_reply: { personas: this.userPersonas } });
-        if (this.persona.id === p.id) { this.persona.id = "falsify"; await this.savePersona(); }
+        if (this.persona.id === p.id) {           // 删的是当前人设 → 落到库第一张, 空了落自填
+          const nxt = this.userPersonas[0];
+          this.persona.id = nxt ? nxt.id : "custom";
+          this.personaCustomShow = !nxt;
+          await this.savePersona();
+        }
         WB.toast(`人设「${p.label}」已删除`);
       } catch (err) { WB.toast("删除失败: " + ((err && err.error) || "")); }
+    },
+    /* 预设播种: 人设库=用户自己的卡列表(人人平等可删改); 服务端预设只是出厂副本,
+       首次把 5 张预设落成用户卡(personas_seeded 防重复), 之后官方改预设文案不影响你的库,
+       想要新版本用「恢复默认」。 */
+    async seedPersonas() {
+      if (!Object.keys(this.personaCards).length) return;   // 端点没取到就不播
+      await this._writePresetCards(Object.keys(this.personaCards), true);
+    },
+    async resetPersonaLib() {
+      await this._writePresetCards(Object.keys(this.personaCards), true);
+      WB.toast("已恢复默认预设(你自己的卡保留)");
+    },
+    async _writePresetCards(presetIds, keepMine) {
+      const fresh = presetIds.map((id) => ({ id, ...this.personaCards[id] }));
+      const mine = keepMine ? this.userPersonas.filter((p) => !presetIds.includes(p.id)) : [];
+      this.userPersonas = [...fresh, ...mine];
+      this.personasSeeded = true;
+      try {
+        await WB.api.put("/settings", { x_reply: { personas: this.userPersonas, personas_seeded: true } });
+      } catch (e) { WB.toast("人设库写入失败"); }
+      if (!this.userPersonas.some((p) => p.id === this.persona.id) && this.persona.id !== "custom") {
+        this.persona.id = "falsify";                 // 当前人设不在库里了 → 落回证伪交易员
+        await this.savePersona();
+      }
     },
     xfToggleChip(key, field, val) {
       const arr = this[key][field];
@@ -791,13 +895,29 @@ WB.pages.article = {
       this.persona.custom = (xp.persona || {}).custom || "";
       this.personaCustomShow = this.persona.id === "custom";
       this.userPersonas = Array.isArray(xp.personas) ? xp.personas : [];
+      this.personasSeeded = !!xp.personas_seeded;
     } catch (e) {} // 取不到设置时保留现有默认值; 草稿恢复在此后覆盖。
+    try {
+      const d2 = await WB.api.get("/x-reply/personas");  // 内置人设卡全字段(右栏详情展示+播种)
+      const m = {};
+      ((d2 || {}).personas || []).forEach((p) => { m[p.id] = p; });
+      this.personaCards = m;
+      if (!this.personasSeeded) await this.seedPersonas();   // 首跑: 预设播种成你的卡
+      // 旧播种卡迁移: 缺 prompt 字段的(早期六字段卡)用预设渲染全文补上, 侧栏才可编辑提示词
+      let dirty = false;
+      this.userPersonas.forEach((p) => {
+        if (!p.prompt && this.personaCards[p.id] && this.personaCards[p.id].prompt) {
+          p.prompt = this.personaCards[p.id].prompt; dirty = true;
+        }
+      });
+      if (dirty) await this._saveLib();
+    } catch (e) {}
     this.registerSubs();
     this.syncMaterials();
     this.initBasketIds();
     this.loadDict(); this.loadX(); this.loadXF("xfReco"); this.loadSurgeRss(); this.loadXc();
     this.loadFlows(); this.loadRuns(); this.loadDrafts();
-    this.loadAccounts(); this.loadLedger(); this.loadTasks();
+    this.loadAccounts(); this.loadLedger(); this.loadTasks(); this.loadXaccts();
     WB.api.get("/gen-jobs").then((d) => {           // 页面重开时有未完成的生成 → 续上轮询
       const j = ((d || {}).compose) || {};
       if (j.running) { this.genJob = j; this.genTimer = setInterval(this.pollGen, 2000); }
@@ -942,44 +1062,55 @@ WB.pages.article = {
       <!-- 右侧栏: 评论人设(grok v2), 存 settings; 人设进提示词+缓存 key, 换人设旧评论自动失效。
            内置 5 预设 + 用户自定义卡(可增删改) + 自填补充 -->
       <aside class="surge-side">
-      <div class="persona-bar">
-        <span class="lab">评论人设</span>
-        <span v-for="[pid, label] in personaPresets.filter(c => c[0] !== 'custom')" :key="pid" class="chip"
-              :class="{on: persona.id === pid}" @click="pickPersona(pid)">{{ label }}</span>
-        <span v-for="p in userPersonas" :key="p.id" class="chip has-tools"
-              :class="{on: persona.id === p.id}" @click="pickPersona(p.id)"
-              :title="p.one_liner || p.label">{{ p.label }}
-          <i class="tool" @click.stop="editPersona(p)" title="编辑">✎</i>
-          <i class="tool" @click.stop="deletePersona(p)" title="删除">✕</i>
-        </span>
-        <span class="chip" :class="{on: persona.id === 'custom'}" @click="pickPersona('custom')"
-              title="不建卡, 只写一段口吻补充(≤200字)">自填</span>
-        <span class="chip add" @click="newPersona()" title="新建自定义人设卡">＋ 新建</span>
-      </div>
-      <!-- 人设卡编辑器: 六字段骨架 + 通用兜底 -->
-      <div v-if="personaEdit.show" class="persona-custom">
-        <div class="persona-edit">
-          <label>标签<input v-model="personaEdit.label" maxlength="12" placeholder="如: 期权流"></label>
-          <label>一句话<input v-model="personaEdit.one_liner" maxlength="40" placeholder="如: 只做开盘前后的伽马方向"></label>
-          <label>判断程序<input v-model="personaEdit.lens" maxlength="30" placeholder="如: 伽马挤压/大盘仓位"></label>
-          <label>口吻<input v-model="personaEdit.voice" maxlength="30" placeholder="如: 短促直接, 不给模棱话"></label>
-          <label>本条要做<input v-model="personaEdit.do" maxlength="40" placeholder="如: 给可观察的开仓信号"></label>
-          <label>本条不做<input v-model="personaEdit.dont" maxlength="40" placeholder="如: 喊单/给目标价"></label>
+      <!-- 人设面板: 选择栏点击展开人设库(行右 ✕ 删除, 底部新建/恢复默认);
+           选中后下方给概要与提示词, 均可编辑; 改提示词=渲染哈希变=旧评论自动作废 -->
+      <div class="persona-bar persona-panel">
+        <div class="pp-title">评论人设</div>
+        <div class="pp-sel" @click="personaOpen = !personaOpen">
+          <span class="pp-sel-name">{{ curPersona.label }}</span>
+          <span class="pp-sel-arrow">{{ personaOpen ? '▴' : '▾' }}</span>
         </div>
-        <div class="persona-foot">
-          <button class="btn" @click="savePersonaCard()">保存人设卡</button>
-          <span class="act" @click="personaEdit.show = false">取消</span>
-          <span class="muted">留空的字段用通用骨架; 修改自动使该人设的旧评论作废重生成</span>
+        <div v-if="personaOpen" class="pp-list">
+          <div v-for="p in userPersonas" :key="p.id" class="pp-item"
+               :class="{on: persona.id === p.id}">
+            <span class="pp-item-name" @click="pickPersona(p.id); personaOpen = false"
+                  :title="p.one_liner || p.label">{{ p.label }}</span>
+            <i class="tool" @click.stop="deletePersona(p)" title="删除">✕</i>
+          </div>
+          <div class="pp-item" :class="{on: persona.id === 'custom'}">
+            <span class="pp-item-name" @click="pickPersona('custom'); personaOpen = false"
+                  title="不建卡, 只写一段口吻补充(≤200字)">自填(不建卡)</span>
+          </div>
+          <div class="pp-item pp-new" @click="newPersona()">＋ 新建人设</div>
+          <div class="pp-item pp-reset" @click="resetPersonaLib(); personaOpen = false"
+               title="把 5 张预设恢复成出厂文案(你自建的卡不受影响)">↺ 恢复默认预设</div>
         </div>
-      </div>
-      <div v-if="personaCustomShow" class="persona-custom">
-        <textarea v-model="persona.custom" maxlength="200" rows="2"
-                  placeholder="自定义口吻/判断程序, 如: 只做美股的期权流交易员, 关注伽马挤压和大盘仓位, 说话短促直接…(≤200字, 留空则用通用骨架)"></textarea>
-        <div class="persona-foot">
-          <span class="muted">{{ (persona.custom || '').length }}/200</span>
-          <button class="btn" :disabled="personaSaving" @click="savePersona()">
-            {{ personaSaving ? '保存中…' : '保存人设' }}</button>
-          <span class="muted">保存后新点「评论生成」即生效; 已生成的旧人设评论自动作废重生成</span>
+        <div class="pp-current">
+          <template v-if="curPersona.kind === 'custom'">
+            <label class="pp-ed-lab">自填补充(≤200字, 拼在提示词后)
+              <textarea v-model="persona.custom" maxlength="200" rows="3"
+                        placeholder="自定义口吻/判断程序, 如: 只做美股的期权流交易员, 关注伽马挤压和大盘仓位…"></textarea></label>
+            <div class="persona-foot">
+              <span class="muted">{{ (persona.custom || '').length }}/200</span>
+              <button class="btn" :disabled="personaSaving" @click="savePersona()">
+                {{ personaSaving ? '保存中…' : '保存' }}</button>
+            </div>
+          </template>
+          <template v-else-if="curCard">
+            <label class="pp-ed-lab">名称
+              <input v-model="curCard.label" maxlength="12"></label>
+            <label class="pp-ed-lab">概要
+              <input v-model="curCard.one_liner" maxlength="40"
+                     placeholder="一句话说清这个人设怎么看市场"></label>
+            <label class="pp-ed-lab">提示词
+              <textarea v-model="curCard.prompt" maxlength="240" rows="8"
+                        placeholder="人设判断程序全文; 留空则按服务端骨架渲染"></textarea></label>
+            <div class="persona-foot">
+              <span class="muted">{{ (curCard.prompt || '').length }}/240</span>
+              <button class="btn" @click="saveCurCard()">保存</button>
+            </div>
+            <div class="muted pp-hint">保存后新点「评论生成」即生效; 已生成的旧评论自动作废重生成</div>
+          </template>
         </div>
       </div>
       </aside>
@@ -1466,6 +1597,59 @@ WB.pages.article = {
       </div>
     </div>
 
-    <!-- ═══ 子页5: 账号追踪(自选 X 账号粉丝/增粉/更新/流量日快照; 库 data/workbench/x_track.json) ═══ -->
+    <!-- ═══ 子页6: 账号管理(全 X 池账号信息来源; 池只读, 关注/备注为板块四自有偏好) ═══ -->
+    <div v-show="tab==='xaccts'">
+      <div class="card">
+        <h3>X 账号池({{ xaccts.meta.count || 0 }})
+          <span class="muted">关注 {{ xaccts.meta.followed_n || 0 }} ·
+            停用 {{ xaccts.meta.disabled_n || 0 }} · 显示 {{ xacctRows.length }}</span>
+          <span v-if="xaccts.meta.err" class="badge red" style="margin-left:8px">{{ xaccts.meta.err }}</span></h3>
+        <div class="feed-toolbar">
+          <input type="text" v-model="xaccts.q" class="mat-search" placeholder="搜索(名称/handle/市场)" style="width:220px">
+          <span class="chip" :class="{on: !xaccts.pos}" @click="xaccts.pos=''">全部</span>
+          <span v-for="p in tagEnums.positionings" :key="p" class="chip"
+                :class="{on: xaccts.pos === p}" @click="xaccts.pos = xaccts.pos === p ? '' : p">{{ p }}</span>
+          <span class="chip" :class="{on: xaccts.followOnly}" @click="xaccts.followOnly=!xaccts.followOnly">★ 仅看关注</span>
+          <span style="flex:1"></span>
+          <button class="btn" @click="loadXaccts">{{ xaccts.loading ? '刷新中…' : '刷新' }}</button>
+        </div>
+        <div class="muted" style="margin:6px 0 10px">
+          池数据来自板块一 twitter_pool.yaml(只读); 启用开关=本机偏好(停用后推荐信息/蹭蹭流量
+          不再出现该账号内容, 也不再采集), 关注与备注同样只存 data/workbench/。</div>
+        <table class="tbl">
+          <thead><tr><th>账号</th><th>市场</th><th>定位</th><th>标签</th><th>粉丝</th><th>启用</th><th>关注</th><th>备注</th></tr></thead>
+          <tbody>
+            <tr v-for="a in xacctRows" :key="a.handle"
+                :style="{background: a.follow ? 'var(--accent-weak)' : '',
+                         opacity: a.enabled ? '' : .5}">
+              <td>
+                <a :href="a.homepage" target="_blank" rel="noopener"><b>{{ a.name || '@'+a.handle }}</b></a>
+                <span v-if="a.verified" class="badge blue" title="X 认证账号" style="margin-left:4px">✓</span>
+                <div class="muted" style="font-size:11px">@{{ a.handle }}<template v-if="a.bio"> · {{ a.bio }}</template></div>
+              </td>
+              <td><span v-for="m in a.markets" :key="m" class="badge" style="margin-right:4px">{{ m }}</span></td>
+              <td><span v-if="a.positioning" class="badge blue">{{ a.positioning }}</span>
+                <div class="muted" style="font-size:11px" v-if="a.role">{{ a.role }}</div></td>
+              <td><span v-if="a.tier" class="badge yellow">{{ a.tier }}</span>
+                <span v-if="a.priority" class="badge" style="margin-left:4px">{{ a.priority }}</span>
+                <div class="muted" style="font-size:11px" v-if="a.note" :title="a.note">{{ a.note.slice(0, 24) }}</div></td>
+              <td class="mono">{{ a.followers ? fmtFol(a.followers) : '—' }}</td>
+              <td><span class="switch" :class="{ on: a.enabled, busy: xBusyId === a.handle }"
+                    role="switch" tabindex="0" :aria-checked="a.enabled ? 'true' : 'false'"
+                    :title="a.pool_enabled
+                      ? (a.enabled ? '停看(推荐/蹭蹭流量隐藏此账号)' : '恢复看(重新出现在推荐/蹭蹭流量)')
+                      : '池内停用账号 — 须改池文件或 local 覆盖启用'"
+                    @click="toggleXEnabled(a)" @keydown.enter="toggleXEnabled(a)"></span></td>
+              <td><span class="act" :style="{color: a.follow ? 'var(--yellow)' : ''}"
+                    @click="toggleXFollow(a)">{{ a.follow ? '★ 已关注' : '☆ 关注' }}</span></td>
+              <td><input type="text" v-model="a.local_note" @change="saveXNote(a)" placeholder="本地备注"
+                         style="width:150px;font-size:11.5px"></td>
+            </tr>
+            <tr v-if="!xacctRows.length && !xaccts.loading">
+              <td colspan="8" class="muted">无匹配账号</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
   </div>`,
 };
