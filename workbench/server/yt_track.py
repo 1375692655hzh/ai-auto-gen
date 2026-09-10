@@ -638,13 +638,33 @@ def _delta(series: list, now: float, win_s: int, tol_s: int) -> tuple[int | None
     return last["v"] - anchor["v"], True
 
 
+_VIEW_CACHE: dict = {"at": 0.0, "key": None, "data": None}
+_VIEW_TTL_S = 60.0
+
+
+def _mtime(p) -> int:
+    try:
+        return p.stat().st_mtime_ns
+    except OSError:
+        return 0
+
+
 def build_view(range: str = "24h", sort: str = "views", kind: str = "all",
                channel: str = "", q: str = "", limit: int = 100) -> dict:
     """热点榜主表=启用频道的窗口内视频, 快照差分派生增量; 绝不外呼。
     sort: views(累计播放, 默认=用户主视角) | delta24h | delta7d | rate(折合日速) | newest。
-    增量 None/不可信一律沉底; 新视频用首见基线(basis=first_seen, 前端标 *)。"""
+    增量 None/不可信一律沉底; 新视频用首见基线(basis=first_seen, 前端标 *)。
+    视图层缓存(2026-09-11 复审 P1): 参数+输入文件 mtime 为键, 60s TTL 兜底——
+    旧版每请求全量解析 yt_videos.json 并逐视频重算差分。"""
     range = range if range in _RANGES else "24h"
     sort = sort if sort in _SORTS else "views"
+    key = (range, sort, kind, channel, q, int(limit),
+           _mtime(VIDEOS_FILE), _mtime(config.DATA_DIR / "yt_channels.json"),
+           _mtime(config.DATA_DIR / "settings.json"))
+    hit = _VIEW_CACHE["data"]
+    if hit is not None and _VIEW_CACHE["key"] == key \
+            and time.time() - _VIEW_CACHE["at"] < _VIEW_TTL_S:
+        return hit
     now = time.time()
     store = load_store()
     channels = [c for c in config.load_yt_channels()
@@ -782,20 +802,23 @@ def build_view(range: str = "24h", sort: str = "views", kind: str = "all",
             "rate_per_day": round(rate) if rate is not None else None,
         })
     tcfg = config.load().get("translate") or {}
-    return {"items": rows, "total": total, "insights": insights,
-            "meta": {"range": range, "sort": sort, "kind": kind, "channel": channel, "tracked": len(store.get("videos") or {}),
-                     "configured": bool(api_key()),
-                     "insight_configured": bool(tcfg.get("base_url") and tcfg.get("api_key")
-                                                and tcfg.get("model")),
-                     "enabled_channels": len(en_ids),
-                     "updated_at": store.get("updated_at"),
-                     "last_collect_at": lc.get("finished_at"),
-                     "data_age_min": data_age_min,
-                     "cold_start": cold_start,
-                     "caliber": store.get("caliber"),
-                     "rule": "Δviews=本地快照差分; 无快照/不可信一律沉底; 带*为新视频首见基线(偏小); "
-                             "Shorts=时长≤3分钟; 播放口径 2026-08-24 起=开始播放即计, 跨口径不可比斜率; "
-                             "订阅数为公开取整仅展示"}}
+    result = {"items": rows, "total": total, "insights": insights,
+              "meta": {"range": range, "sort": sort, "kind": kind, "channel": channel, "tracked": len(store.get("videos") or {}),
+                       "configured": bool(api_key()),
+                       "insight_configured": bool(tcfg.get("base_url") and tcfg.get("api_key")
+                                                  and tcfg.get("model")),
+                       "enabled_channels": len(en_ids),
+                       "updated_at": store.get("updated_at"),
+                       "last_collect_at": lc.get("finished_at"),
+                       "data_age_min": data_age_min,
+                       "cold_start": cold_start,
+                       "caliber": store.get("caliber"),
+                       "rule": "Δviews=本地快照差分; 无快照/不可信一律沉底; 带*为新视频首见基线(偏小); "
+                               "Shorts=时长≤3分钟; 播放口径 2026-08-24 起=开始播放即计, 跨口径不可比斜率; "
+                               "订阅数为公开取整仅展示"}}
+    _VIEW_CACHE.clear()
+    _VIEW_CACHE.update({"at": time.time(), "key": key, "data": result})
+    return result
 
 
 def status_payload() -> dict:

@@ -67,9 +67,12 @@ def _detect_fallback(base: str, key: str, model: str) -> dict:
 
 
 
-def create_app() -> FastAPI:
+def create_app(bind_host: str = "127.0.0.1") -> FastAPI:
     app = FastAPI(title="aag-workbench", version="0.1", docs_url=None, redoc_url=None)
     vstudio.migrate_legacy_assets()
+    scrubbed = vstudio.scrub_voice_job_keys()      # 存量 _job.json 明文 key 一次性擦除
+    if scrubbed:
+        print(f"安全迁移: 已擦除 {scrubbed} 个历史语音任务文件里的明文 Key")
 
     # ── 数据源代理(前端唯一取数口) ──────────────────────────────────────────
     @app.get("/wb-api/v1/{path:path}")
@@ -165,12 +168,13 @@ def create_app() -> FastAPI:
         return {"removed": 1}
 
     @app.post("/wb-api/videos/{vid}/cover")
-    async def video_cover(vid: str, request: Request):
-        """封面制作：背景+人物形象+标题 → Remotion still 出 out/cover.png。"""
+    def video_cover(vid: str, body: dict = Body(default=None)):
+        """封面制作：背景+人物形象+标题 → Remotion still 出 out/cover.png。
+        同步 def 走 Starlette 线程池——渲染分钟级, 绝不能在 async 里阻塞事件循环。"""
         import re as _re
         if not _re.fullmatch(r"[A-Za-z0-9_\-]+", vid):
             return JSONResponse({"error": "bad_vid"}, status_code=400)
-        body = await request.json()
+        body = body or {}
         try:
             return vstudio.run_cover(vid, body)
         except ValueError as e:
@@ -179,13 +183,13 @@ def create_app() -> FastAPI:
             return JSONResponse({"error": type(e).__name__, "hint": str(e)[:200]}, status_code=500)
 
     @app.post("/wb-api/videos/{vid}/rename")
-    async def video_rename(vid: str, request: Request):
+    def video_rename(vid: str, body: dict = Body(default=None)):
         """重命名视频项目(改 project.json 标题, 经 CLI 子进程写板块二)。"""
         import re
         import subprocess
         if not re.fullmatch(r"[A-Za-z0-9_\-]+", vid):
             return JSONResponse({"error": "bad_vid"}, status_code=400)
-        body = await request.json()
+        body = body or {}
         title = str(body.get("title") or "").strip()
         if not title or len(title) > 60:
             return JSONResponse({"error": "标题需为 1-60 字"}, status_code=400)
@@ -355,10 +359,10 @@ def create_app() -> FastAPI:
 
     # ── 内容生成·信息检索: 素材回查全文/同簇多源/同标的扩展(纯只读, 零 LLM) ────
     @app.post("/wb-api/retrieve")
-    async def retrieve_view(request: Request):
-        body = await request.json()
+    def retrieve_view(body: dict = Body(default=None)):
+        """同步 def 走线程池: retrieve 内部连打数据站(锚定+扩展), 不能阻塞事件循环。"""
         try:
-            return retrieve.run(body)
+            return retrieve.run(body or {})
         except proxy.UpstreamError as e:
             return JSONResponse({"error": str(e), "hint": "先跑 python cli.py sources serve"},
                                 status_code=e.code or 502)
@@ -382,15 +386,10 @@ def create_app() -> FastAPI:
         return {"started": True}
 
     @app.post("/wb-api/test-llm")
-    async def test_llm(request: Request):
+    def test_llm(body: dict = Body(default=None)):
+        """同步 def 走线程池: CLI 子进程最长 40s, 不能阻塞事件循环。"""
         import subprocess
-        model_id = ""
-        try:                                        # 可选 body: {"model_id": "..."} 只测指定链位
-            body = await request.json()
-            if isinstance(body, dict):
-                model_id = str(body.get("model_id") or "")
-        except Exception:
-            pass
+        model_id = str((body or {}).get("model_id") or "")
         cli = Path(__file__).resolve().parents[2] / "cli.py"
         cmd = [*config.py_cmd(), str(cli), "workbench", "test-llm"]
         if model_id:
@@ -449,12 +448,9 @@ def create_app() -> FastAPI:
 
     # ── 浏览层按需翻译: 视口内缺译文卡片批量翻, 哈希缓存落盘, 免费链(ondemand_translate) ──
     @app.post("/wb-api/translate")
-    async def wb_translate(request: Request):
-        try:
-            body = await request.json()
-        except Exception:
-            return JSONResponse({"error": "bad_json"}, status_code=400)
-        items = body.get("items")
+    def wb_translate(body: dict = Body(default=None)):
+        """同步 def 走线程池: 翻译批是逐条 LLM 外呼+节流, 最长分钟级, 不能阻塞事件循环。"""
+        items = (body or {}).get("items")
         if not isinstance(items, list) or not items:
             return JSONResponse({"error": "items 必须是非空数组"}, status_code=400)
         try:
@@ -902,11 +898,16 @@ def create_app() -> FastAPI:
             return JSONResponse({"error": "bad_content_length"}, status_code=400)
         if length > limit:
             return JSONResponse({"error": "too_large"}, status_code=400)
-        body = await request.body()
+        # 流式读体+累计计数(2026-09-11 复审 P2): 无/谎报 Content-Length 的分块请求
+        # 不能再整包进内存打满; 超限即断, 不落盘不返回部分数据
+        buf = bytearray()
+        async for chunk in request.stream():
+            buf.extend(chunk)
+            if len(buf) > limit:
+                return JSONResponse({"error": "too_large"}, status_code=400)
+        body = bytes(buf)
         if not body:
             return JSONResponse({"error": "empty_body"}, status_code=400)
-        if len(body) > limit:
-            return JSONResponse({"error": "too_large"}, status_code=400)
         asset, err = vstudio.asset_add(name, body, duration_s)
         return JSONResponse(err, status_code=400) if err else {"asset": asset}
 
@@ -989,15 +990,20 @@ def create_app() -> FastAPI:
 
 
     @app.post("/wb-api/tts-voices-detect")
-    async def tts_voices_detect(request: Request):
+    def tts_voices_detect(body: dict = Body(default=None)):
         """自定义供应商: 在线检测支持的预设音色。尝试 GET {base}/audio/voices,
-        兼容多种返回形状; 不支持的端点明确报错, 让用户回手动添加。"""
-        body = await request.json()
+        兼容多种返回形状; 不支持的端点明确报错, 让用户回手动添加。
+        安全(2026-09-11 grok/codex 复审): 已存 key 只在 base_url 与存储值逐字一致时
+        才回退复用——防止"provider_id+换 base_url+留空 key"把真实密钥打到任意主机;
+        上游错误不再回显响应体(可能含密钥碎片), 只回分类码。"""
+        body = body or {}
         # 已保存供应商: 表单留空的字段回退存储值(key 打码后用户点检测仍可用真实 key)
         saved = next((p for p in (config.load().get("tts") or {}).get("providers", [])
                       if p.get("id") == str(body.get("provider_id") or "")), None)             if body.get("provider_id") else None
         base = str(body.get("base_url") or "") or (saved or {}).get("base_url", "")
-        key = str(body.get("api_key") or "") or (saved or {}).get("api_key", "")
+        key = str(body.get("api_key") or "")
+        if not key and saved and base == str(saved.get("base_url") or ""):
+            key = str(saved.get("api_key") or "")     # 同地址才允许复用已存 key
         model = str(body.get("model") or "") or (saved or {}).get("model", "")
         if not base:
             return {"ok": False, "error": "先填接口地址"}
@@ -1057,14 +1063,15 @@ def create_app() -> FastAPI:
         except urllib.error.HTTPError as e:
             if e.code == 404:
                 return _detect_fallback(base, key, model)
-            return {"ok": False, "error": f"HTTP {e.code}: {e.read().decode('utf-8', 'replace')[:120]}"}
+            return {"ok": False, "error": f"HTTP {e.code}（端点拒绝; 响应体不回显防泄露）"}
         except Exception as e:
-            return {"ok": False, "error": f"检测失败: {type(e).__name__}: {str(e)[:100]}"}
+            return {"ok": False, "error": f"检测失败: {type(e).__name__}"}
 
     @app.post("/wb-api/test-tts")
-    async def test_tts(request: Request):
+    def test_tts(body: dict = Body(default=None)):
+        """同步 def 走线程池: CLI 子进程最长 120s, 不能阻塞事件循环。"""
         import subprocess
-        body = await request.json()
+        body = body or {}
         cli = Path(__file__).resolve().parents[2] / "cli.py"
         try:
             tts_args = [*config.py_cmd(), str(cli), "workbench", "test-tts",
@@ -1159,15 +1166,11 @@ def create_app() -> FastAPI:
                 return JSONResponse({"error": "pool_not_found"}, status_code=400)
             result_key = vstudio.analysis_key_of(row.get("video_id") or "", row.get("url") or "")
         elif body.get("local_path"):
-            import os as _os
-            ap = _os.path.abspath(str(body.get("local_path")))
-            roots = [p for p in ((cfg.get("analysis_paths") or {}).get("paths") or []) if p]
-            if not (_os.path.isfile(ap)
-                    and any(ap.startswith(_os.path.abspath(p)) for p in roots)):
+            fp = vstudio.local_path_allowed(body.get("local_path"))
+            if fp is None:
                 return JSONResponse({"error": "bad_local_path",
                                      "hint": "仅允许分析已配置路径下的视频文件(设置→视频分析路径)"},
                                     status_code=400)
-            fp = Path(ap).resolve()
             result_key = vstudio.analysis_key_of("", f"local:{fp}")   # 与 CLI 侧 _target 同构, key 一致
         else:
             parsed = vstudio.parse_video_input(str(body.get("url") or ""))
@@ -1485,6 +1488,27 @@ def create_app() -> FastAPI:
     # ── 静态 SPA(放最后, 兜底所有非 /wb-api 路径到 index.html) ───────────────
     # SPA 静态资源禁启发式缓存: 迭代期旧 JS/CSS 被 webview 缓存会导致新旧混载
     @app.middleware("http")
+    async def write_guard(request: Request, call_next):
+        """对外绑定(非 loopback)时 wb-api 写方法强制 Bearer 鉴权(2026-09-11 复审 P0):
+        未配置 workbench.api_key → 拒绝一切写(403); 已配置 → 比对 Authorization/X-API-Key。
+        loopback 绑定(默认)完全放行, 本机使用零感知。GET/HEAD/OPTIONS 只读不写, 放行。"""
+        if bind_host not in ("127.0.0.1", "localhost", "::1") \
+                and request.method not in ("GET", "HEAD", "OPTIONS") \
+                and request.url.path.startswith("/wb-api"):
+            key = (config.load().get("workbench") or {}).get("api_key") or ""
+            if not key:
+                return JSONResponse({"error": "workbench_key_required",
+                                     "hint": "当前对外绑定: 请先在本机设置页「系统 → 访问鉴权」配置访问 Key"},
+                                    status_code=403)
+            auth = request.headers.get("authorization", "")
+            given = auth[7:].strip() if auth.lower().startswith("bearer ") \
+                else (request.headers.get("x-api-key") or "")
+            if given != key:
+                return JSONResponse({"error": "unauthorized", "hint": "访问 Key 不对或缺失"},
+                                    status_code=401)
+        return await call_next(request)
+
+    @app.middleware("http")
     async def no_cache_static(request: Request, call_next):
         resp = await call_next(request)
         if not request.url.path.startswith("/wb-api"):
@@ -1502,5 +1526,5 @@ def run(host: str = "127.0.0.1", port: int = 8788, open_browser: bool = False) -
     if open_browser:
         threading.Timer(1.0, lambda: webbrowser.open(f"http://127.0.0.1:{port}/")).start()
     print(f"工作台已启动: http://127.0.0.1:{port}/  (数据站: 请先 python cli.py sources serve)")
-    uvicorn.run(create_app(), host=host, port=port, log_level="warning")
+    uvicorn.run(create_app(bind_host=host), host=host, port=port, log_level="warning")
     return 0

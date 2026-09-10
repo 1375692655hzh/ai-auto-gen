@@ -92,6 +92,68 @@ def save_store(store: dict) -> None:
     os.replace(tmp, TRACK_FILE)
 
 
+# ── 跨进程互斥(2026-09-11 复审 P0: 旧版注释写"占锁"实际什么都没置, 双开互踩库) ──
+_COLLECT_LOCK_FH = None
+
+
+def acquire_collect_lock() -> bool:
+    """整轮采集互斥(跨进程文件锁): 撞锁即放弃本轮; 进程崩溃句柄随 OS 释放。"""
+    global _COLLECT_LOCK_FH
+    if os.name != "nt":
+        return True                              # 部署目标是 Windows; 其它平台暂靠 running 标志
+    import msvcrt
+    fh = None
+    try:
+        DATA_DIR.mkdir(parents=True, exist_ok=True)
+        fh = open(DATA_DIR / "x_track.collect.lock", "a+b")
+        fh.seek(0)
+        msvcrt.locking(fh.fileno(), msvcrt.LK_NBLCK, 1)
+    except OSError:
+        if fh:
+            fh.close()
+        return False
+    _COLLECT_LOCK_FH = fh
+    return True
+
+
+def release_collect_lock() -> None:
+    global _COLLECT_LOCK_FH
+    fh, _COLLECT_LOCK_FH = _COLLECT_LOCK_FH, None
+    if fh:
+        try:
+            fh.seek(0)
+            import msvcrt
+            msvcrt.locking(fh.fileno(), msvcrt.LK_UNLCK, 1)
+        except OSError:
+            pass
+        fh.close()
+
+
+class store_locked:
+    """读改写短临界区互斥(端点增删改 与 CLI 收尾合并共用), LK_LOCK 阻塞至 ~10s。"""
+
+    def __enter__(self):
+        self._fh = None
+        if os.name == "nt":
+            import msvcrt
+            DATA_DIR.mkdir(parents=True, exist_ok=True)
+            self._fh = open(DATA_DIR / "x_track.store.lock", "a+b")
+            self._fh.seek(0)
+            msvcrt.locking(self._fh.fileno(), msvcrt.LK_LOCK, 1)
+        return self
+
+    def __exit__(self, *exc):
+        if self._fh:
+            try:
+                self._fh.seek(0)
+                import msvcrt
+                msvcrt.locking(self._fh.fileno(), msvcrt.LK_UNLCK, 1)
+            except OSError:
+                pass
+            self._fh.close()
+        return False
+
+
 def _prune(acc: dict) -> None:
     days = acc.get("days") or {}
     if len(days) > DAY_RETAIN:
@@ -105,50 +167,55 @@ def add_account(inp: str, note: str = "", enabled: bool = True) -> tuple[dict | 
     if not handle:
         return None, {"error": "无法识别的 X 账号格式",
                       "hint": "支持 @handle、裸 handle 或 x.com/<handle> 链接"}
-    store = load_store()
-    accounts = store["accounts"]
-    if handle in accounts:
-        return None, {"error": "该账号已在追踪列表", "hint": "@" + handle}
-    if len(accounts) >= MAX_ACCOUNTS:
-        return None, {"error": f"追踪账号已达上限({MAX_ACCOUNTS}), 请先删减"}
-    row = {"handle": handle, "name": "", "avatar": "", "verified": False,
-           "bio": "", "note": note or "", "enabled": bool(enabled),
-           "error": "", "error_at": "",
-           "added_at": time.strftime("%Y-%m-%d %H:%M:%S"), "days": {}}
-    accounts[handle] = row
-    save_store(store)
+    store_lock = store_locked()
+    with store_lock:
+        store = load_store()
+        accounts = store["accounts"]
+        if handle in accounts:
+            return None, {"error": "该账号已在追踪列表", "hint": "@" + handle}
+        if len(accounts) >= MAX_ACCOUNTS:
+            return None, {"error": f"追踪账号已达上限({MAX_ACCOUNTS}), 请先删减"}
+        row = {"handle": handle, "name": "", "avatar": "", "verified": False,
+               "bio": "", "note": note or "", "enabled": bool(enabled),
+               "error": "", "error_at": "",
+               "added_at": time.strftime("%Y-%m-%d %H:%M:%S"), "days": {}}
+        accounts[handle] = row
+        save_store(store)
     return row, None
 
 
 def remove_account(handle: str) -> int:
-    store = load_store()
-    h = (handle or "").strip().lstrip("@").lower()
-    if h in store["accounts"]:
-        del store["accounts"][h]
-        save_store(store)
-        return 1
+    with store_locked():
+        store = load_store()
+        h = (handle or "").strip().lstrip("@").lower()
+        if h in store["accounts"]:
+            del store["accounts"][h]
+            save_store(store)
+            return 1
     return 0
 
 
 def set_enabled(handle: str, on: bool) -> bool:
-    store = load_store()
-    h = (handle or "").strip().lstrip("@").lower()
-    acc = store["accounts"].get(h)
-    if acc is None:
-        return False
-    acc["enabled"] = bool(on)
-    save_store(store)
+    with store_locked():
+        store = load_store()
+        h = (handle or "").strip().lstrip("@").lower()
+        acc = store["accounts"].get(h)
+        if acc is None:
+            return False
+        acc["enabled"] = bool(on)
+        save_store(store)
     return True
 
 
 def set_note(handle: str, note: str) -> bool:
-    store = load_store()
-    h = (handle or "").strip().lstrip("@").lower()
-    acc = store["accounts"].get(h)
-    if acc is None:
-        return False
-    acc["note"] = (note or "")[:200]
-    save_store(store)
+    with store_locked():
+        store = load_store()
+        h = (handle or "").strip().lstrip("@").lower()
+        acc = store["accounts"].get(h)
+        if acc is None:
+            return False
+        acc["note"] = (note or "")[:200]
+        save_store(store)
     return True
 
 
@@ -338,82 +405,100 @@ def collect(force: bool = False, handles: list | None = None) -> tuple[dict, int
     if not todo:
         return {"msg": "无启用的追踪账号", "total": 0}, 0
 
-    started_s = store["last_collect"].get("started_at")
-    save_store(store)                                # 先占锁再外呼
+    if not acquire_collect_lock():
+        return {"skipped": "already_running",
+                "note": "另一实例在跑(跨进程文件锁), 本轮放弃"}, 0
+    started_s = time.strftime("%Y-%m-%d %H:%M:%S")
+    store["last_collect"] = {**(store.get("last_collect") or {}),
+                             "running": True, "started_at": started_s}
+    save_store(store)                                # 真占锁(文件锁+running标志)再外呼
+    try:
+        report = {"total": len(todo), "ok": 0, "fail": 0, "circuit_break": False,
+                  "failures": {}}
+        lock = threading.Lock()
+        circuit = False
+        results: dict[str, dict] = {}                # handle → {days, followers, statuses_total}
 
-    report = {"total": len(todo), "ok": 0, "fail": 0, "circuit_break": False,
-              "failures": {}}
-    lock = threading.Lock()
-    circuit = False
-    results: dict[str, dict] = {}                    # handle → {days, followers, statuses_total}
-
-    def work(h: str):
-        nonlocal circuit
-        if circuit:
-            return
-        try:
-            prof, days, err = _collect_one(h)
-        except _RateLimited:
+        def work(h: str):
+            nonlocal circuit
+            if circuit:
+                return
+            try:
+                prof, days, err = _collect_one(h)
+            except _RateLimited:
+                with lock:
+                    circuit = True                   # 全局熔断: 本轮到此为止, 保旧数据
+                return
             with lock:
-                circuit = True                       # 全局熔断: 本轮到此为止, 保旧数据
-            return
-        with lock:
-            if err:
-                report["fail"] += 1
-                report["failures"][h] = err
-            else:
-                report["ok"] += 1
-            if days and prof:
-                results[h] = {"days": days, "followers": prof["followers"],
-                              "statuses_total": prof["statuses_total"]}
+                if err:
+                    report["fail"] += 1
+                    report["failures"][h] = err
+                else:
+                    report["ok"] += 1
+                if days and prof:
+                    results[h] = {"days": days, "followers": prof["followers"],
+                                  "statuses_total": prof["statuses_total"]}
 
-    t0 = time.time()
-    with ThreadPoolExecutor(max_workers=WORKERS) as ex:
-        list(ex.map(work, todo))
+        t0 = time.time()
+        with ThreadPoolExecutor(max_workers=WORKERS) as ex:
+            list(ex.map(work, todo))
 
-    # 重读库再合并: 采集窗口(分钟级)内用户增删/开关经服务端落盘, 整存旧快照会
-    # 复活已删账号(lost-update); 结果只并进仍存在的账号, 已删的自然丢弃。
-    store = load_store()
-    accounts = store["accounts"]
-    now_s = time.strftime("%Y-%m-%d %H:%M:%S")
-    for h, got in results.items():
-        acc = accounts.get(h)
-        if acc is None:
-            continue
-        merged = acc.get("days") or {}
-        for d, row in got["days"].items():
-            old = merged.get(d) or {}
-            new = dict(old)
-            for k in _MERGE_KEYS:
-                new[k] = max(int(old.get(k) or 0), int(row.get(k) or 0))
-            new.update({k: row[k] for k in ("followers", "statuses_total", "sampled_at")
-                        if k in row})
-            merged[d] = new
-        # 冷启动回填: 本轮覆盖到的天缺粉丝记录(纯时间线天)时, 用当前档案值补基线
-        # —— 增粉曲线从追踪起点平铺起步, 首轮 delta 不会误算成全量粉丝数。
-        for d, row in merged.items():
-            if "followers" not in row:
-                row["followers"] = got["followers"]
-                row["statuses_total"] = got["statuses_total"]
-                row["sampled_at"] = now_s
-        acc["days"] = merged
-        _prune(acc)
-    for h, acc in accounts.items():
-        if report["failures"].get(h):
-            acc["error"] = report["failures"][h][:120]
-            acc["error_at"] = time.strftime("%Y-%m-%d %H:%M:%S")
-        elif h in results:
-            acc["error"] = ""
-            acc["error_at"] = ""
-    store["last_collect"] = {
-        "running": False, "started_at": started_s,
-        "finished_at": time.strftime("%Y-%m-%d %H:%M:%S"),
-        "exit": 0, "report": dict(report)}
-    save_store(store)
-    report["elapsed_s"] = int(time.time() - t0)
-    if circuit:
-        report["not_run"] = report["total"] - report["ok"] - report["fail"]
-    return report, (3 if circuit else 0)
+        # 重读库再合并: 采集窗口(分钟级)内用户增删/开关经服务端落盘, 整存旧快照会
+        # 复活已删账号(lost-update); 结果只并进仍存在的账号, 已删的自然丢弃。
+        # 合并段走 store_locked 与端点增删改互斥(短临界区)。
+        with store_locked():
+            store = load_store()
+            accounts = store["accounts"]
+            now_s = time.strftime("%Y-%m-%d %H:%M:%S")
+            for h, got in results.items():
+                acc = accounts.get(h)
+                if acc is None:
+                    continue
+                merged = acc.get("days") or {}
+                for d, row in got["days"].items():
+                    old = merged.get(d) or {}
+                    new = dict(old)
+                    for k in _MERGE_KEYS:
+                        new[k] = max(int(old.get(k) or 0), int(row.get(k) or 0))
+                    new.update({k: row[k] for k in ("followers", "statuses_total", "sampled_at")
+                                if k in row})
+                    merged[d] = new
+                # 冷启动回填: 本轮覆盖到的天缺粉丝记录(纯时间线天)时, 用当前档案值补基线
+                # —— 增粉曲线从追踪起点平铺起步, 首轮 delta 不会误算成全量粉丝数。
+                for d, row in merged.items():
+                    if "followers" not in row:
+                        row["followers"] = got["followers"]
+                        row["statuses_total"] = got["statuses_total"]
+                        row["sampled_at"] = now_s
+                acc["days"] = merged
+                _prune(acc)
+            for h, acc in accounts.items():
+                if report["failures"].get(h):
+                    acc["error"] = report["failures"][h][:120]
+                    acc["error_at"] = time.strftime("%Y-%m-%d %H:%M:%S")
+                elif h in results:
+                    acc["error"] = ""
+                    acc["error_at"] = ""
+            store["last_collect"] = {
+                "running": False, "started_at": started_s,
+                "finished_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+                "exit": 0, "report": dict(report)}
+            save_store(store)
+        report["elapsed_s"] = int(time.time() - t0)
+        if circuit:
+            report["not_run"] = report["total"] - report["ok"] - report["fail"]
+        return report, (3 if circuit else 0)
+    except Exception:
+        with store_locked():
+            st = load_store()
+            st["last_collect"] = {**(st.get("last_collect") or {}),
+                                  "running": False, "started_at": started_s,
+                                  "finished_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+                                  "exit": 3, "report": {"error": "collect_crash"}}
+            save_store(st)
+        raise
+    finally:
+        release_collect_lock()
 
 
 # ── 视图(端点侧, 零外呼) ─────────────────────────────────────────────────────

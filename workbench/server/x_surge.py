@@ -484,6 +484,20 @@ def calc_fv(it: dict, age_h: float) -> dict:
                       "impact": imp, "surprise": sur, "proof": proof + fresh}}
 
 
+_VIEW_CACHE: dict = {"at": 0.0, "key": None, "data": None}
+_VIEW_TTL_S = 60.0                      # 兜底新鲜度: 文件没变最多也只用 60s(窗口条目在数据站侧更新)
+
+
+def _mtimes(*paths) -> tuple:
+    out = []
+    for p in paths:
+        try:
+            out.append(p.stat().st_mtime_ns)
+        except OSError:
+            out.append(0)
+    return tuple(out)
+
+
 def build_view(range_h: int = 24, golden: bool = False, market: str = "",
                sector: str = "", min_followers: int = 0, finance: bool = False,
                sort: str = "time", limit: int = 100) -> dict:
@@ -492,9 +506,21 @@ def build_view(range_h: int = 24, golden: bool = False, market: str = "",
     sort: fv(金融价值, 推荐页默认) | time(发布时间降序) | surge(起爆概率) |
           growth(浏览增速) | pred(预测浏览) | exposure(评论曝光)。
           None 一律沉底, 平分按 views 降序。
-    """
+
+    视图层缓存(2026-09-11 复审 P1): 参数+五个输入文件 mtime 为键, 60s TTL 兜底——
+    前端每次切筛选/排序/翻页都打本函数, 旧版每请求全量解析 ~5MB JSON 并重算全窗口。"""
     range_h = min(max(int(range_h), 1), 48)
     sort = sort if sort in _SORTS else "time"
+    limit = min(max(int(limit), 1), 500)
+    key = (range_h, golden, market, sector, min_followers, finance, sort, limit,
+           *_mtimes(ENGAGE_FILE, TEXTS_FILE,
+                    x_profile_enricher.CACHE_FILE,
+                    DATA_DIR / "x_account_prefs.json",
+                    DATA_DIR.parents[1] / "global-news-sources" / "config" / "twitter_pool.yaml"))
+    hit = _VIEW_CACHE["data"]
+    if hit is not None and _VIEW_CACHE["key"] == key \
+            and time.time() - _VIEW_CACHE["at"] < _VIEW_TTL_S:
+        return hit
     eng = load_engage()
     texts = load_texts()
     now = time.time()
@@ -627,13 +653,16 @@ def build_view(range_h: int = 24, golden: bool = False, market: str = "",
     if finance:
         rows = [r for r in rows if r["finance"]]
     rows.sort(key=sort_key, reverse=True)
-    return {"items": rows[:limit], "total": total, "golden_n": golden_n,
-            "sector_unlabeled_n": sum(1 for r in rows if not r["sector_l1"]),
-            "meta": {"data_age_min": data_age_min, "tracked": len(eng["statuses"]),
-                     "updated_at": eng.get("updated_at"), "sort": sort,
-                     "sectors_l1": sectors_l1,
-                     "rule": "FV金融价值=事件28+主体22+信源15+影响12+意外10(缺省5)+印证时效13; "
-                             "首周阈值 P0≥75/P1≥60/P2≥40; 评论曝光≈views×10%; 黄金窗口=发布≤2h"}}
+    result = {"items": rows[:limit], "total": total, "golden_n": golden_n,
+              "sector_unlabeled_n": sum(1 for r in rows if not r["sector_l1"]),
+              "meta": {"data_age_min": data_age_min, "tracked": len(eng["statuses"]),
+                       "updated_at": eng.get("updated_at"), "sort": sort,
+                       "sectors_l1": sectors_l1,
+                       "rule": "FV金融价值=事件28+主体22+信源15+影响12+意外10(缺省5)+印证时效13; "
+                               "首周阈值 P0≥75/P1≥60/P2≥40; 评论曝光≈views×10%; 黄金窗口=发布≤2h"}}
+    _VIEW_CACHE.clear()
+    _VIEW_CACHE.update({"at": time.time(), "key": key, "data": result})
+    return result
 
 
 def run_cli(args) -> int:                        # 保留 CLI 直调入口形状(cli.py 未用, 备用)

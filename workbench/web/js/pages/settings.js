@@ -15,6 +15,7 @@ WB.pages.settings = {
            compose: { base_url: "", api_key: "", model: "" },
            finnhub: { api_key: "" },
            market: { source_pref: "auto" },
+           workbench: { api_key: "" },
            gen_defaults: { lang: "en", tier: "free", template: "catalyst-take" },
            tts: { default: { provider_id: "edge", voice: "zh-CN-XiaoxiaoNeural" }, providers: [] },
            cloud: { endpoint: "", account: "", sync_enabled: false } },
@@ -25,6 +26,7 @@ WB.pages.settings = {
       gHasKey: false, gKeyTail: "",
       cHasKey: false, cKeyTail: "", composeExtra: "",
       composeRemoved: [], llmTests: {}, llmTesting: "",
+      wbHasKey: false, wbKeyTail: "", wbLocalKey: "",
       fHasKey: false, fKeyTail: "",
       llmTest: false, llmTestResult: null,
       ttsRemoved: [], ttsTests: {}, ttsTesting: "",
@@ -100,6 +102,9 @@ WB.pages.settings = {
       this.composeRemoved = [];
       this.llmTests = {};
       this.fHasKey = (d.finnhub || {}).has_key; this.fKeyTail = (d.finnhub || {}).key_tail;
+      this.s.workbench = { api_key: "" };
+      this.wbHasKey = (d.workbench || {}).has_key; this.wbKeyTail = (d.workbench || {}).key_tail;
+      try { this.wbLocalKey = localStorage.getItem("wb_api_key") || ""; } catch (e) {}
       const tts = d.tts || {};
       this.s.tts = {
         default: { provider_id: "edge", voice: "zh-CN-XiaoxiaoNeural", ...(tts.default || {}) },
@@ -164,6 +169,7 @@ WB.pages.settings = {
           analysis_paths: { paths: (this.s.analysis_paths || {}).paths || ["", "", "", ""] },
           compose: composePayload,
           finnhub: { api_key: (this.s.finnhub || {}).api_key || "" },
+          workbench: { api_key: (this.s.workbench || {}).api_key || "" },
           market: { ...this.s.market },
           gen_defaults: { ...this.s.gen_defaults },
           tts: this.ttsPayload(),
@@ -179,6 +185,8 @@ WB.pages.settings = {
         this.applyComposePublic(d.compose);
         if (this.s.finnhub) this.s.finnhub.api_key = "";
         this.fHasKey = (d.finnhub || {}).has_key; this.fKeyTail = (d.finnhub || {}).key_tail;
+        if (this.s.workbench) this.s.workbench.api_key = "";
+        this.wbHasKey = (d.workbench || {}).has_key; this.wbKeyTail = (d.workbench || {}).key_tail;
         this.applyTtsPublic(d.tts);
         this.applyTheme();
         WB.toast("设置已保存");
@@ -460,6 +468,13 @@ WB.pages.settings = {
     applyTheme() {
       WB.theme ? WB.theme.apply(this.s.ui.theme)
                : document.body.classList.toggle("light", this.s.ui.theme === "light");
+    },
+    saveWbLocalKey() {
+      try {
+        if (this.wbLocalKey) localStorage.setItem("wb_api_key", this.wbLocalKey.trim());
+        else localStorage.removeItem("wb_api_key");
+        WB.toast("本浏览器的访问 Key 已更新");
+      } catch (e) { WB.toast("写入失败: " + ((e && e.message) || e)); }
     },
     async loadCheck() {
       try { this.check = await WB.api.get("/selfcheck"); } catch (e) {}
@@ -864,6 +879,27 @@ WB.pages.settings = {
         目录外路径会被拒绝。留空 = 禁用该槽位。
       </div>
       <button class="btn primary" :disabled="saving" @click="save">保存设置</button>
+    </div>
+
+    <!-- 6. 环境自检 -->
+    <div class="card" v-show="sec==='sys'">
+      <h3>访问鉴权 <span class="muted">仅对外绑定(--bind 0.0.0.0 等)时生效 · 本机 127.0.0.1 无需</span></h3>
+      <div class="key-guide">
+        <b>说明:</b> 默认本机绑定完全用不到本卡。一旦对外绑定(局域网/云), 工作台的写操作
+        (改设置/删产物/发任务)会强制要求 Bearer Key——<b>不配置则拒绝一切写</b>(只读页面不受影响)。
+        在<b>本机</b>这里设 Key, 其它设备的浏览器在下方第二栏填同一个 Key 即可。
+      </div>
+      <div class="form-row"><label>服务端访问 Key</label>
+        <input type="password" v-model="s.workbench.api_key"
+               :placeholder="wbHasKey ? '已配置(尾号 ' + wbKeyTail + '), 留空保持不变' : '留空 = 对外绑定拒绝写'"
+               style="width:320px">
+        <span class="muted">仅存本机服务端, 不回显明文</span></div>
+      <button class="btn primary" :disabled="saving" @click="save">保存设置</button>
+      <div class="form-row" style="margin-top:10px"><label>本浏览器的 Key</label>
+        <input type="password" v-model="wbLocalKey" placeholder="远程访问时填与服务端相同的 Key"
+               style="width:320px">
+        <button class="btn" @click="saveWbLocalKey">记住</button></div>
+      <p class="muted">第二栏只写本浏览器 localStorage, 写请求自动携带; 本机使用留空即可</p>
     </div>
 
     <!-- 6. 环境自检 -->

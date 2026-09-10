@@ -63,7 +63,8 @@ WB.pages.article = {
                 { v: "funding-trail", t: "融资脉络 · 历轮融资时间线", zero: 1 }],
       tplLegacy: { short: "catalyst-take", morning: "tape-recap", digest: "thesis-note" },
       genJob: { running: false, progress: {}, result: "", error: "", hint: "" },
-      genResult: null, genTimer: null,
+      genResult: null, genTimer: null, genDelay: 2000,
+      disposed: false,                 // 卸载后迟到的异步回调不得再建轮询(幽灵轮询防护)
       genHistory: [], historyLoading: false, historyLoaded: false,
       calendarLoading: false, genDownloading: false, tplSuggestion: null,
       manualForm: { show: false, title: "", text: "", time: "", source: "" },
@@ -254,6 +255,8 @@ WB.pages.article = {
     async loadXF(key) {
       const st = this[key];
       st.loading = true;
+      st.reqSeq = (st.reqSeq || 0) + 1;           // 快速切筛选: 只接受最后一次响应
+      const mySeq = st.reqSeq;
       try {
         const p = new URLSearchParams({ range: st.since, sort: st.sort, limit: "100" });
         if (st.golden) p.set("golden", "1");
@@ -262,10 +265,12 @@ WB.pages.article = {
         if (st.markets.length) p.set("market", st.markets.join(","));
         if (st.sectors.length) p.set("sector", st.sectors[0]);
         const d = await WB.api.get("/x-surge?" + p.toString());
+        if (mySeq !== st.reqSeq || this.disposed) return;   // 旧响应不得覆盖新列表
         (d.items || []).forEach((r, i) => { r.rank = i + 1; });   // 服务端已排好序
         st.items = d.items; st.total = d.total;
         st.meta = { ...(d.meta || {}), golden_n: d.golden_n, err: "" };
       } catch (e) {
+        if (mySeq !== st.reqSeq || this.disposed) return;
         st.items = [];
         st.meta = { ...(st.meta || {}), err: (e && e.error) || "接口不可用" };
       }
@@ -277,10 +282,16 @@ WB.pages.article = {
     async loadSurgeRss() {
       const st = this.xfSurge;
       st.loading = true;
+      st.reqSeq = (st.reqSeq || 0) + 1;
+      const mySeq = st.reqSeq;
       try {
         const d = await WB.api.get("/x-surge-rss?sort=" + st.sort);
+        if (mySeq !== st.reqSeq || this.disposed) return;
         st.items = d.items; st.total = d.total; st.meta = d.meta || {};
-      } catch (e) { st.items = []; }
+      } catch (e) {
+        if (mySeq !== st.reqSeq || this.disposed) return;
+        st.items = [];
+      }
       st.loading = false;
       this.registerSubs();
       this.$nextTick(() => WB.trans.scan(this.$el));   // 视口自动翻译新渲染卡片
@@ -288,21 +299,28 @@ WB.pages.article = {
     /* ── 一键采集: 空态页面直接拉数, 不碰 CLI(xsurge_ctl; 2026-09-10 分发用户反馈) ── */
     async loadXc() {
       try { const d = await WB.api.get("/xsurge-status");
+        if (this.disposed) return;
         this.xc.collecting = !!d.collecting; this.xc.scheduled = !!d.scheduled;
       } catch (e) {}
-      if (this.xc.collecting && !this.xc.timer) this.watchXc();   // 页面打开时已在跑(任务计划拉的)
+      if (this.xc.collecting && !this.xc.timer && !this.disposed) this.watchXc();   // 页面打开时已在跑(任务计划拉的)
     },
-    watchXc() {           // 轮询到采集结束 → 自动刷新两页数据
-      if (this.xc.timer) return;
-      this.xc.timer = setInterval(async () => {
+    watchXc() {           // 轮询到采集结束 → 自动刷新两页数据(退避: 5s 起, ×1.5, 15s 封顶)
+      if (this.xc.timer || this.disposed) return;
+      this.xc.delay = 5000;
+      const step = async () => {
+        if (this.disposed) { this.xc.timer = null; return; }
         try { const d = await WB.api.get("/xsurge-status");
           this.xc.collecting = !!d.collecting; this.xc.scheduled = !!d.scheduled;
           if (!d.collecting) {
-            clearInterval(this.xc.timer); this.xc.timer = null;
+            this.xc.timer = null;
             this.loadXF("xfReco"); this.loadSurgeRss();
+            return;
           }
         } catch (e) {}
-      }, 5000);
+        this.xc.delay = Math.min(15000, Math.round(this.xc.delay * 1.5));
+        this.xc.timer = setTimeout(step, this.xc.delay);
+      };
+      this.xc.timer = setTimeout(step, this.xc.delay);
     },
     async collectNow() {
       if (this.xc.busy) return;
@@ -532,15 +550,23 @@ WB.pages.article = {
       this.genResult = null;
       this.genJob = { running: true, progress: { stage: "start", pct: 0, message: "已启动" },
                       result: "", error: "", hint: "" };
-      this.genTimer = setInterval(this.pollGen, 2000);
+      this.genDelay = 2000;
+      this.genTimer = setTimeout(this.pollGen, this.genDelay);
     },
     async pollGen() {
+      if (this.disposed) { this.genTimer = null; return; }
       let d;
-      try { d = await WB.api.get("/gen-jobs"); } catch (e) { return; }
+      try { d = await WB.api.get("/gen-jobs"); } catch (e) { d = null; }
       const j = (d || {}).compose || {};
       this.genJob = j;
-      if (j.running) return;
-      clearInterval(this.genTimer); this.genTimer = null;
+      if (j.running || !d) {                     // 仍在跑/接口抖动 → 退避后排下一拍
+        if (!this.disposed) {
+          this.genDelay = Math.min(8000, Math.round(this.genDelay * 1.5));
+          this.genTimer = setTimeout(this.pollGen, this.genDelay);
+        }
+        return;
+      }
+      this.genTimer = null;
       if (j.exit === 0 && j.result) {
         try {
           this.genResult = await WB.api.get("/gen-posts/" + j.result);
@@ -884,6 +910,7 @@ WB.pages.article = {
     },
   },
   async mounted() {
+    this.disposed = false;
     try {
       const d = await WB.api.get("/settings");
       const defaults = d.gen_defaults || {};
@@ -919,14 +946,19 @@ WB.pages.article = {
     this.loadFlows(); this.loadRuns(); this.loadDrafts();
     this.loadAccounts(); this.loadLedger(); this.loadTasks(); this.loadXaccts();
     WB.api.get("/gen-jobs").then((d) => {           // 页面重开时有未完成的生成 → 续上轮询
+      if (this.disposed) return;                    // 迟到响应不得重建轮询
       const j = ((d || {}).compose) || {};
-      if (j.running) { this.genJob = j; this.genTimer = setInterval(this.pollGen, 2000); }
+      if (j.running && !this.genTimer) {
+        this.genJob = j; this.genDelay = 2000;
+        this.genTimer = setTimeout(this.pollGen, this.genDelay);
+      }
     }).catch(() => {});
   },
   unmounted() {
+    this.disposed = true;
     if (WB.shell) WB.shell.setSubs([]);
-    if (this.genTimer) { clearInterval(this.genTimer); this.genTimer = null; }
-    if (this.xc.timer) { clearInterval(this.xc.timer); this.xc.timer = null; }
+    if (this.genTimer) { clearTimeout(this.genTimer); this.genTimer = null; }
+    if (this.xc.timer) { clearTimeout(this.xc.timer); this.xc.timer = null; }
   },
 
   template: `

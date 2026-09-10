@@ -5,10 +5,17 @@ window.WB = window.WB || {};
 WB.api = (function () {
   async function call(method, path, body) {
     let resp;
+    const headers = body ? { "Content-Type": "application/json" } : {};
+    if (method !== "GET") {                    // 对外绑定写面鉴权: 本浏览器记住的访问 Key
+      try {
+        const k = localStorage.getItem("wb_api_key") || "";
+        if (k) headers["Authorization"] = "Bearer " + k;
+      } catch (e) {}
+    }
     try {
       resp = await fetch("/wb-api" + path, {
         method,
-        headers: body ? { "Content-Type": "application/json" } : {},
+        headers,
         body: body ? JSON.stringify(body) : undefined,
       });
     } catch (e) {
@@ -78,6 +85,15 @@ WB.copyText = async function (text) {
 WB.basket = {
   key: "wb_materials",
   list() { try { return JSON.parse(localStorage.getItem(this.key)) || []; } catch (e) { return []; } },
+  _save(rows) {                          // 配额防护: 写满 localStorage 时淘汰最旧条目重试
+    for (;;) {
+      try { localStorage.setItem(this.key, JSON.stringify(rows)); return true; }
+      catch (e) {
+        if (!rows.length) { WB.toast("浏览器本地存储已满, 素材篮保存失败"); return false; }
+        rows.pop();
+      }
+    }
+  },
   add(item) {
     const rows = this.list();
     if (rows.some((r) => r.id === item.id)) { WB.toast("该条已在素材篮"); return; }
@@ -85,16 +101,15 @@ WB.basket = {
                    text: (item.title || item.text || "").slice(0, 200), url: item.url || "",
                    body: (item.body || "").slice(0, 2000),
                    sel: true });
-    localStorage.setItem(this.key, JSON.stringify(rows));
-    WB.toast("已加入素材篮(图文页可用)");
+    if (this._save(rows)) WB.toast("已加入素材篮(图文页可用)");
   },
   setSel(id, sel) {
     const rows = this.list();
     const r = rows.find((x) => x.id === id);
-    if (r) { r.sel = !!sel; localStorage.setItem(this.key, JSON.stringify(rows)); }
+    if (r) { r.sel = !!sel; this._save(rows); }
   },
   remove(id) {
-    localStorage.setItem(this.key, JSON.stringify(this.list().filter((r) => r.id !== id)));
+    this._save(this.list().filter((r) => r.id !== id));
   },
   clear() { localStorage.removeItem(this.key); },
 };

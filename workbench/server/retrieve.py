@@ -90,6 +90,22 @@ def _items(params: dict) -> list:
     return d.get("items") or []
 
 
+def _items_paged(params: dict, page_budget: int = 3) -> tuple[list, bool]:
+    """跟随 next_cursor 翻页(store 单页硬顶 1000); → (items, truncated)。
+    锚定降级的簇成员必在 dedup=0 才出现, 单页装不下时靠翻页补(2026-09-11 codex 复审)。"""
+    out, cursor = [], ""
+    for _ in range(max(1, page_budget)):
+        q = dict(params)
+        if cursor:
+            q["cursor"] = cursor
+        d = proxy.fetch_json("items?" + urllib.parse.urlencode(q))
+        out.extend(d.get("items") or [])
+        cursor = d.get("next_cursor") or ""
+        if not cursor:
+            return out, False
+    return out, bool(cursor)
+
+
 def _status_id(url: str):
     m = _STATUS_RE.search(url or "")
     return m.group(2) if m else None
@@ -118,6 +134,7 @@ def run(body: dict) -> dict:
     pool = _items({"since": _fmt_ts(base), "limit": 2000, "dedup": 1})   # 代表条池: A 路锚定
     pool_all = None                                                      # B 路按需: 含簇成员
     queries, groups = 1, []
+    truncated_any = False
 
     for s in seeds:
         sid_status = _status_id(s.get("url") or "")
@@ -131,6 +148,18 @@ def run(body: dict) -> dict:
             if sid_status and _status_id(it.get("url") or "") == sid_status:
                 anchor = it
                 break
+        if anchor is None and (s.get("id") or sid_status):
+            # 降级: 素材本身可能是簇成员(dedup=1 被滤)或超出单页硬顶 → dedup=0 翻页补找
+            extra, tr = _items_paged({"since": _fmt_ts(base), "limit": 1000, "dedup": 0}, 3)
+            queries += 1
+            truncated_any = truncated_any or tr
+            for it in extra:
+                if s.get("id") and it.get("id") == s["id"]:
+                    anchor = it
+                    break
+                if sid_status and _status_id(it.get("url") or "") == sid_status:
+                    anchor = it
+                    break
         hydrated = None
         if anchor:
             hydrated = {"source": anchor.get("source"), "time": anchor.get("time"),
@@ -163,6 +192,7 @@ def run(body: dict) -> dict:
                 h["why"] = ["同事件×" + str(h["dup_count"])] if h["dup_count"] > 1 else ["同事件"]
                 related.append(h)
                 taken_ids.add(it.get("id"))
+                seen_src.add(it["source"])         # 同源只取一条(此前忘了装填, 去重从未生效)
                 if it.get("url"):
                     taken_urls.add(it.get("url"))
                 if len(related) >= CLUSTER_CAP:
@@ -227,4 +257,5 @@ def run(body: dict) -> dict:
                                 "event_type": tags["event_type"]}})
 
     return {"groups": groups,
-            "meta": {"queries": queries, "scanned": len(pool), "window_h": window_h}}
+            "meta": {"queries": queries, "scanned": len(pool), "window_h": window_h,
+                     "truncated": truncated_any}}

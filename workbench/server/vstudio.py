@@ -379,6 +379,11 @@ def chat_completions_ex(base: str, key: str, model: str, messages: list,
         content = ((data.get("choices") or [{}])[0].get("message") or {}).get("content")
     except Exception as e:
         return None, f"响应解析失败({type(e).__name__})"
+    finally:
+        try:
+            response.close()                     # 复审 P2: 正常/异常路径都必须关闭
+        except Exception:
+            pass
     content = (content or "").strip()
     if not content:
         return None, ("返回空 content——推理模型? 在成稿设置 extra_body 填 "
@@ -566,38 +571,42 @@ def _jobs_file() -> Path:
 
 
 def begin_job(kind: str, request: dict) -> None:
-    jobs = load_jobs()
-    job = _empty_job()
-    job.update({"running": True, "started_at": _now(), "request": dict(request or {})})
-    if kind == "analyze":
-        job["result_key"] = ""
-    elif kind == "build":
-        job["result"] = _empty_build_result()
-    else:
-        job["result"] = None
-    jobs[kind] = job
-    _save_jobs(jobs)
+    with config.file_lock("video_jobs"):           # 跨进程互斥: HTTP 端与多个 CLI 子进程并发
+        jobs = load_jobs()
+        job = _empty_job()
+        job.update({"running": True, "started_at": _now(), "request": dict(request or {})})
+        if kind == "analyze":
+            job["result_key"] = ""
+        elif kind == "build":
+            job["result"] = _empty_build_result()
+        else:
+            job["result"] = None
+        jobs[kind] = job
+        _save_jobs(jobs)
 
 
 def tick(kind: str, stage: str, pct: int, msg: str) -> None:
-    jobs = load_jobs()
-    jobs[kind]["progress"] = {"stage": stage, "pct": pct, "message": msg}
-    _save_jobs(jobs)
+    with config.file_lock("video_jobs"):
+        jobs = load_jobs()
+        jobs[kind]["progress"] = {"stage": stage, "pct": pct, "message": msg}
+        _save_jobs(jobs)
 
 
 def _set_job_result(kind: str, value) -> None:
-    jobs = load_jobs()
-    jobs[kind]["result_key" if kind == "analyze" else "result"] = value
-    _save_jobs(jobs)
+    with config.file_lock("video_jobs"):
+        jobs = load_jobs()
+        jobs[kind]["result_key" if kind == "analyze" else "result"] = value
+        _save_jobs(jobs)
 
 
 def finish_job(kind: str, exit: int, error: str, hint: str = "") -> None:
-    jobs = load_jobs()
-    jobs[kind].update({"running": False, "finished_at": _now(), "exit": exit,
-                       "error": error or "", "hint": hint or ""})
-    if exit == 0:
-        jobs[kind]["progress"] = {"stage": "done", "pct": 100, "message": "完成"}
-    _save_jobs(jobs)
+    with config.file_lock("video_jobs"):
+        jobs = load_jobs()
+        jobs[kind].update({"running": False, "finished_at": _now(), "exit": exit,
+                           "error": error or "", "hint": hint or ""})
+        if exit == 0:
+            jobs[kind]["progress"] = {"stage": "done", "pct": 100, "message": "完成"}
+        _save_jobs(jobs)
 
 
 def _age_seconds(stamp: str | None) -> float:
@@ -694,6 +703,30 @@ def _yt_meta_of(video_id: str) -> dict:
             "duration_s": v.get("duration_s"), "is_short": v.get("is_short")}
 
 
+def local_path_allowed(raw: str) -> Path | None:
+    """设置页 analysis_paths 白名单校验 → 规范化 Path | None。
+    resolve 后按路径组件从属判断(防 C:\\vid → C:\\vid2 前缀绕过; Windows 大小写归一);
+    端点与 CLI 共用同一函数(2026-09-11 复审 P2)。"""
+    import os as _os
+    try:
+        fp = Path(str(raw or "")).resolve()
+    except OSError:
+        return None
+    if not fp.is_file():
+        return None
+    roots = [r for r in ((config.load().get("analysis_paths") or {}).get("paths") or [])
+             if str(r).strip()]
+    nfp = _os.path.normcase(str(fp))
+    for r in roots:
+        try:
+            nroot = _os.path.normcase(str(Path(r).resolve())).rstrip("\\/")
+        except OSError:
+            continue
+        if nfp == nroot or nfp.startswith(nroot + _os.sep):
+            return fp
+    return None
+
+
 def _target(request: dict) -> tuple[dict | None, dict | None]:
     if request.get("pool_id"):
         row = next((r for r in config.load_video_pool()
@@ -708,13 +741,16 @@ def _target(request: dict) -> tuple[dict | None, dict | None]:
         return t, None
     lp = str(request.get("local_path") or "")
     if lp:
-        fp = Path(lp)
-        if not fp.is_file():
+        if not Path(lp).is_file():
             return None, {"error": "local_file_missing", "hint": f"本地文件不存在: {lp}"}
+        fp = local_path_allowed(lp)              # CLI 侧复核白名单(job 请求可被构造)
+        if fp is None:
+            return None, {"error": "bad_local_path",
+                          "hint": "仅允许分析已配置路径下的视频文件(设置→视频分析路径)"}
         if fp.suffix.lower() not in _VIDEO_MIME:
             return None, {"error": "bad_video_ext", "hint": f"不支持的扩展名: {fp.suffix}"}
-        return {"video_id": "", "url": f"local:{fp.resolve()}", "title": fp.stem,
-                "channel_title": fp.parent.name, "local_path": str(fp.resolve())}, None
+        return {"video_id": "", "url": f"local:{fp}", "title": fp.stem,
+                "channel_title": fp.parent.name, "local_path": str(fp)}, None
     parsed = parse_video_input(str(request.get("url") or ""))
     if not parsed:
         return None, {"error": "bad_video_input", "hint": "请输入 YouTube 视频链接或 11 位视频 ID"}
@@ -1066,12 +1102,13 @@ def make_get(mid: str) -> dict | None:
 
 
 def _make_save(row: dict) -> dict:
-    rows = config.load_video_makes()
-    row["updated_at"] = _now()
-    rows = [row if r.get("id") == row["id"] else r for r in rows]
-    if not any(r.get("id") == row["id"] for r in rows):
-        rows.append(row)
-    config.save_video_makes(rows)
+    with config.file_lock("video_makes"):          # 构建 CLI 回写 与 前端自动保存互斥
+        rows = config.load_video_makes()
+        row["updated_at"] = _now()
+        rows = [row if r.get("id") == row["id"] else r for r in rows]
+        if not any(r.get("id") == row["id"] for r in rows):
+            rows.append(row)
+        config.save_video_makes(rows)
     return row
 
 
@@ -1386,6 +1423,26 @@ def migrate_legacy_assets() -> int:
     return count
 
 
+def scrub_voice_job_keys(root: Path | None = None) -> int:
+    """存量擦除(2026-09-11 复审 P0): 旧版 _job.json 的 provider_config.api_key 是明文,
+    现 key 改走 env(AAG_TTS_API_KEY)——启动时把历史文件里的 key 字段抹掉(幂等)。"""
+    base = root or (config.DATA_DIR / "video_voice")
+    if not base.is_dir():
+        return 0
+    n = 0
+    for jf in base.rglob("_job.json"):
+        try:
+            d = json.loads(jf.read_text(encoding="utf-8"))
+            pc = d.get("provider_config")
+            if isinstance(pc, dict) and pc.get("api_key"):
+                pc["api_key"] = ""
+                _atomic_json(jf, d)
+                n += 1
+        except Exception:
+            continue
+    return n
+
+
 NARRATION_SYSTEM = r"""你是财经口播稿主编。输出且仅输出一个 ```json 代码块，不要解释。
 输出 wb-narration/v1：
 {"schema":"wb-narration/v1","title":"≤30字","format":"horizontal|vertical","paragraphs":[{"id":"p1","text":"..."}],"word_count":0,"warnings":[]}
@@ -1558,16 +1615,18 @@ def _tts_node(scenes: list, out_dir: Path, provider: dict, voice: str, progress:
     result_json.unlink(missing_ok=True)   # 本次失败不能误读上次结果
     job = {"scenes": scenes, "out_dir": str(out_dir.resolve()),
            "provider": provider["engine"], "voice": voice}
-    if provider["engine"] == "custom":              # 自定义 OpenAI 兼容供应商: 全量配置透传 Node
+    if provider["engine"] == "custom":              # 自定义 OpenAI 兼容供应商: 非密钥配置透传 Node
         job["provider_config"] = {"base_url": provider.get("base_url") or "",
-                                  "api_key": provider.get("api_key") or "",
                                   "model": provider.get("model") or "",
                                   "style": provider.get("style") or "",
                                   "format": provider.get("format") or ""}
     if provider["engine"] == "volc":
-        job["provider_config"] = {"api_key": provider.get("api_key") or ""}
+        job["provider_config"] = {}
     _atomic_json(job_json, job)
     env = os.environ.copy()
+    # 密钥不落盘(2026-09-11 复审 P0): custom/volc 的 api_key 走 env, Node 读 AAG_TTS_API_KEY
+    if provider["engine"] in ("custom", "volc") and provider.get("api_key"):
+        env["AAG_TTS_API_KEY"] = provider["api_key"]
     if provider["engine"] == "dashscope":
         if provider.get("api_key"):
             env["DASHSCOPE_API_KEY"] = provider["api_key"]
@@ -1577,17 +1636,34 @@ def _tts_node(scenes: list, out_dir: Path, provider: dict, voice: str, progress:
                             cwd=str(vmake.VIDEO_DIR), env=env, stdout=subprocess.PIPE,
                             stderr=subprocess.STDOUT, text=True, encoding="utf-8", errors="replace",
                             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+    # 总超时杀树(2026-09-11 复审 P2): 旧版读 stdout+wait 无上限, Node 挂起则任务永远 running
+    import threading as _th
+    tts_timeout = max(300, 90 * len(scenes))
+    timed_out = _th.Event()
+
+    def _kill_tree():
+        timed_out.set()
+        subprocess.run(["taskkill", "/T", "/F", "/PID", str(proc.pid)], capture_output=True)
+
+    watchdog = _th.Timer(tts_timeout, _kill_tree)
+    watchdog.start()
     last, count, diagnostics = "", 0, []
-    for line in proc.stdout or []:
-        if line.strip():
-            last = line.strip()
-            diagnostics.append(last.replace(provider.get("api_key") or "\0", "***"))
-        if progress and "合成语音" in line:
-            count += 1
-            tick("voice", "tts", min(95, count * 90 // max(1, len(scenes))), f"合成语音 {count}")
-    code = proc.wait()
+    try:
+        for line in proc.stdout or []:
+            if line.strip():
+                last = line.strip()
+                if len(diagnostics) < 2000:      # 大日志不攒爆内存
+                    diagnostics.append(last.replace(provider.get("api_key") or "\0", "***"))
+            if progress and "合成语音" in line:
+                count += 1
+                tick("voice", "tts", min(95, count * 90 // max(1, len(scenes))), f"合成语音 {count}")
+        code = proc.wait()
+    finally:
+        watchdog.cancel()
     if proc.stdout:
         proc.stdout.close()
+    if timed_out.is_set():
+        return None, f"tts_timeout: 合成超过 {tts_timeout}s 上限, 已杀进程树(可重跑, 已有音频会跳过)"
     (out_dir / "tts.log").write_text("\n".join(diagnostics), encoding="utf-8")
     if code:
         key = provider.get("api_key") or ""
@@ -1886,15 +1962,31 @@ def run_generate_cli(args) -> int:
 BUILD_TIMEOUT_S = 3600     # 总超时: 渲染分钟级, 1 小时保底杀树
 
 
+def _arkcli_argv(prompt: str) -> list:
+    """arkcli 调用向量(2026-09-11 复审 P0): cmd /c shim 会把整条命令行交给 cmd 二次解析,
+    prompt 是 LLM/用户文本, 引号+&|% 可逃逸成命令注入——优先解析 npm shim 背后的
+    真实 node 入口直接调(list argv 无 shell 解析); 找不到才回退 cmd /c 且剥掉元字符。"""
+    import shutil
+    shim = shutil.which("arkcli.cmd") or shutil.which("arkcli") or ""
+    if shim.lower().endswith(".cmd"):
+        run_js = (Path(shim).parent / "node_modules" / "@volcengine"
+                  / "ark-cli" / "scripts" / "run.js")
+        if run_js.is_file():
+            return ["node", str(run_js), "+gen", "--modality", "image",
+                    "--model", "doubao-seedream-5.0-lite", "--size", "1920x1920", prompt]
+    safe = re.sub(r"[\"'&|<>^%`\r\n]", " ", prompt)   # 兜底路径: 剥 cmd 元字符
+    return ["cmd", "/c", "arkcli", "+gen", "--modality", "image",
+            "--model", "doubao-seedream-5.0-lite", "--size", "1920x1920", safe]
+
+
 def _gen_collage_image(prompt: str, dest: Path, timeout: int = 150) -> None:
     """seedream 生成一张纸拼贴海报 → 移动到 dest(项目 input/collage/)。
-    arkcli 必须 cmd /c 调用(npm shim); 尺寸 1920x1920(Ark 最低像素门槛), 模板端 cover 裁切。
+    尺寸 1920x1920(Ark 最低像素门槛), 模板端 cover 裁切。
     生成失败抛 RuntimeError(调用方回退无图版式)。"""
     import shutil
     with tempfile.TemporaryDirectory() as tmp:
         proc = subprocess.run(
-            ["cmd", "/c", "arkcli", "+gen", "--modality", "image",
-             "--model", "doubao-seedream-5.0-lite", "--size", "1920x1920", prompt],
+            _arkcli_argv(prompt),
             cwd=tmp, capture_output=True, text=True,
             encoding="utf-8", errors="replace", timeout=timeout)
         out = (proc.stdout or "") + (proc.stderr or "")
@@ -2017,6 +2109,10 @@ def run_cover(project_id: str, payload: dict) -> dict:
             out, _ = proc.communicate(timeout=300)
         except subprocess.TimeoutExpired:
             subprocess.run(["taskkill", "/T", "/F", "/PID", str(proc.pid)], capture_output=True)
+            try:
+                proc.communicate(timeout=10)     # 杀树后收割, 防僵尸句柄泄漏
+            except Exception:
+                pass
             raise ValueError("封面渲染超时（5 分钟）")
         log.write(out or "")
     if proc.returncode != 0 or not (proj / "out" / "cover.png").is_file():

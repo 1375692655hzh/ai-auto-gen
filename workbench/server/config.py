@@ -79,6 +79,9 @@ DEFAULTS = {
         "api_key": "",                              # 免费档 finnhub.io 注册即得, 仅存服务端打码回显
     },
     "market": {"source_pref": "auto"},  # auto=yfinance主力东财兜底 | em_first=东财优先 | yf_only=仅用yfinance
+    "workbench": {                              # 工作台自身(2026-09-11 对外绑定写面鉴权)
+        "api_key": "",                          # 非 loopback 绑定时 wb-api 写方法(POST/PUT/DELETE)
+    },                                          # 必须带 Bearer 此 key; 空=对外绑定拒绝一切写
     "gen_defaults": {"lang": "en", "tier": "free", "template": "catalyst-take"},
     "cloud": {                                      # 云端同步预留(本期后端不消费)
         "endpoint": "", "account": "", "sync_token": "",
@@ -94,7 +97,19 @@ def _merge(base: dict, override: dict) -> dict:
     return out
 
 
+_LOAD_CACHE: dict = {"mtime_ns": None, "data": None}
+
+
 def load() -> dict:
+    """读 settings.json 并合并出厂默认。mtime 进程内缓存(2026-09-11 复审 P2):
+    文件没变直接回深拷贝, 省掉每请求多次的磁盘读+合并; save/apply_patch 写盘后
+    mtime 变化自动失效。返回值永远是新建对象, 调用方改脏不影响缓存。"""
+    try:
+        mt = _settings_file().stat().st_mtime_ns
+    except OSError:
+        mt = -1
+    if _LOAD_CACHE["mtime_ns"] == mt and _LOAD_CACHE["data"] is not None:
+        return json.loads(json.dumps(_LOAD_CACHE["data"]))
     try:
         saved = json.loads(_settings_file().read_text(encoding="utf-8"))
         merged = _merge(DEFAULTS, saved)
@@ -121,9 +136,12 @@ def load() -> dict:
                                  "base_url": base, "api_key": key, "model": model,
                                  "extra_body": mc.get("extra_body")
                                  if isinstance(mc.get("extra_body"), dict) else {}}]
-        return merged
+        _LOAD_CACHE.update({"mtime_ns": mt, "data": merged})
+        return json.loads(json.dumps(merged))
     except Exception:
-        return json.loads(json.dumps(DEFAULTS))     # 深拷贝出厂默认
+        d = json.loads(json.dumps(DEFAULTS))        # 深拷贝出厂默认
+        _LOAD_CACHE.update({"mtime_ns": mt, "data": d})
+        return json.loads(json.dumps(d))
 
 
 def save(cfg: dict) -> dict:
@@ -213,6 +231,10 @@ def public_view(cfg: dict) -> dict:
     v["finnhub"]["api_key"] = ""
     v["finnhub"]["has_key"] = bool(fkey)
     v["finnhub"]["key_tail"] = fkey[-4:] if fkey else ""
+    wkey = (v.get("workbench") or {}).get("api_key") or ""
+    v["workbench"]["api_key"] = ""
+    v["workbench"]["has_key"] = bool(wkey)
+    v["workbench"]["key_tail"] = wkey[-4:] if wkey else ""
     v["cloud"]["sync_token"] = ""
     v["cloud"]["has_token"] = bool(cfg["cloud"].get("sync_token"))
     return v
@@ -354,7 +376,7 @@ def apply_patch(patch: dict) -> dict:
             patch["compose"] = s if s else None
             if not s:
                 patch.pop("compose", None)
-    for sec in ("source", "translate", "youtube", "gemini", "finnhub"):
+    for sec in ("source", "translate", "youtube", "gemini", "finnhub", "workbench"):
         s = dict(patch.get(sec) or {})
         if "api_key" in s and not s["api_key"]:
             s.pop("api_key")
@@ -422,6 +444,50 @@ def load_rows(name: str) -> list:
         return json.loads((DATA_DIR / name).read_text(encoding="utf-8"))
     except Exception:
         return []
+
+
+class file_lock:
+    """跨进程读改写互斥(短临界区, 2026-09-11 复审 P0): Windows 用 msvcrt 锁
+    data/workbench/<name>.lock 首字节(阻塞至系统 ~10s 上限); 其它平台退化进程内锁。
+    用法: with config.file_lock("video_jobs"): load→改→save。"""
+
+    _LOCAL: dict = {}
+
+    def __init__(self, name: str):
+        if not re.fullmatch(r"[\w-]+", name or ""):
+            raise ValueError("bad lock name")
+        self._name = name
+        self._fh = None
+
+    def __enter__(self):
+        if os.name == "nt":
+            import msvcrt
+            DATA_DIR.mkdir(parents=True, exist_ok=True)
+            self._fh = open(DATA_DIR / f"{self._name}.lock", "a+b")
+            self._fh.seek(0)
+            msvcrt.locking(self._fh.fileno(), msvcrt.LK_LOCK, 1)
+        else:
+            import threading
+            lk = self._LOCAL.setdefault(self._name, threading.Lock())
+            lk.acquire()
+            self._fh = lk
+        return self
+
+    def __exit__(self, *exc):
+        fh, self._fh = self._fh, None
+        if fh is None:
+            return False
+        if os.name == "nt":
+            import msvcrt
+            try:
+                fh.seek(0)
+                msvcrt.locking(fh.fileno(), msvcrt.LK_UNLCK, 1)
+            except OSError:
+                pass
+            fh.close()
+        else:
+            fh.release()
+        return False
 
 
 def save_rows(name: str, rows: list) -> list:

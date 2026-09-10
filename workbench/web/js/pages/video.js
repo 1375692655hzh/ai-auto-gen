@@ -261,11 +261,17 @@ WB.pages.video = {
     },
     async loadHot() {
       this.hotLoading = true; this.hotErr = null;
+      this.hotSeq = (this.hotSeq || 0) + 1;       // 快速切筛选: 旧响应不得覆盖新列表
+      const mySeq = this.hotSeq;
       try {
         const d = await WB.api.get("/yt/hot?" + this.hotQuery());
+        if (mySeq !== this.hotSeq || this.disposed) return;
         this.hotItems = d.items; this.hotTotal = d.total; this.hotMeta = d.meta;
         this.hotInsights = d.insights || [];
-      } catch (e) { this.hotErr = e; }
+      } catch (e) {
+        if (mySeq !== this.hotSeq || this.disposed) return;
+        this.hotErr = e;
+      }
       this.hotLoading = false;
       this.registerSubs();
     },
@@ -447,7 +453,9 @@ WB.pages.video = {
       try {
         const d = await WB.api.post("/test-tts",
           { provider_id: pid, voice, text: this.voiceTestPhrase });
-        this.voiceTestUrl = d.url;
+        // 版本号在成功这一刻固化一次: 模板里拼 Date.now() 会被 2s 自动保存的
+        // 重渲染打断试听(2026-09-11 codex 复审发现)
+        this.voiceTestUrl = d.url + "?t=" + Date.now();
       } catch (e) { WB.toast(e.error || "试听失败"); }
       this.voiceTesting = false;
     },
@@ -1204,6 +1212,11 @@ WB.pages.video = {
     Object.values(this.saveTimers).forEach(clearTimeout);
     clearTimeout(this.collectPoll);
     Object.values(this.jobPolls).forEach(clearTimeout);
+    try {                                     // 媒体元素随页卸载: 停播+卸 src, 防后台继续拉流
+      this.$el.querySelectorAll("audio,video").forEach((m) => {
+        try { m.pause(); m.removeAttribute("src"); m.load(); } catch (e) {}
+      });
+    } catch (e) {}
     if (WB.shell) WB.shell.setSubs([]);   // 离开视频页清空左菜单
   },
   template: `
@@ -1602,7 +1615,7 @@ WB.pages.video = {
           <div style="display:flex;gap:10px;align-items:center">
             <div style="width:64px;height:48px;flex-shrink:0;display:flex;align-items:center;justify-content:center;overflow:hidden">
               <img v-if="a.kind==='image'" :src="assetFileUrl(a)" :alt="a.name" loading="lazy" style="width:100%;height:100%;object-fit:cover">
-              <video v-else-if="a.kind==='video'" :src="assetFileUrl(a)" preload="metadata" muted style="width:100%;height:100%;object-fit:cover"></video>
+              <video v-else-if="a.kind==='video'" :src="assetFileUrl(a)" preload="none" muted style="width:100%;height:100%;object-fit:cover"></video>
               <span v-else style="font-size:28px" aria-label="音频">🎧</span>
             </div>
             <div style="min-width:0;flex:1">
@@ -1758,7 +1771,7 @@ WB.pages.video = {
                     <button class="btn" :disabled="voiceTesting || !curMake.voice.profile_id || !curMake.voice.voice" @click="testVoiceListen">
                       {{ voiceTesting ? '合成中…' : '试听' }}</button></div>
                   <div v-if="voiceTestUrl" style="margin:6px 0">
-                    <audio controls :src="voiceTestUrl + '?t=' + Date.now()" style="max-width:100%;height:36px"></audio>
+                    <audio controls :src="voiceTestUrl" style="max-width:100%;height:36px"></audio>
                     <p class="muted" style="font-size:11px">试听文本: 「{{ voiceTestPhrase }}」</p></div>
                   <p class="muted">换音色=全新合成；旧音色文件保留，切回即复用</p>
                   <p v-if="!ttsProviders.length" class="notice">请到 <a href="#/settings">设置 → 语音合成</a> 启用供应商和音色</p>

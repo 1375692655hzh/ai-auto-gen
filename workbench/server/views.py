@@ -171,9 +171,12 @@ def videos() -> list:
 def video_file(vid: str, name: str) -> Path | None:
     if not re.fullmatch(r"[\w\-.]+", vid) or not re.fullmatch(r"[\w\-.]+", name):
         return None
-    for base in (VIDEOS / vid / "out", VIDEOS / vid):
-        p = base / name
-        if p.is_file() and p.suffix.lower() in (".mp4", ".png", ".jpg", ".srt", ".md"):
+    if ".." in vid or ".." in name:              # 正则放行了连续点号, 显式拒掉(2026-09-11 复审)
+        return None
+    root = (VIDEOS / vid).resolve()
+    for base in (root / "out", root):
+        p = (base / name).resolve()
+        if root in p.parents and p.is_file() and p.suffix.lower() in (".mp4", ".png", ".jpg", ".srt", ".md"):
             return p
     return None
 

@@ -33,6 +33,8 @@ async function main() {
 	const saveManifest = () => writeFileSync(manifestPath, JSON.stringify(manifest, null, 2));
 	async function synthAll(engine, voice) {
 		const customCfg = ["custom", "volc"].includes(engine) ? (job.provider_config || {}) : undefined;
+		// 密钥不落盘(2026-09-11): api_key 只从 env 读, _job.json 里不再携带
+		if (customCfg) customCfg.api_key = process.env.AAG_TTS_API_KEY || "";
 		const made = [];
 		for (const s of job.scenes) {
 			const outFile = path.join(outDir, `${s.id}.mp3`);
