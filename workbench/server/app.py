@@ -641,6 +641,9 @@ def create_app() -> FastAPI:
     @app.get("/wb-api/yt/channels")
     def yt_channels_list():
         rows = config.load_yt_channels()
+        stats = yt_track.channel_stats()      # YTB 追踪标准六项(零外呼读缓存)
+        for r in rows:
+            r["stats"] = stats.get(r.get("channel_id") or "") or {}
         return {"channels": rows,
                 "meta": {"configured": bool(yt_track.api_key()),
                          "enabled": sum(1 for c in rows if c.get("enabled", True)),
@@ -1057,6 +1060,27 @@ def create_app() -> FastAPI:
         if not record:
             return JSONResponse({"error": "analysis_not_found"}, status_code=404)
         return record
+
+    @app.post("/wb-api/video-analyses/{key}/rename")
+    async def video_analysis_rename(key: str, request: Request):
+        import re as _re
+        if not _re.fullmatch(r"[\w\-]+", key):
+            return JSONResponse({"error": "bad_key"}, status_code=400)
+        body = await request.json()
+        try:
+            return vstudio.analysis_rename(key, str(body.get("title") or ""))
+        except ValueError as e:
+            return JSONResponse({"error": "rename_rejected", "hint": str(e)}, status_code=400)
+
+    @app.delete("/wb-api/video-analyses/{key}")
+    def video_analysis_delete(key: str):
+        import re as _re
+        if not _re.fullmatch(r"[\w\-]+", key):
+            return JSONResponse({"error": "bad_key"}, status_code=400)
+        try:
+            return vstudio.analysis_delete(key)
+        except ValueError as e:
+            return JSONResponse({"error": "delete_rejected", "hint": str(e)}, status_code=400)
 
     @app.post("/wb-api/video-analyze")
     async def video_analyze(request: Request):

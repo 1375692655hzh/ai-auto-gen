@@ -1730,6 +1730,30 @@ def analysis_get(key: str) -> dict | None:
     return (_load_analyses().get("analyses") or {}).get(key)
 
 
+def analysis_rename(key: str, title: str) -> dict:
+    """历史分析重命名：只改标题，不动 updated_at（那是分析完成时间，改名不应重排序）。"""
+    if not title or len(title.strip()) > 80:
+        raise ValueError("标题需为 1-80 字")
+    store = _load_analyses()
+    record = (store.get("analyses") or {}).get(key)
+    if not record:
+        raise ValueError("分析记录不存在")
+    record["title"] = title.strip()
+    _save_analyses(store)
+    return {"key": key, "title": record["title"]}
+
+
+def analysis_delete(key: str) -> dict:
+    store = _load_analyses()
+    analyses = store.get("analyses") or {}
+    if key not in analyses:
+        raise ValueError("分析记录不存在")
+    title = analyses[key].get("title") or key
+    del analyses[key]
+    _save_analyses(store)
+    return {"deleted": key, "title": title}
+
+
 def scripts_view() -> list:
     return sorted(config.load_video_scripts(), key=lambda row: row.get("updated_at") or "",
                   reverse=True)

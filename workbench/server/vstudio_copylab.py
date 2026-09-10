@@ -272,11 +272,12 @@ def annotate(report_md: str, result: dict) -> str:
 def run(target: dict, key: str, request: dict) -> tuple[dict, int]:
     """copylab 工作流主入口(仅 CLI 进程)。target 已由 vstudio._target 解析。"""
     attempted = []
-    tcfg = config.load().get("translate") or {}
+    # 2026-09-10 用户拍板: LLM 步走成稿模型(compose 段), 不再挂翻译段
+    tcfg = config.load().get("compose") or {}
     base, tkey, tmodel = (str(tcfg.get(k) or "") for k in ("base_url", "api_key", "model"))
     if not (base and tkey and tmodel):
-        return {"error": "no_translate_config",
-                "hint": "可核验拆解走文本模型, 到设置页配置翻译模型(DeepSeek 等)"}, 4
+        return {"error": "no_compose_config",
+                "hint": "copylab 走成稿模型, 到设置页配置成稿模型(GLM/DeepSeek 等)"}, 4
 
     vstudio.tick("analyze", "copylab", 8, "yt-dlp 取元数据/字幕…")
     with tempfile.TemporaryDirectory() as tmp:
@@ -313,7 +314,9 @@ def run(target: dict, key: str, request: dict) -> tuple[dict, int]:
                  .replace("{{TRANSCRIPT}}", transcript_txt))
     raw = vstudio.chat_completions(base, tkey, tmodel,
                                    [{"role": "user", "content": prompt}],
-                                   0.1, 8000, 300)
+                                   0.1, 8000, 300,
+                                   extra=tcfg.get("extra_body")
+                                   if isinstance(tcfg.get("extra_body"), dict) else None)
     if not raw:
         attempted.append({"tier": "llm", "result": "failed", "evidence": "文本模型未返回内容"})
         rec = vstudio._analysis_record(target, key, attempted, "failed", "copylab", "",

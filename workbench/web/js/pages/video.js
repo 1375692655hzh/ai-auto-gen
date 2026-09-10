@@ -14,7 +14,7 @@ WB.pages.video = {
       claimsOpen: false,   // claims 事实账本明细展开
       /* ── 视频分析·本地文件方式 + 历史结果 ── */
       anMode: "url", anWorkflow: "gemini", anPaths: [], anPathIdx: null, anFiles: [], anFile: "",
-      anHistory: [], anHistoryLoading: false,
+      anHistory: [], anHistoryLoading: false, anRenaming: '', anRenameTitle: '',
       collecting: false, collectPoll: null,
       /* ── 视频工坊 ── */
       pool: [], poolMeta: null, poolIds: {}, poolSel: null,
@@ -656,6 +656,24 @@ WB.pages.video = {
     },
     copyPubCmd() { WB.copyText(this.pubCmd); },
     makeError(e) { return String(e.error || e.message || e || '请求失败') + (e.hint ? ' — ' + e.hint : ''); },
+    anStartRename(h) { this.anRenaming = h.key; this.anRenameTitle = h.title || ''; },
+    async anSubmitRename(h) {
+      const title = this.anRenameTitle.trim();
+      if (!title) return;
+      try {
+        await WB.api.post('/video-analyses/' + encodeURIComponent(h.key) + '/rename', { title });
+        h.title = title; this.anRenaming = '';
+        if (this.anRec && this.anRec.key === h.key) this.anRec.title = title;
+      } catch (e) { WB.toast(this.makeError(e)); }
+    },
+    async anDelete(h) {
+      if (!confirm('删除分析「' + (h.title || h.key) + '」？\n只删这份分析报告，素材池与视频项目不受影响')) return;
+      try {
+        await WB.api.del('/video-analyses/' + encodeURIComponent(h.key));
+        this.anHistory = this.anHistory.filter((x) => x.key !== h.key);
+        if (this.anRec && this.anRec.key === h.key) this.anRec = null;
+      } catch (e) { WB.toast(this.makeError(e)); }
+    },
     coverAssetName(field) { const a = this.libAssets.find((x) => x.asset_id === this.coverForm[field]); return a && a.name; },
     async uploadCoverAsset(field, ev) {
       const file = ev.target.files && ev.target.files[0]; ev.target.value = '';
@@ -1286,9 +1304,9 @@ WB.pages.video = {
             <div class="form-row" style="margin-top:4px"><label>工作流</label>
               <select v-model="anWorkflow" style="min-width:280px">
                 <option value="gemini">Gemini 看片(画面语义, 需 Gemini Key)</option>
-                <option value="copylab">可核验拆解(文案框架+引用核验, 走文本模型)</option>
+                <option value="copylab">copylab（文案框架+引用核验，走成稿模型）</option>
               </select>
-              <span class="muted">可核验拆解需要字幕, 仅 YouTube; 引用逐条机器核对, 报告带通过率</span></div>
+              <span class="muted">copylab 需要字幕, 仅 YouTube; 引用逐条机器核对, 报告带通过率</span></div>
           </template>
           <div v-if="anErr" class="err-box">{{ anErr.error || anErr }}</div>
         </div>
@@ -1403,10 +1421,23 @@ WB.pages.video = {
         <div v-if="!anHistory.length" class="empty">还没有分析记录 —— 分析完成的结果都会归档在这里</div>
         <div v-for="h in anHistory" :key="h.key" class="list-item"
              :class="{sel: anRec && anRec.key === h.key}" @click="openAnalysis(h.key)">
-          <div class="t">{{ cut(h.title, 26) }}
-            <span class="badge" :class="h.status==='ok' ? 'green' : h.status==='partial' ? 'yellow' : 'red'"
-                  style="float:right">{{ h.status }}</span></div>
-          <div class="s">{{ h.updated_at }} · {{ h.tier_used || '—' }}</div>
+          <template v-if="anRenaming === h.key">
+            <div class="form-row" style="gap:6px" @click.stop>
+              <input type="text" v-model="anRenameTitle" style="flex:1;min-width:120px" @keyup.enter="anSubmitRename(h)" @keyup.esc="anRenaming=''">
+              <button class="btn primary" @click="anSubmitRename(h)">保存</button>
+              <button class="btn" @click="anRenaming=''">取消</button>
+            </div>
+          </template>
+          <template v-else>
+            <div class="t">{{ cut(h.title, 22) }}
+              <span style="display:inline-flex;gap:4px;float:right">
+                <button class="btn" style="padding:1px 8px" title="重命名" @click.stop="anStartRename(h)">改名</button>
+                <button class="btn" style="padding:1px 8px" title="删除" @click.stop="anDelete(h)">删除</button>
+              </span>
+              <span class="badge" :class="h.status==='ok' ? 'green' : h.status==='partial' ? 'yellow' : 'red'"
+                    style="float:right;margin-right:6px">{{ h.status }}</span></div>
+            <div class="s">{{ h.updated_at }} · {{ h.tier_used || '—' }}</div>
+          </template>
         </div>
       </div>
     </div>
