@@ -310,7 +310,7 @@ def translate_chain(cfg: dict) -> list:
         mb = str(it.get("base_url") or "").strip()
         mk = str(it.get("api_key") or "").strip()
         mm = str(it.get("model") or "").strip()
-        if mb and mk and mm:
+        if mb and mk and mm and (mb, mk, mm) not in chain:   # 去重: 用户链头常与出厂位同款
             chain.append((mb, mk, mm))
     return chain
 

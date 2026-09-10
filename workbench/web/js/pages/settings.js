@@ -434,16 +434,12 @@ WB.pages.settings = {
 
     <!-- 3. 翻译模型(蹭蹭流量推文翻译, OpenAI 兼容 /chat/completions) -->
     <div class="card" v-show="sec==='translate'">
-      <h3>翻译模型 <span class="muted">全站浏览层翻译(推荐信息/蹭蹭流量/资讯页视口自动翻) ·  DeepSeek 链头优先</span></h3>
+      <h3>翻译模型 <span class="muted">全站浏览层翻译(推荐信息/蹭蹭流量/资讯页视口自动翻) · 免费链优先, 付费兜底</span></h3>
       <div class="key-guide">
-        <b>推荐方案(必配, 稳定且极便宜):</b>
-        <a href="https://platform.deepseek.com" target="_blank" rel="noopener">DeepSeek 开放平台</a>
-        → 注册(送额度) → 「API keys」创建( sk- 开头), 在下面三行填入(链头优先);
-        翻译用量很小, 日常使用月费用可忽略。任意 OpenAI 兼容服务也可
-        (通义/Kimi/月之暗面等, 换 base_url + model 即可)。<br>
-        <b>免费方案(网络在允许地区的用户):</b> 装
+        <b>推荐方案(免费, 零费用):</b> 装
         <a href="https://omniroute.online" target="_blank" rel="noopener">OmniRoute</a>
-        (下方按钮一键安装, 监听 127.0.0.1:20128), 默认链尾已预置本机免费位。
+        (下方按钮一键安装, 监听 127.0.0.1:20128), 出厂链已预置免费双保险:
+        <b>muse 主力 → 用完/挂了自动落 mimo(同为免费)</b>, 无需任何手动干预。
         免费位是 OmniRoute 云端中转, <b>中转服务端按出口地区封锁</b>(大陆裸网
         403 "not available in your country"); 且它不走系统代理端口——要过得有
         "整体干净的非大陆出口", 两选一:<br>
@@ -462,7 +458,13 @@ WB.pages.settings = {
            配置持久保存, 一次配好长期有效。<br>
         <b>两个坑:</b> 代理端口没在监听会<b>静默回落直连</b>(不报错、译文悄悄消失)
         ——Clash 必须常驻; 节点换成香港/其他地区仍会被中转拒。<br>
-        嫌折腾就配上面的 DeepSeek(链头优先, 配了免费位通不通都无所谓)。<br>
+        <b>备选方案(付费兜底, 可选):</b>
+        <a href="https://platform.deepseek.com" target="_blank" rel="noopener">DeepSeek 开放平台</a>
+        → 注册(送额度) → 「API keys」创建( sk- 开头), 在下面三行填入(链头优先,
+        配了免费位通不通都无所谓)。适合: 大陆裸网且不想折腾代理的用户,
+        或对译文质量/稳定性有更高要求时。任意 OpenAI 兼容服务也可
+        (通义/Kimi/月之暗面等, 换 base_url + model 即可); 翻译用量很小,
+        月费用可忽略。<br>
         <b>说明:</b> 服务全站浏览层翻译(看才翻、翻过即存哈希缓存)与采集轮自动补译;
         配置仅存本工作台(data/workbench/settings.json)——
         <b>只单独部署工作台、没有数据站的用户, 照常生效</b>(RSS 源不依赖数据站)。

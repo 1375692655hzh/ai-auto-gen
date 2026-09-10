@@ -50,7 +50,9 @@ DEFAULTS = {
         "model": "",                                # 如 deepseek-v4-flash
         "models": [                                  # 模型链兜底: 依次尝试, 前一失败自动落下一
             {"base_url": "http://127.0.0.1:20128/v1", "api_key": "omniroute-local",
-             "model": "oc/muse-spark-1.2-contributor-free"},   # OmniRoute 本地免费(装了即生效, 零费用)
+             "model": "oc/muse-spark-1.2-contributor-free"},   # 主力免费(docs/翻译模型实测与推荐.md)
+            {"base_url": "http://127.0.0.1:20128/v1", "api_key": "omniroute-local",
+             "model": "oc/mimo-v2.5-free"},                    # 免费替补: muse 用完/挂自动落这
         ],
     },
     "youtube": {                                    # YouTube 热点追踪(Data API v3, 视频页)
@@ -94,6 +96,14 @@ def load() -> dict:
         merged = _merge(DEFAULTS, saved)
         if isinstance(saved.get("tts"), dict) and "default" in saved["tts"]:
             merged["tts"]["default"] = saved["tts"]["default"]
+        # 出厂免费兜底位强制在链: 老机器 settings 冻结了旧 models 列表(_merge 对列表
+        # 整段替换), muse 用完自动落 mimo 的替补位必须补回; 用户自定义链位原位保留。
+        tr = merged.get("translate") or {}
+        if isinstance(tr.get("models"), list):
+            have = {str(m.get("model") or "") for m in tr["models"] if isinstance(m, dict)}
+            for slot in DEFAULTS["translate"]["models"]:
+                if slot["model"] not in have:
+                    tr["models"].append(dict(slot))
         return merged
     except Exception:
         return json.loads(json.dumps(DEFAULTS))     # 深拷贝出厂默认
