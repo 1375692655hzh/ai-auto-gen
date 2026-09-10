@@ -1,0 +1,791 @@
+{
+ "enriched_at": "2026-09-03 19:36:28",
+ "profiles": {
+  "10kdiver": {
+   "bio": "帮助人们理解金融与投资的基本原理。",
+   "followers": 290285,
+   "verified": false,
+   "fetched_at": "2026-09-03 19:26:25"
+  },
+  "activeark": {
+   "bio": "发布ARK投资公司相关信息，以英语文章日译为主。",
+   "followers": 15807,
+   "verified": false,
+   "fetched_at": "2026-09-03 19:26:25"
+  },
+  "altinhisseler": {
+   "bio": "2019年起全职投资者，内容不构成投资建议。",
+   "followers": 120314,
+   "verified": true,
+   "fetched_at": "2026-09-03 19:26:25"
+  },
+  "america_kabu": {
+   "bio": "聚焦美股及投资资讯、拓展资产配置视野的账号。",
+   "followers": 29294,
+   "verified": false,
+   "fetched_at": "2026-09-03 19:26:25"
+  },
+  "amitisinvesting": {
+   "bio": "拆解科技、商业与股票，尤其关注帕兰提尔。",
+   "followers": 649185,
+   "verified": true,
+   "fetched_at": "2026-09-03 19:26:25"
+  },
+  "analitikyatirim": {
+   "bio": "分享技术、交割与基本面分析，并提供每日交易股票。",
+   "followers": 13591,
+   "verified": true,
+   "fetched_at": "2026-09-03 19:26:25"
+  },
+  "arifcoskun05": {
+   "bio": "金融博主，分享股市策略与公开信息，欢迎随时私信提问。",
+   "followers": 372234,
+   "verified": true,
+   "fetched_at": "2026-09-03 19:26:25"
+  },
+  "as_akat": {
+   "bio": "",
+   "followers": 124501,
+   "verified": false,
+   "fetched_at": "2026-09-03 19:26:25"
+  },
+  "barissoydan": {
+   "bio": "从业30年的经济写作者，曾任早报经济杂志主编。",
+   "followers": 149752,
+   "verified": true,
+   "fetched_at": "2026-09-03 19:26:25"
+  },
+  "baymucize": {
+   "bio": "提供个股图表支持、选股与进出场分析及每周跟踪。",
+   "followers": 7359,
+   "verified": false,
+   "fetched_at": "2026-09-03 19:26:25"
+  },
+  "benthompson": {
+   "bio": "Stratechery创始人，主持科技播客，互联网评论家。",
+   "followers": 282086,
+   "verified": true,
+   "fetched_at": "2026-09-03 19:26:25"
+  },
+  "beth_kindig": {
+   "bio": "投资者，回报优于华尔街老派，提供审计组合与每周分析。",
+   "followers": 182535,
+   "verified": true,
+   "fetched_at": "2026-09-03 19:26:25"
+  },
+  "biancoresearch": {
+   "bio": "专注宏观投资研究的Bianco Research官方账号",
+   "followers": 770977,
+   "verified": true,
+   "fetched_at": "2026-09-03 19:27:06"
+  },
+  "bitcoinmagazine": {
+   "bio": "比特币领域最受信赖的媒体声音",
+   "followers": 4460404,
+   "verified": true,
+   "fetched_at": "2026-09-03 19:27:06"
+  },
+  "borrowed_ideas": {
+   "bio": "股票分析师，分享投资日记与上市公司深度研究",
+   "followers": 150076,
+   "verified": true,
+   "fetched_at": "2026-09-03 19:27:06"
+  },
+  "borsaanalyst": {
+   "bio": "国际贸易与金融专业出身的交易员",
+   "followers": 2971,
+   "verified": false,
+   "fetched_at": "2026-09-03 19:27:06"
+  },
+  "borsaemiliano": {
+   "bio": "抄底猎手，内容非投资建议",
+   "followers": 70495,
+   "verified": true,
+   "fetched_at": "2026-09-03 19:27:06"
+  },
+  "borsaistanbul": {
+   "bio": "伊斯坦布尔证券交易所官方账号",
+   "followers": 521570,
+   "verified": true,
+   "fetched_at": "2026-09-03 19:27:06"
+  },
+  "borsaizinde": {
+   "bio": "提供股市分析、教育与资讯的订阅账号",
+   "followers": 582199,
+   "verified": true,
+   "fetched_at": "2026-09-03 19:27:06"
+  },
+  "borsanalist_": {
+   "bio": "内容非投资建议，决策须遵监管规则",
+   "followers": 5336,
+   "verified": false,
+   "fetched_at": "2026-09-03 19:27:06"
+  },
+  "borsayolundaa": {
+   "bio": "从业十四年的股市交易者，分享个人笔记非投资建议",
+   "followers": 305188,
+   "verified": true,
+   "fetched_at": "2026-09-03 19:27:06"
+  },
+  "brianferoldi": {
+   "bio": "教投资者如何分析企业的财经作家与教育者",
+   "followers": 671130,
+   "verified": true,
+   "fetched_at": "2026-09-03 19:27:06"
+  },
+  "buffett_taro": {
+   "bio": "主张国际分散投资，认为标普500与全球指数已过时",
+   "followers": 363247,
+   "verified": true,
+   "fetched_at": "2026-09-03 19:27:06"
+  },
+  "burak_finance": {
+   "bio": "分析主管兼成长型投资者，擅长基本面与技术分析",
+   "followers": 11209,
+   "verified": true,
+   "fetched_at": "2026-09-03 19:27:06"
+  },
+  "burrytracker": {
+   "bio": "追踪对冲基金及迈克尔·伯里持股的股票跟踪账号。",
+   "followers": 556756,
+   "verified": true,
+   "fetched_at": "2026-09-03 19:28:09"
+  },
+  "byrnehobart": {
+   "bio": "财经评论作者，Stripe Press《Boom》一书联合作者。",
+   "followers": 61407,
+   "verified": true,
+   "fetched_at": "2026-09-03 19:28:09"
+  },
+  "cathiedwood": {
+   "bio": "ARK投资创始人、CEO兼CIO，专注颠覆性创新投资。",
+   "followers": 2918247,
+   "verified": true,
+   "fetched_at": "2026-09-03 19:28:09"
+  },
+  "charliebilello": {
+   "bio": "Creative Planning首席市场策略师，投资者与财经作者。",
+   "followers": 862628,
+   "verified": true,
+   "fetched_at": "2026-09-03 19:28:09"
+  },
+  "churio777": {
+   "bio": "日本现役医生兼指数投资博主，著有两本投资书。",
+   "followers": 43408,
+   "verified": true,
+   "fetched_at": "2026-09-03 19:28:09"
+  },
+  "cissan_9984": {
+   "bio": "自称资产610亿日元的日本股票与期货投资者。",
+   "followers": 789496,
+   "verified": true,
+   "fetched_at": "2026-09-03 19:28:09"
+  },
+  "citrini": {
+   "bio": "专注主题投资与跨资产研究的财经分析账号。",
+   "followers": 288123,
+   "verified": true,
+   "fetched_at": "2026-09-03 19:28:09"
+  },
+  "cnyes": {
+   "bio": "台湾财经媒体鉅亨网官方账号，提供全球财经资讯。",
+   "followers": 1305,
+   "verified": false,
+   "fetched_at": "2026-09-03 19:28:09"
+  },
+  "danieltniles": {
+   "bio": "Niles投资管理创始人，关注科技的投资人与父亲。",
+   "followers": 132917,
+   "verified": true,
+   "fetched_at": "2026-09-03 19:28:09"
+  },
+  "data_kapital": {
+   "bio": "伊斯坦布尔交易所官方数据商，新一代金融数据平台。",
+   "followers": 3119,
+   "verified": true,
+   "fetched_at": "2026-09-03 19:28:09"
+  },
+  "datadinvesting": {
+   "bio": "工程师出身的投资人，自称第一性原理思考者。",
+   "followers": 54607,
+   "verified": true,
+   "fetched_at": "2026-09-03 19:28:09"
+  },
+  "deitaone": {
+   "bio": "",
+   "followers": 1913996,
+   "verified": true,
+   "fetched_at": "2026-09-03 19:28:09"
+  },
+  "digitimes": {
+   "bio": "",
+   "followers": 10412,
+   "verified": false,
+   "fetched_at": "2026-09-03 19:29:08"
+  },
+  "dividendology": {
+   "bio": "分享优质股息增长与高收益投资机会，YouTube订阅超25万。",
+   "followers": 124223,
+   "verified": true,
+   "fetched_at": "2026-09-03 19:29:08"
+  },
+  "dnystedt": {
+   "bio": "前记者、现任金融分析师，常驻台北，主要评论半导体与台湾。",
+   "followers": 53885,
+   "verified": true,
+   "fetched_at": "2026-09-03 19:29:08"
+  },
+  "dollarsanddata": {
+   "bio": "自2017年起助人积累财富，《持续买入》与《财富阶梯》作者。",
+   "followers": 189734,
+   "verified": true,
+   "fetched_at": "2026-09-03 19:29:08"
+  },
+  "dylan522p": {
+   "bio": "SemiAnalysis创始人，专注人工智能基础设施研究与咨询。",
+   "followers": 159305,
+   "verified": true,
+   "fetched_at": "2026-09-03 19:29:08"
+  },
+  "ecommerceshares": {
+   "bio": "前高盛出身的独立投资者，关注美英欧及全球资产并爱吐槽。",
+   "followers": 134881,
+   "verified": true,
+   "fetched_at": "2026-09-03 19:29:08"
+  },
+  "economyapp": {
+   "bio": "应用经济投资者，硅谷法国人、游戏业老兵，通讯读者超30万。",
+   "followers": 241673,
+   "verified": true,
+   "fetched_at": "2026-09-03 19:29:08"
+  },
+  "elerianm": {
+   "bio": "沃顿实践教授、安联顾问，前PIMCO首席执行官兼联席投资官。",
+   "followers": 1096350,
+   "verified": true,
+   "fetched_at": "2026-09-03 19:29:08"
+  },
+  "ericjackson": {
+   "bio": "预测市场先行者，哥伦比亚商学院博士，EMJ Capital创始人。",
+   "followers": 172426,
+   "verified": true,
+   "fetched_at": "2026-09-03 19:29:08"
+  },
+  "fabknowledge": {
+   "bio": "通俗解读AI时代半导体投资，SemiAnalysis团队成员。",
+   "followers": 34184,
+   "verified": true,
+   "fetched_at": "2026-09-03 19:29:08"
+  },
+  "financelancelot": {
+   "bio": "仅在X分享投资观点的财经博主，决策前请自行研究。",
+   "followers": 359665,
+   "verified": true,
+   "fetched_at": "2026-09-03 19:29:08"
+  },
+  "fintables": {
+   "bio": "土耳其一站式金融数据与资讯平台，提供行情、新闻与应用。",
+   "followers": 412653,
+   "verified": true,
+   "fetched_at": "2026-09-03 19:29:08"
+  },
+  "fonanalisti": {
+   "bio": "持牌基金分析师，帮你专业分析基金以管理资金（非投资建议）。",
+   "followers": 4100,
+   "verified": true,
+   "fetched_at": "2026-09-03 19:30:09"
+  },
+  "garyblack00": {
+   "bio": "Future Fund管理合伙人，SEC注册投资顾问兼CEO/CIO。",
+   "followers": 580000,
+   "verified": true,
+   "fetched_at": "2026-09-03 19:30:09"
+  },
+  "gavinsbaker": {
+   "bio": "Atreides资管管理合伙人兼CIO，观点仅代表个人非投资建议。",
+   "followers": 341000,
+   "verified": true,
+   "fetched_at": "2026-09-03 19:30:09"
+  },
+  "gerberkawasaki": {
+   "bio": "Gerber Kawasaki联合创始人兼CEO/CIO，投资顾问与ETF基金经理。",
+   "followers": 429000,
+   "verified": true,
+   "fetched_at": "2026-09-03 19:30:09"
+  },
+  "goto_finance": {
+   "bio": "前日经记者，独立财经评论员，WBS主播，通俗讲解经济投资。",
+   "followers": 815000,
+   "verified": true,
+   "fetched_at": "2026-09-03 19:30:09"
+  },
+  "grdecter": {
+   "bio": "CEO，常现身彭博与福克斯，LinkedIn顶级意见领袖。",
+   "followers": 412000,
+   "verified": true,
+   "fetched_at": "2026-09-03 19:30:09"
+  },
+  "guskuay": {
+   "bio": "Destek Yatırım研究策略总监。",
+   "followers": 82000,
+   "verified": false,
+   "fetched_at": "2026-09-03 19:30:09"
+  },
+  "haohong_cfa": {
+   "bio": "彭博年度人物，三度中国最具影响力经济学家，以预判牛熊著称。",
+   "followers": 354000,
+   "verified": true,
+   "fetched_at": "2026-09-03 19:30:09"
+  },
+  "hiromethods": {
+   "bio": "经出版社许可，在博客免费公开技术评论社著作内容。",
+   "followers": 10000,
+   "verified": false,
+   "fetched_at": "2026-09-03 19:30:09"
+  },
+  "hirosetakao": {
+   "bio": "",
+   "followers": 292000,
+   "verified": true,
+   "fetched_at": "2026-09-03 19:30:09"
+  },
+  "iancutress": {
+   "bio": "半导体顾问与首席分析师，运营MoreThanMoore与科技YouTube。",
+   "followers": 58000,
+   "verified": true,
+   "fetched_at": "2026-09-03 19:30:09"
+  },
+  "ibrahimmturhan2": {
+   "bio": "经济学教授，曾任土耳其央行与伊斯坦布尔证交所高管及议员。",
+   "followers": 95000,
+   "verified": true,
+   "fetched_at": "2026-09-03 19:30:09"
+  },
+  "investturkey": {
+   "bio": "土耳其总统府投资与金融办公室官方账号。",
+   "followers": 177034,
+   "verified": true,
+   "fetched_at": "2026-09-03 19:31:00"
+  },
+  "irbank": {
+   "bio": "日本企业IR信息网站IRBANK官方账号。",
+   "followers": 9674,
+   "verified": true,
+   "fetched_at": "2026-09-03 19:31:00"
+  },
+  "jessefelder": {
+   "bio": "《Felder Report》创始主编，主持超级投资者播客。",
+   "followers": 171195,
+   "verified": false,
+   "fetched_at": "2026-09-03 19:31:00"
+  },
+  "jimcramer": {
+   "bio": "CNBC《Mad Money》主持人，运营CNBC投资俱乐部。",
+   "followers": 2476209,
+   "verified": true,
+   "fetched_at": "2026-09-03 19:31:00"
+  },
+  "jonahlupton": {
+   "bio": "LuptonCapital对冲基金CEO，专注低估成长股。",
+   "followers": 554248,
+   "verified": true,
+   "fetched_at": "2026-09-03 19:31:00"
+  },
+  "jukan05": {
+   "bio": "Citrini研究员，声明内容非投资建议。",
+   "followers": 208601,
+   "verified": true,
+   "fetched_at": "2026-09-03 19:31:00"
+  },
+  "jyershixiong": {
+   "bio": "前券商投顾与交易员，专注美股期权与港股衍生品。",
+   "followers": 2814,
+   "verified": false,
+   "fetched_at": "2026-09-03 19:31:00"
+  },
+  "kadircalimbay": {
+   "bio": "二十年股市教授，声明不提供投资建议。",
+   "followers": 362678,
+   "verified": true,
+   "fetched_at": "2026-09-03 19:31:00"
+  },
+  "kawzinvests": {
+   "bio": "研究向投资者，关注光子、人工智能、国防、科技与航天。",
+   "followers": 117256,
+   "verified": true,
+   "fetched_at": "2026-09-03 19:31:00"
+  },
+  "kobeissiletter": {
+   "bio": "The Kobeissi Letter官方账号，评论全球资本市场。",
+   "followers": 2590948,
+   "verified": true,
+   "fetched_at": "2026-09-03 19:31:00"
+  },
+  "komcdspxl": {
+   "bio": "工作覆盖北美与中南美市场。",
+   "followers": 140325,
+   "verified": true,
+   "fetched_at": "2026-09-03 19:31:00"
+  },
+  "lanceroberts": {
+   "bio": "首席策略师、RealInvestment节目主持与投资组合经理。",
+   "followers": 105064,
+   "verified": true,
+   "fetched_at": "2026-09-03 19:31:00"
+  },
+  "litcapital": {
+   "bio": "Litquidity创始人，运营Exec Sum与Crypto Sum通讯，兼任贝恩资本Scout。",
+   "followers": 1645000,
+   "verified": true,
+   "fetched_at": "2026-09-03 19:32:11"
+  },
+  "lizannsonders": {
+   "bio": "嘉信理财金融研究中心首席投资策略师。",
+   "followers": 803000,
+   "verified": true,
+   "fetched_at": "2026-09-03 19:32:11"
+  },
+  "lukegromen": {
+   "bio": "Forest for the Trees创始人兼总裁，著有《The Mr. X Interviews》。",
+   "followers": 621000,
+   "verified": true,
+   "fetched_at": "2026-09-03 19:32:11"
+  },
+  "lynaldencontact": {
+   "bio": "《Broken Money》作者，工程金融背景投资者，Ego Death Capital普通合伙人。",
+   "followers": 1131000,
+   "verified": true,
+   "fetched_at": "2026-09-03 19:32:11"
+  },
+  "macroalf": {
+   "bio": "Palinuro Capital与机构宏观研究平台The Macro Compass创始人。",
+   "followers": 467000,
+   "verified": true,
+   "fetched_at": "2026-09-03 19:32:11"
+  },
+  "macromicrome": {
+   "bio": "金融数据平台，提供宏观、行业与股市图表、指标及市场洞察。",
+   "followers": 23000,
+   "verified": true,
+   "fetched_at": "2026-09-03 19:32:11"
+  },
+  "marikomabuchi": {
+   "bio": "日本金融经济研究所代表理事、大阪公立大学客座副教授兼财经评论员。",
+   "followers": 158000,
+   "verified": true,
+   "fetched_at": "2026-09-03 19:32:11"
+  },
+  "markminervini": {
+   "bio": "《像股市奇才一样交易》作者，美国投资锦标赛冠军，股票交易名家。",
+   "followers": 763000,
+   "verified": true,
+   "fetched_at": "2026-09-03 19:32:11"
+  },
+  "memetsimsek": {
+   "bio": "土耳其共和国财政部长。",
+   "followers": 2634000,
+   "verified": true,
+   "fetched_at": "2026-09-03 19:32:11"
+  },
+  "michaelbatnick": {
+   "bio": "长途阅读者。",
+   "followers": 207000,
+   "verified": true,
+   "fetched_at": "2026-09-03 19:32:11"
+  },
+  "mifsee": {
+   "bio": "IT营销从业者，深耕美股投资研究并分享实盘洞察与成长股分析。",
+   "followers": 1900,
+   "verified": true,
+   "fetched_at": "2026-09-03 19:32:11"
+  },
+  "mikefritzell": {
+   "bio": "深耕亚洲股市十六年，《Asian Century Stocks》通讯作者。",
+   "followers": 36000,
+   "verified": true,
+   "fetched_at": "2026-09-03 19:32:11"
+  },
+  "mingchikuo": {
+   "bio": "香港天风国际证券分析师，分享科技产业趋势观察。",
+   "followers": 250296,
+   "verified": true,
+   "fetched_at": "2026-09-03 19:32:51"
+  },
+  "modestproposal1": {
+   "bio": "谦卑提出个人见解，希望不致招致丝毫异议。",
+   "followers": 125498,
+   "verified": true,
+   "fetched_at": "2026-09-03 19:32:51"
+  },
+  "momiage0088": {
+   "bio": "2018年起投资美股，驻美期间快速分享美国市场动态，助力投资新手。",
+   "followers": 211251,
+   "verified": true,
+   "fetched_at": "2026-09-03 19:32:51"
+  },
+  "morganhousel": {
+   "bio": "畅销书作家，Collaborative Fund合伙人，Markel集团董事。",
+   "followers": 703302,
+   "verified": true,
+   "fetched_at": "2026-09-03 19:32:51"
+  },
+  "muratcigerciogu": {
+   "bio": "土耳其银行经理、工业工程学士，内容仅为分享非投资建议。",
+   "followers": 570,
+   "verified": true,
+   "fetched_at": "2026-09-03 19:32:51"
+  },
+  "nicktimiraos": {
+   "bio": "《华尔街日报》首席经济记者，著有《万亿美元急救》。",
+   "followers": 488344,
+   "verified": true,
+   "fetched_at": "2026-09-03 19:32:51"
+  },
+  "nikkei": {
+   "bio": "日本经济新闻电子版官方账号，24小时发布头版及重点资讯。",
+   "followers": 3918647,
+   "verified": true,
+   "fetched_at": "2026-09-03 19:32:51"
+  },
+  "nikkeixtech": {
+   "bio": "日经BP技术媒体「日经交叉科技」官方账号，报道IT至建设等前沿技术。",
+   "followers": 49288,
+   "verified": false,
+   "fetched_at": "2026-09-03 19:32:51"
+  },
+  "northstarcharts": {
+   "bio": "军方气象学家，用科学预测方法研判宏观市场走势与交易。",
+   "followers": 166405,
+   "verified": true,
+   "fetched_at": "2026-09-03 19:32:51"
+  },
+  "nragr": {
+   "bio": "关注美国投资者吉姆·克莱默，运营美股与克莱默相关频道。",
+   "followers": 12168,
+   "verified": true,
+   "fetched_at": "2026-09-03 19:32:51"
+  },
+  "omdia_japan": {
+   "bio": "美国调研公司Omdia日本官方账号，分享最新科技市场趋势。",
+   "followers": 570,
+   "verified": false,
+   "fetched_at": "2026-09-03 19:32:51"
+  },
+  "patrickmoorhead": {
+   "bio": "Moor Insights创始人兼首席分析师，前AMD企业副总裁。",
+   "followers": 68475,
+   "verified": true,
+   "fetched_at": "2026-09-03 19:32:51"
+  },
+  "peterlbrandt": {
+   "bio": "期货市场经典图表分析权威，五十年交易员、市场巫师与作者。",
+   "followers": 1300000,
+   "verified": true,
+   "fetched_at": "2026-09-03 19:34:17"
+  },
+  "piyasatturkiye": {
+   "bio": "土耳其财经资讯号，发布经济动态、公司新闻与策略研报。",
+   "followers": 260000,
+   "verified": true,
+   "fetched_at": "2026-09-03 19:34:17"
+  },
+  "qcompounding": {
+   "bio": "前职业投资者，专注优质股票并在网站上教授投资。",
+   "followers": 490000,
+   "verified": true,
+   "fetched_at": "2026-09-03 19:34:17"
+  },
+  "rampcapitalllc": {
+   "bio": "股票与初创投资者，兼建造者与程序员的网络投资名人。",
+   "followers": 1650000,
+   "verified": true,
+   "fetched_at": "2026-09-03 19:34:17"
+  },
+  "realunclebrent": {
+   "bio": "斜杠中年博主，身兼摄影、设计、讲师与营销，分享多元人生。",
+   "followers": 9,
+   "verified": false,
+   "fetched_at": "2026-09-03 19:34:17"
+  },
+  "ridvanozturgut": {
+   "bio": "经济金融博士与学者，分析股市、黄金、美元与比特币。",
+   "followers": 81000,
+   "verified": true,
+   "fetched_at": "2026-09-03 19:34:17"
+  },
+  "rihardjarc": {
+   "bio": "专注人工智能、云计算、半导体与平台的科技研究投资者。",
+   "followers": 82000,
+   "verified": true,
+   "fetched_at": "2026-09-03 19:34:17"
+  },
+  "sawyermerritt": {
+   "bio": "电动车、航天与科技新闻博主，特斯拉与SpaceX投资者。",
+   "followers": 1120000,
+   "verified": true,
+   "fetched_at": "2026-09-03 19:34:17"
+  },
+  "semianalysis_": {
+   "bio": "专注半导体与人工智能产业链的深度研究与分析。",
+   "followers": 160000,
+   "verified": true,
+   "fetched_at": "2026-09-03 19:34:17"
+  },
+  "semiconportal": {
+   "bio": "来自日本的新兴科技资讯账号，关注半导体产业动态。",
+   "followers": 7,
+   "verified": false,
+   "fetched_at": "2026-09-03 19:34:17"
+  },
+  "serkannnkayaaaa": {
+   "bio": "拥有22年经验的伊斯坦布尔证交所分析师，前银行资深分析员。",
+   "followers": 900,
+   "verified": false,
+   "fetched_at": "2026-09-03 19:34:17"
+  },
+  "statementdog": {
+   "bio": "追踪人工智能基础设施建设背后的公司与技术供应链。",
+   "followers": 3300,
+   "verified": true,
+   "fetched_at": "2026-09-03 19:34:17"
+  },
+  "stockfeel": {
+   "bio": "在线互动平台，助你边学股票交易边赢取虚拟与真实金钱奖励。",
+   "followers": 0,
+   "verified": false,
+   "fetched_at": "2026-09-03 19:35:27"
+  },
+  "stockmktnewz": {
+   "bio": "提供快速、准确、稳定可靠的免费股市新闻，内容不止于股票资讯。",
+   "followers": 1123466,
+   "verified": true,
+   "fetched_at": "2026-09-03 19:35:27"
+  },
+  "strainerjp": {
+   "bio": "从美国企业财报中提炼管理层要点与关键数字，用日语解读AI、基建与消费变化。",
+   "followers": 77848,
+   "verified": true,
+   "fetched_at": "2026-09-03 19:35:27"
+  },
+  "taaardu": {
+   "bio": "土耳其长期投资者，关注新股发行与伊斯坦布尔股市。",
+   "followers": 492697,
+   "verified": true,
+   "fetched_at": "2026-09-03 19:35:27"
+  },
+  "tahtaci_borsa": {
+   "bio": "赢家从不放弃，放弃的人永远无法获胜。",
+   "followers": 180942,
+   "verified": true,
+   "fetched_at": "2026-09-03 19:35:27"
+  },
+  "tapazou29": {
+   "bio": "经营两家公司第十一年，专注美股、房地产与光伏投资并运营投资频道。",
+   "followers": 250429,
+   "verified": true,
+   "fetched_at": "2026-09-03 19:35:27"
+  },
+  "taritariblog": {
+   "bio": "分享时事新闻，关注AI半导体、亚洲经济、职业发展及海外股票。",
+   "followers": 76590,
+   "verified": true,
+   "fetched_at": "2026-09-03 19:35:27"
+  },
+  "tavicosta": {
+   "bio": "Azuria Capital创始人兼CEO，宏观思考者与价值投资者，来自巴西圣保罗。",
+   "followers": 321863,
+   "verified": true,
+   "fetched_at": "2026-09-03 19:35:27"
+  },
+  "techfund1": {
+   "bio": "工程师兼投资组合经理，运营逾1.9万订阅者的投资通讯。",
+   "followers": 16567,
+   "verified": true,
+   "fetched_at": "2026-09-03 19:35:27"
+  },
+  "tesuta001": {
+   "bio": "连续20年盈利的专职投资者，2024年累计利润达100亿日元。",
+   "followers": 1190791,
+   "verified": true,
+   "fetched_at": "2026-09-03 19:35:27"
+  },
+  "thetranscript_": {
+   "bio": "每周精选财报电话会议金句，发布高质量摘录通讯。",
+   "followers": 103243,
+   "verified": true,
+   "fetched_at": "2026-09-03 19:35:27"
+  },
+  "tier10k": {
+   "bio": "发布市场突发与加密快讯，隶属于DB News。",
+   "followers": 1045119,
+   "verified": true,
+   "fetched_at": "2026-09-03 19:35:27"
+  },
+  "traders_web": {
+   "bio": "日本股票资讯网站官方账号，实时发布关注个股及汇市、纽约、上海市场信息。",
+   "followers": 45302,
+   "verified": false,
+   "fetched_at": "2026-09-03 19:36:28"
+  },
+  "trendforce": {
+   "bio": "2000年成立于台北，全球科技产业市场情报提供商。",
+   "followers": 22222,
+   "verified": true,
+   "fetched_at": "2026-09-03 19:36:28"
+  },
+  "tsoh_investing": {
+   "bio": "TSOH投资研究创始人，著有《巴菲特与芒格未公开言论》。",
+   "followers": 65622,
+   "verified": true,
+   "fetched_at": "2026-09-03 19:36:28"
+  },
+  "tuncaytursucu": {
+   "bio": "持牌股市分析师、数学工程师与研究员，内容不构成投资建议。",
+   "followers": 528595,
+   "verified": true,
+   "fetched_at": "2026-09-03 19:36:28"
+  },
+  "unusual_whales": {
+   "bio": "提供市场新闻、交易工具及实时期权资金流、筛选器和GEX预警。",
+   "followers": 5292049,
+   "verified": true,
+   "fetched_at": "2026-09-03 19:36:28"
+  },
+  "us_stock_invest": {
+   "bio": "2017年起投资美股，分享美股、季报与经济动态，兼爱好酒食与足球。",
+   "followers": 62074,
+   "verified": true,
+   "fetched_at": "2026-09-03 19:36:28"
+  },
+  "viop_analiz": {
+   "bio": "即将开设公司估值课程，可关注其另一账号获取相关课程信息。",
+   "followers": 43569,
+   "verified": false,
+   "fetched_at": "2026-09-03 19:36:28"
+  },
+  "yfinansman": {
+   "bio": "土耳其首家券商Yatırım Finansman官方账号，隶属土耳其工行。",
+   "followers": 123099,
+   "verified": true,
+   "fetched_at": "2026-09-03 19:36:28"
+  },
+  "yurumazu": {
+   "bio": "经济学家与全球策略师，畅销书作者及日经Money专栏作家。",
+   "followers": 528868,
+   "verified": true,
+   "fetched_at": "2026-09-03 19:36:28"
+  },
+  "zephyr_z9": {
+   "bio": "关注人工智能与芯片赛道，内容不构成投资建议。",
+   "followers": 171190,
+   "verified": true,
+   "fetched_at": "2026-09-03 19:36:28"
+  },
+  "zerohedge": {
+   "bio": "",
+   "followers": 3370577,
+   "verified": true,
+   "fetched_at": "2026-09-03 19:36:28"
+  }
+ }
+}

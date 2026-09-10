@@ -12,6 +12,7 @@ data/ 目录已被 gitignore, 配置永不入库。
 import json
 import os
 import re
+import shutil
 import tempfile
 from pathlib import Path
 
@@ -180,8 +181,8 @@ def _tts_provider(prev, incoming: dict) -> dict | None:
     if not _tts_id_ok(pid):
         return None
     engine = incoming.get("engine", prev.get("engine") or "edge")
-    if engine not in ("edge", "dashscope"):
-        engine = prev.get("engine") if prev.get("engine") in ("edge", "dashscope") else "edge"
+    if engine not in ("edge", "dashscope", "volc"):
+        engine = prev.get("engine") if prev.get("engine") in ("edge", "dashscope", "volc") else "edge"
     name = incoming["name"] if "name" in incoming else prev.get("name") or pid
     enabled = incoming["enabled"] if "enabled" in incoming else prev.get("enabled", True)
     base_url = incoming["base_url"] if "base_url" in incoming else prev.get("base_url", "")
@@ -257,6 +258,26 @@ def apply_patch(patch: dict) -> dict:
 
 # ── 通用 JSON 清单存取(追踪账号/草稿/自动化任务, 全部原子写) ─────────────────
 
+SEED_DIR = Path(__file__).resolve().parent / "seed"   # 仓内首跑播种源(scripts/sync_seeds.py 生成)
+
+
+def seed_if_missing(name: str) -> bool:
+    """首跑播种: data/workbench/<name> 不存在而仓内 seed/ 有同名件 → 复制过去。
+
+    只在用户自有文件缺失时触发一次——播种后启停/开关全写用户自己的文件,
+    仓库 seed 后续更新永不回写覆盖(分发用户与开发者清单看齐、状态各自独立的契约)。
+    """
+    dst, src = DATA_DIR / name, SEED_DIR / name
+    if dst.exists() or not src.is_file():
+        return False
+    try:
+        DATA_DIR.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(src, dst)
+        return True
+    except OSError:
+        return False
+
+
 def load_rows(name: str) -> list:
     try:
         return json.loads((DATA_DIR / name).read_text(encoding="utf-8"))
@@ -283,7 +304,9 @@ def save_accounts(rows: list) -> list:
 
 def load_yt_channels() -> list:
     """视频页【追踪账号】子页的 YouTube 账号库(与 tracked_accounts.json 物理隔离,
-    见 yt_track.py 模块头竞态说明)。"""
+    见 yt_track.py 模块头竞态说明)。首跑无自有文件时从仓内 seed 播种(清单看齐开发者,
+    启停状态此后归本机)。"""
+    seed_if_missing("yt_channels.json")
     return load_rows("yt_channels.json")
 
 

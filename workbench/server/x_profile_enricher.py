@@ -21,7 +21,7 @@ import tempfile
 import time
 from pathlib import Path
 
-from . import xaccounts
+from . import config, xaccounts
 
 DATA_DIR = Path(__file__).resolve().parents[2] / "data" / "workbench"
 CACHE_FILE = DATA_DIR / "x_profiles.json"
@@ -38,6 +38,8 @@ _PROMPT = """{anti}请用 x-search 逐个查询以下 X(Twitter) 账号的公开
 
 
 def load_cache() -> dict:
+    if not CACHE_FILE.is_file():
+        config.seed_if_missing("x_profiles.json")    # 首跑播种: 粉丝数/认证等展示信息与开发者看齐
     if not CACHE_FILE.is_file():
         return {"enriched_at": None, "profiles": {}}
     try:

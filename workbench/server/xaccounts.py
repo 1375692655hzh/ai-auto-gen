@@ -20,6 +20,7 @@ import yaml
 
 REPO = Path(__file__).resolve().parents[2]               # workbench/server/xaccounts.py → 仓库根
 POOL_FILE = REPO / "global-news-sources" / "config" / "twitter_pool.yaml"
+POOL_SEED = Path(__file__).resolve().parent / "seed" / "twitter_pool.yaml"  # 稀疏检出兜底
 TAXONOMY_FILE = REPO / "global-news-sources" / "sources" / "taxonomy.py"
 
 _POOL_SOURCES = ("twitter_kol_flash", "twitter_kol_views")
@@ -41,10 +42,14 @@ def _role_positioning_map() -> dict:
 
 
 def _load_raw() -> dict:
-    """读主池 + local 覆盖(整条替换, 与 basic.py 同规则)。池缺失=空池不抛(读侧宽容)。"""
+    """读主池 + local 覆盖(整条替换, 与 basic.py 同规则)。池缺失=空池不抛(读侧宽容)。
+    纯工作台稀疏检出没有板块一目录 → 回退仓内 seed 池(与主池同步维护, scripts/sync_seeds.py)。"""
     if not POOL_FILE.is_file():
-        return {}
-    pool = yaml.safe_load(POOL_FILE.read_text(encoding="utf-8")) or {}
+        if not POOL_SEED.is_file():
+            return {}
+        pool = yaml.safe_load(POOL_SEED.read_text(encoding="utf-8")) or {}
+    else:
+        pool = yaml.safe_load(POOL_FILE.read_text(encoding="utf-8")) or {}
     loc = POOL_FILE.with_name("twitter_pool.local.yaml")
     if loc.is_file():
         try:
