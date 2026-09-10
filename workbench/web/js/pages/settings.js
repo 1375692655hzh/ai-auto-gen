@@ -1,4 +1,5 @@
-/* 设置页: 信息源连接(本期核心, 真实可用) + 界面偏好 + 环境自检 + 云端同步预留桩。 */
+/* 设置页: 左侧子页面菜单(壳层 WB.shell.setSubs, 与图文页同范式)分七区 —
+   信息源/界面/翻译/成稿/行情与生成/视频与追踪/系统; 卡片按 sec v-show 单区呈现。 */
 window.WB = window.WB || {};
 WB.pages = WB.pages || {};
 
@@ -40,9 +41,31 @@ WB.pages.settings = {
                 { v: "earnings-watch", t: "财报前瞻 · 本周财报票+关注点", zero: 1 },
                 { v: "funding-trail", t: "融资脉络 · 历轮融资时间线", zero: 1 }],
       check: null, saving: false,
+      /* 左侧子页面菜单当前分区: source/ui/translate/compose/gen/video/sys */
+      sec: "source",
     };
   },
   methods: {
+    /* ── 左侧子页面菜单(壳层契约同 article.js): 七区分卡, v-show 单区呈现 ── */
+    registerSubs() {
+      if (!WB.shell) return;
+      if (!location.hash.replace(/^#/, "").startsWith("/settings")) return;  // 迟到的异步回调不得覆盖别的页面
+      const I = (p) => '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" ' +
+        'stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">' + p + "</svg>";
+      const NAV = [
+        ["source", "信息源连接", '<path d="M4 6h16M4 12h16M4 18h10"/>'],
+        ["ui", "界面偏好", '<circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M4.9 19.1 7 17M17 7l2.1-2.1"/>'],
+        ["translate", "翻译模型", '<path d="M3 5h8M7 3v2c0 4-2.5 7-5 8"/><path d="M5 9c1.5 2.5 4 4.5 7 5"/><path d="m13 21 4.5-11L22 21M14.7 17h5.6"/>'],
+        ["compose", "成稿模型", '<path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/>'],
+        ["gen", "行情与生成", '<path d="M3 17l5.5-5.5 3.5 3.5L20 7"/><path d="M14 7h6v6"/>'],
+        ["video", "视频与追踪", '<polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2"/>'],
+        ["sys", "环境自检", '<path d="M9 12l2 2 4-4"/><circle cx="12" cy="12" r="9"/>'],
+      ];
+      WB.shell.setSubs(NAV.map(([id, title, icon]) => ({
+        id, title, icon: I(icon), onPick: () => { this.sec = id; },
+      })), this.sec);
+    },
+    go(sec) { this.sec = sec; if (WB.shell) WB.shell.setSub(sec); },
     async load() {
       const d = await WB.api.get("/settings");
       d.market = { source_pref: "auto", ...(d.market || {}) };
@@ -353,11 +376,12 @@ WB.pages.settings = {
       try { this.check = await WB.api.get("/selfcheck"); } catch (e) {}
     },
   },
-  mounted() { this.load(); this.loadCheck(); this.loadOmni(); },
+  mounted() { this.registerSubs(); this.load(); this.loadCheck(); this.loadOmni(); },
+  unmounted() { if (WB.shell) WB.shell.setSubs([]); },
   template: `
   <div style="max-width:760px">
     <!-- 1. 信息源连接 -->
-    <div class="card">
+    <div class="card" v-show="sec==='source'">
       <h3>信息源连接</h3>
       <div class="key-guide">
         <b>注册来源:</b> 无需注册 —— 本机(127.0.0.1)模式免密直连;
@@ -393,7 +417,7 @@ WB.pages.settings = {
     </div>
 
     <!-- 2. 界面偏好 -->
-    <div class="card">
+    <div class="card" v-show="sec==='ui'">
       <h3>界面偏好</h3>
       <div class="form-row"><label>主题</label>
         <div class="radio-group">
@@ -409,7 +433,7 @@ WB.pages.settings = {
     </div>
 
     <!-- 3. 翻译模型(蹭蹭流量推文翻译, OpenAI 兼容 /chat/completions) -->
-    <div class="card">
+    <div class="card" v-show="sec==='translate'">
       <h3>翻译模型 <span class="muted">全站浏览层翻译(推荐信息/蹭蹭流量/资讯页视口自动翻) ·  DeepSeek 链头优先</span></h3>
       <div class="key-guide">
         <b>推荐方案(必配, 稳定且极便宜):</b>
@@ -461,7 +485,7 @@ WB.pages.settings = {
     </div>
 
     <!-- 4. 成稿模型(内容生成专用 LLM, 独立于翻译链, 不动翻译额度) -->
-    <div class="card">
+    <div class="card" v-show="sec==='compose'">
       <h3>成稿模型 <span class="muted">内容生成页·开始生成专用 · 独立计费</span></h3>
       <div class="key-guide">
         <b>注册来源:</b> 同翻译模型 ——
@@ -494,7 +518,7 @@ WB.pages.settings = {
     </div>
 
     <!-- 5. Finnhub(内容生成·聚合分析增强, 投行评级/目标价, 仅美股) -->
-    <div class="card">
+    <div class="card" v-show="sec==='gen'">
       <h3>Finnhub <span class="muted">内容生成·聚合分析增强 · 投行评级/目标价(仅美股)</span></h3>
       <div class="key-guide">
         <b>注册来源:</b>
@@ -511,7 +535,7 @@ WB.pages.settings = {
       <button class="btn primary" :disabled="saving" @click="save">保存设置</button>
     </div>
 
-    <div class="card">
+    <div class="card" v-show="sec==='gen'">
       <h3>内容生成 · 行情源</h3>
       <div class="form-row"><label>行情数据源</label>
         <select v-model="s.market.source_pref">
@@ -523,7 +547,7 @@ WB.pages.settings = {
       <button class="btn primary" :disabled="saving" @click="save">保存设置</button>
     </div>
 
-    <div class="card">
+    <div class="card" v-show="sec==='gen'">
       <h3>内容生成 · 默认参数</h3>
       <div class="form-row"><label>默认语种</label>
         <select v-model="s.gen_defaults.lang">
@@ -542,7 +566,7 @@ WB.pages.settings = {
     </div>
 
     <!-- 4. YouTube 热点追踪(视频页【热点追踪/追踪账号】数据源, Data API v3) -->
-    <div class="card">
+    <div class="card" v-show="sec==='video'">
       <h3>YouTube 热点追踪 <span class="muted">视频页·热点追踪 · Data API v3</span></h3>
       <div class="key-guide">
         <b>注册来源:</b>
@@ -562,7 +586,7 @@ WB.pages.settings = {
     </div>
 
     <!-- 5. 视频分析(Gemini) -->
-    <div class="card">
+    <div class="card" v-show="sec==='video'">
       <h3>视频分析 (Gemini) <span class="muted">视频工坊·看片分析 · Google AI Studio</span></h3>
       <div class="key-guide">
         <b>注册来源:</b>
@@ -583,7 +607,7 @@ WB.pages.settings = {
     </div>
 
     <!-- 语音合成(视频制作配音, Edge 免费 / DashScope 可选, 可增删供应商) -->
-    <div class="card">
+    <div class="card" v-show="sec==='video'">
       <h3>语音合成 <span class="muted">视频制作·配音 · 可配置多个供应商</span></h3>
       <div class="key-guide">
         <b>注册来源:</b> Edge TTS 免费免 Key;
@@ -682,7 +706,7 @@ WB.pages.settings = {
     </div>
 
     <!-- 视频分析路径(本地文件分析扫描根) -->
-    <div class="card">
+    <div class="card" v-show="sec==='video'">
       <h3>视频分析路径 <span class="muted">视频工坊·本地文件分析 · 4 个扫描根</span></h3>
       <div class="form-row"><label>路径 1</label>
         <input type="text" v-model="s.analysis_paths.paths[0]" style="width:520px"
@@ -702,7 +726,7 @@ WB.pages.settings = {
     </div>
 
     <!-- 6. 环境自检 -->
-    <div class="card">
+    <div class="card" v-show="sec==='sys'">
       <h3>环境自检 <button class="btn" style="float:right" @click="loadCheck">刷新</button></h3>
       <div v-if="check">
         <div class="form-row"><label>工作流包</label><span>{{ check.flows_count }} 个</span></div>
@@ -718,7 +742,7 @@ WB.pages.settings = {
     </div>
 
     <!-- 4. 账号与云同步(预留) -->
-    <div class="card" style="opacity:.65">
+    <div class="card" style="opacity:.65" v-show="sec==='sys'">
       <h3>账号与云同步(预留)</h3>
       <p class="muted" style="margin-bottom:10px">当前为个人单机纯本地版; 未来登录后可将工作台配置与追踪账号同步到云端。</p>
       <div class="form-row"><label>云端网关</label>
