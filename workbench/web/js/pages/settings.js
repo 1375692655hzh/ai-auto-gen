@@ -408,14 +408,15 @@ WB.pages.settings = {
     <div class="card">
       <h3>翻译模型 <span class="muted">全站浏览层翻译(推荐信息/蹭蹭流量/资讯页视口自动翻) · 免费链优先</span></h3>
       <div class="key-guide">
-        <b>免费方案(零费用):</b> 装 <a href="https://omniroute.online" target="_blank" rel="noopener">OmniRoute</a>
-        (Node 工具, <code>npm i -g omniroute</code> 后跑 <code>omniroute serve</code>, 监听 127.0.0.1:20128),
-        <b>默认链已预置好本机免费位, 装好即生效、本页不用填任何东西</b>;
-        也可跑项目 bin/omniroute_task.bat 挂登录自启。<br>
-        <b>付费方案:</b>
+        <b>免费方案(部分地区可用):</b> 装 <a href="https://omniroute.online" target="_blank" rel="noopener">OmniRoute</a>
+        (下方按钮一键安装, 监听 127.0.0.1:20128), 默认链已预置本机免费位。
+        <b>注意: 预置的 muse 免费模型有地区限制, 部分地区(含部分中国大陆网络)会 403
+        "not available in your country"</b>——遇到此情况请走付费方案, 免费位失败会自动跳过不占时间。<br>
+        <b>付费方案(推荐, 稳定且极便宜):</b>
         <a href="https://platform.deepseek.com" target="_blank" rel="noopener">DeepSeek 开放平台</a>
-        → 注册 → 充值 → 「API keys」创建( sk- 开头), 在下面三行填入(链头优先, OmniRoute 免费位自动兜底);
-        任意 OpenAI 兼容服务也可(月之暗面/硅基流动等, 换 base_url + model 即可)。<br>
+        → 注册(送额度) → 「API keys」创建( sk- 开头), 在下面三行填入(链头优先, 免费位兜底);
+        翻译用量很小, 日常使用月费用可忽略。任意 OpenAI 兼容服务也可
+        (通义/Kimi/月之暗面等, 换 base_url + model 即可)。<br>
         <b>说明:</b> 服务全站浏览层翻译(看才翻、翻过即存哈希缓存)与采集轮自动补译;
         配置仅存本工作台(data/workbench/settings.json)——
         <b>只单独部署工作台、没有数据站的用户, 照常生效</b>(RSS 源不依赖数据站)。
