@@ -14,11 +14,11 @@ import urllib.request
 import webbrowser
 from pathlib import Path
 
-from fastapi import FastAPI, Request
+from fastapi import Body, FastAPI, Request
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
-from . import config, gcompose, ondemand_translate, proxy, retrieve, stats, views, vstudio, xaccounts, x_profile_enricher, x_surge, yt_track
+from . import config, gcompose, omniroute_ctl, ondemand_translate, proxy, retrieve, stats, views, vstudio, xaccounts, x_profile_enricher, x_reply, x_surge, yt_track
 
 WEB = Path(__file__).resolve().parent.parent / "web"
 
@@ -302,6 +302,19 @@ def create_app() -> FastAPI:
             return JSONResponse(out, status_code=400 if p.returncode == 4 else 502)
         return out
 
+    # ── OmniRoute 免费翻译网关: 状态探测 + 一键安装启动(分发用户开箱即用, omniroute_ctl) ──
+    @app.get("/wb-api/omniroute-status")
+    def omniroute_status():
+        return omniroute_ctl.status()
+
+    @app.post("/wb-api/omniroute-setup")
+    def omniroute_setup():
+        try:
+            return omniroute_ctl.setup()
+        except Exception as e:
+            return JSONResponse({"ok": False, "state": "error", "msg": f"setup_failed: {e}"},
+                                status_code=500)
+
     # ── 浏览层按需翻译: 视口内缺译文卡片批量翻, 哈希缓存落盘, 免费链(ondemand_translate) ──
     @app.post("/wb-api/translate")
     async def wb_translate(request: Request):
@@ -447,6 +460,48 @@ def create_app() -> FastAPI:
     @app.get("/wb-api/x-surge-rss")
     def x_surge_rss_view(sort: str = "prob", limit: int = 100):
         return x_surge.rss_view(sort=sort, limit=limit)
+
+    # ── 蹭蹭流量·评论生成: 缓存命中同步直返, 未命中同步 spawn CLI(test-llm 先例;
+    #    同步 def 走 Starlette 线程池, LLM 外呼只在 CLI 子进程, 端点零外呼红线不破) ──
+    @app.post("/wb-api/x-reply")
+    def x_reply_gen(body: dict = Body(default=None)):
+        body = body or {}
+        sid = str(body.get("status_id") or "")
+        force = bool(body.get("force"))
+        if not (sid.isdigit() and 5 <= len(sid) <= 25):
+            return JSONResponse({"error": "bad_status_id"}, status_code=400)
+        try:
+            cached = x_reply.cache_get(sid)
+        except Exception:
+            cached = None
+        if cached is not None and not force:
+            return {"cached": True, **cached}
+        ok, err = x_reply.try_begin(sid, force)
+        if not ok:
+            return JSONResponse({"error": err}, status_code=429)
+        import subprocess
+        cli = Path(__file__).resolve().parents[2] / "cli.py"
+        try:
+            p = subprocess.run(
+                ["py", "-3.11", str(cli), "workbench", "gen-reply",
+                 "--status-id", sid] + (["--force"] if force else []),
+                capture_output=True, text=True, encoding="utf-8", timeout=90)
+        except subprocess.TimeoutExpired:
+            return JSONResponse({"error": "cli_timeout",
+                                 "hint": "模型 90 秒未返回, 稍后再试"}, status_code=504)
+        except OSError as e:
+            return JSONResponse({"error": f"生成进程启动失败: {e}"}, status_code=500)
+        finally:
+            x_reply.finish(sid)
+        try:
+            out = json.loads(p.stdout.strip().splitlines()[-1])
+            if not isinstance(out, dict):
+                raise ValueError("invalid result")
+        except (ValueError, TypeError, IndexError):
+            return JSONResponse({"error": "invalid_cli_response"}, status_code=502)
+        if p.returncode != 0:
+            return JSONResponse(out, status_code=400 if p.returncode == 4 else 502)
+        return {"cached": False, **out}
 
     # ── 视频页【热点追踪/追踪账号】: YouTube 账号库+快照增量榜(读缓存零外呼;
     #    外呼只在 /yt/collect spawn 的 CLI 进程, 同 x_surge 架构) ────────────────

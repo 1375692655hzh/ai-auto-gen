@@ -19,6 +19,7 @@ WB.pages.settings = {
            cloud: { endpoint: "", account: "", sync_enabled: false } },
       hasKey: false, keyTail: "", testResult: null, testing: false,
       tHasKey: false, tKeyTail: "",
+      omni: { state: "", busy: false, msg: "" },   /* OmniRoute 免费网关: running/installed/missing/no_node */
       yHasKey: false, yKeyTail: "",
       gHasKey: false, gKeyTail: "",
       cHasKey: false, cKeyTail: "", composeExtra: "",
@@ -71,6 +72,29 @@ WB.pages.settings = {
       };
       this.ttsRemoved = [];
       this.applyTheme();
+    },
+    /* ── OmniRoute 免费翻译网关: 状态探测 + 一键安装启动(幂等, 分发用户开箱即用) ── */
+    async loadOmni() {
+      try {
+        const d = await WB.api.get("/omniroute-status");
+        this.omni.state = d.state || "";
+        this.omni.msg = d.hint || "";
+      } catch (e) { this.omni.state = ""; }
+    },
+    async setupOmni() {
+      if (this.omni.busy) return;
+      this.omni.busy = true; this.omni.msg = "安装/启动中, 可能需要 1-2 分钟…";
+      try {
+        const d = await fetch("/wb-api/omniroute-setup", { method: "POST" }).then((r) => r.json());
+        this.omni.state = d.state || "";
+        this.omni.msg = d.msg || "";
+        if (WB.toast) WB.toast(d.ok ? "✅ " + d.msg : "⚠️ " + d.msg);
+        if (d.ok) this.loadOmni();
+      } catch (e) {
+        this.omni.msg = "请求失败: " + ((e && e.message) || e);
+      } finally {
+        this.omni.busy = false;
+      }
     },
     async save() {
       let extraBody = {};
@@ -325,7 +349,7 @@ WB.pages.settings = {
       try { this.check = await WB.api.get("/selfcheck"); } catch (e) {}
     },
   },
-  mounted() { this.load(); this.loadCheck(); },
+  mounted() { this.load(); this.loadCheck(); this.loadOmni(); },
   template: `
   <div style="max-width:760px">
     <!-- 1. 信息源连接 -->
@@ -395,6 +419,23 @@ WB.pages.settings = {
         <b>说明:</b> 服务全站浏览层翻译(看才翻、翻过即存哈希缓存)与采集轮自动补译;
         配置仅存本工作台(data/workbench/settings.json)——
         <b>只单独部署工作台、没有数据站的用户, 照常生效</b>(RSS 源不依赖数据站)。
+      </div>
+      <div class="omni-row" style="margin:6px 0">
+        <template v-if="omni.state === 'running'">
+          🟢 <b>OmniRoute 运行中</b>(127.0.0.1:20128) · 免费翻译已生效
+        </template>
+        <template v-else-if="omni.state === 'installed'">
+          🟡 OmniRoute 已安装、未运行
+          <button class="btn" style="margin-left:8px" :disabled="omni.busy" @click="setupOmni">{{ omni.busy ? '启动中…' : '启动' }}</button>
+        </template>
+        <template v-else-if="omni.state === 'missing'">
+          🔴 未安装 OmniRoute, 免费翻译暂不可用
+          <button class="btn primary" style="margin-left:8px" :disabled="omni.busy" @click="setupOmni">{{ omni.busy ? '安装中(1-2分钟)…' : '一键安装并启动' }}</button>
+        </template>
+        <template v-else-if="omni.state === 'no_node'">
+          🔴 未检测到 Node.js — 先到 nodejs.org 装 LTS 版再回来点「一键安装并启动」
+        </template>
+        <span v-if="omni.msg && omni.state !== 'no_node'" class="muted" style="margin-left:8px">{{ omni.msg }}</span>
       </div>
 
       <div class="form-row"><label>接口地址</label>
