@@ -140,7 +140,7 @@ WB.trans = (function () {
     }).then((r) => r.json()).then((d) => {
       if (d.unconfigured && !sessionStorage.getItem("wb_tr_warned")) {
         sessionStorage.setItem("wb_tr_warned", "1");   // 每次刷新只提醒一次
-        if (WB.toast) WB.toast("翻译未配置: 设置页「翻译模型」填 key, 或装 OmniRoute 免费翻译(见设置页说明)");
+        if (WB.toast) WB.toast("翻译未配置: 到设置页「翻译模型」填 DeepSeek 等 key(免费位 muse 有云端地区封锁, 大陆网络不可用, 见设置页说明)");
       }
       (d.results || []).forEach((res) => {
         const b = batch.find((x) => x.i === res.i);

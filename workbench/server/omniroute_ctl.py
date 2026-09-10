@@ -48,7 +48,8 @@ def setup(timeout_s: int = 300) -> dict:
     """幂等安装并启动。返回最终状态; npm 输出尾部回显供前端展示。"""
     st = status()
     if st["state"] == "running":
-        return {**st, "ok": True, "msg": "OmniRoute 已在运行, 免费翻译已生效"}
+        return {**st, "ok": True,
+                "msg": "OmniRoute 已在运行(免费位 muse 有云端地区封锁, 大陆网络 403 属正常, 请配 DeepSeek 链头)"}
     log_tail = ""
     if st["state"] == "missing":
         npm = shutil.which("npm")
@@ -81,6 +82,7 @@ def setup(timeout_s: int = 300) -> dict:
     for _ in range(20):                                          # 最多等 20s 起监听
         if _listening():
             return {"state": "running", "ok": True,
-                    "msg": "OmniRoute 已启动, 免费翻译生效(链位: 127.0.0.1:20128 muse)", "log": log_tail}
+                    "msg": "OmniRoute 已启动(链位 127.0.0.1:20128; 免费位 muse 有云端地区封锁, 大陆网络 403 属正常, 请配 DeepSeek 链头)",
+                    "log": log_tail}
         time.sleep(1)
     return {"state": "installed", "ok": False, "msg": "已拉起但 20s 内未见 20128 监听, 稍后再试或看 data/omniroute_task.log"}

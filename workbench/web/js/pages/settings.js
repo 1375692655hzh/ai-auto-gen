@@ -190,6 +190,10 @@ WB.pages.settings = {
     },
     ttsIdOk(v) { return /^[\w-]+$/.test(String(v || "")); },
     engineVoices(engine) {
+      if (engine === "volc") return [
+        {id: "zh_male_liufei_uranus_bigtts", name: "刘飞2.0·新闻口播"},
+        {id: "zh_male_dayi_uranus_bigtts", name: "大壹·解说"},
+        {id: "zh_male_m191_uranus_bigtts", name: "云舟·通用"}];
       return engine === "dashscope"
         ? [{ id: "longanlufeng", name: "陆锋 · 男声" }, { id: "longanlingxin", name: "灵欣 · 女声" }]
         : [{ id: "zh-CN-XiaoxiaoNeural", name: "晓晓 · 女声" },
@@ -265,7 +269,7 @@ WB.pages.settings = {
     },
     toggleTtsOpen(p) { p.open = p.open === true ? false : true; },
     engineLabel(e) {
-      return { edge: "Edge TTS", dashscope: "DashScope", custom: "自定义" }[e] || e;
+      return { edge: "Edge TTS", dashscope: "DashScope", volc: "豆包 TTS 2.0", custom: "自定义" }[e] || e;
     },
     addTtsProvider() {
       const ids = new Set((this.s.tts.providers || []).map((p) => p.id));
@@ -406,24 +410,27 @@ WB.pages.settings = {
 
     <!-- 3. 翻译模型(蹭蹭流量推文翻译, OpenAI 兼容 /chat/completions) -->
     <div class="card">
-      <h3>翻译模型 <span class="muted">全站浏览层翻译(推荐信息/蹭蹭流量/资讯页视口自动翻) · 免费链优先</span></h3>
+      <h3>翻译模型 <span class="muted">全站浏览层翻译(推荐信息/蹭蹭流量/资讯页视口自动翻) ·  DeepSeek 链头优先</span></h3>
       <div class="key-guide">
-        <b>免费方案(部分地区可用):</b> 装 <a href="https://omniroute.online" target="_blank" rel="noopener">OmniRoute</a>
-        (下方按钮一键安装, 监听 127.0.0.1:20128), 默认链已预置本机免费位。
-        <b>注意: 预置的 muse 免费模型有地区限制, 部分地区(含部分中国大陆网络)会 403
-        "not available in your country"</b>——遇到此情况请走付费方案, 免费位失败会自动跳过不占时间。<br>
-        <b>付费方案(推荐, 稳定且极便宜):</b>
+        <b>推荐方案(必配, 稳定且极便宜):</b>
         <a href="https://platform.deepseek.com" target="_blank" rel="noopener">DeepSeek 开放平台</a>
-        → 注册(送额度) → 「API keys」创建( sk- 开头), 在下面三行填入(链头优先, 免费位兜底);
+        → 注册(送额度) → 「API keys」创建( sk- 开头), 在下面三行填入(链头优先);
         翻译用量很小, 日常使用月费用可忽略。任意 OpenAI 兼容服务也可
         (通义/Kimi/月之暗面等, 换 base_url + model 即可)。<br>
+        <b>免费方案(基本不可用, 仅供网络在允许地区的用户):</b> 装
+        <a href="https://omniroute.online" target="_blank" rel="noopener">OmniRoute</a>
+        (下方按钮一键安装, 监听 127.0.0.1:20128), 默认链尾已预置本机免费位。
+        <b>已实测: 预置的 muse 免费模型是 OmniRoute 云端中转, 中转服务端做地区封锁
+        (403 "not available in your country")——本机代理绕不过</b>(Node fetch 不走系统代理端口;
+        强制走代理+香港出口仍 403, 疑似按账号/渠道地区绑定)。大陆网络别折腾免费位,
+        直接配上面的 DeepSeek; 免费位失败会自动跳过不占时间。<br>
         <b>说明:</b> 服务全站浏览层翻译(看才翻、翻过即存哈希缓存)与采集轮自动补译;
         配置仅存本工作台(data/workbench/settings.json)——
         <b>只单独部署工作台、没有数据站的用户, 照常生效</b>(RSS 源不依赖数据站)。
       </div>
       <div class="omni-row" style="margin:6px 0">
         <template v-if="omni.state === 'running'">
-          🟢 <b>OmniRoute 运行中</b>(127.0.0.1:20128) · 免费翻译已生效
+          🟢 <b>OmniRoute 运行中</b>(127.0.0.1:20128) · 免费位仅在非封锁地区可用(大陆网络会 403 自动跳过)
         </template>
         <template v-else-if="omni.state === 'installed'">
           🟡 OmniRoute 已安装、未运行
@@ -624,13 +631,14 @@ WB.pages.settings = {
         <div class="form-row"><label>引擎</label>
           <select v-model="p.engine" @change="onTtsEngine(p)">
             <option value="edge">Edge TTS（免费）</option>
+            <option value="volc">豆包 TTS 2.0（火山引擎）</option>
             <option value="dashscope">DashScope（阿里云）</option>
             <option value="custom">自定义（OpenAI 兼容 /audio/speech）</option>
           </select>
           <label><input type="checkbox" v-model="p.enabled"> 启用</label></div>
         <div class="form-row"><label>API Key</label>
           <input type="password" v-model="p.api_key"
-                 :placeholder="p.has_key ? '已配置(尾号 ' + p.key_tail + '), 留空保持不变' : (p.engine==='edge' ? 'Edge 可留空' : 'sk-...')"
+                 :placeholder="p.has_key ? '已配置(尾号 ' + p.key_tail + '), 留空保持不变' : (p.engine==='edge' ? 'Edge 可留空' : p.engine==='volc' ? '火山引擎新版 API Key（X-Api-Key）' : 'sk-...')"
                  style="width:320px">
           <span class="muted">仅存本机服务端, 不回显明文</span></div>
         <div class="form-row" v-if="p.engine==='dashscope'"><label>接口地址</label>
