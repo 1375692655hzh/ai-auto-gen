@@ -153,6 +153,8 @@ def save(cfg: dict) -> dict:
     with os.fdopen(fd, "w", encoding="utf-8") as f:
         json.dump(merged, f, ensure_ascii=False, indent=2)
     os.replace(tmp, _settings_file())
+    # 主动失效 mtime 缓存: 不赌文件系统时间戳粒度(同戳替换会读到旧对象), 写完直接换血
+    _LOAD_CACHE.update({"mtime_ns": None, "data": None})
     return merged
 
 

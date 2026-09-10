@@ -221,33 +221,42 @@ WB.pages.track = {
       this.xtrack.loading = true;
       try {
         const d = await WB.api.get("/xt/overview");
+        if (this.disposed) return;                 // 卸载后迟到响应: 不回写也不再挂轮询
         this.xtrack.accounts = d.accounts || [];
         this.xtrack.count = d.count || 0;
         this.xtrack.enabled_n = d.enabled_n || 0;
         this.xtrack.status = d.status || {};
         this.xtrack.err = "";
       } catch (e) {
+        if (this.disposed) return;
         this.xtrack.accounts = [];
         this.xtrack.err = (e && e.error) || "接口不可用";
       }
       this.xtrack.loading = false;
       this.registerSubs();
-      if ((this.xtrack.status || {}).running) this.watchXt();   // 打开页面时已在跑(计划任务拉的)
+      if ((this.xtrack.status || {}).running && !this.disposed) this.watchXt();   // 打开页面时已在跑(计划任务拉的)
     },
-    watchXt() {          // 采集中轮询(4s): 结束后刷新列表与已展开详情
-      if (this.xt.timer) return;
-      this.xt.timer = setInterval(async () => {
+    watchXt() {          // 采集中轮询(退避 4s→12s): 结束后刷新列表与已展开详情
+      if (this.xt.timer || this.disposed) return;
+      this.xt.delay = 4000;
+      const step = async () => {
+        if (this.disposed) { this.xt.timer = null; return; }
         try {
           const d = await WB.api.get("/xt/overview");
+          if (this.disposed) { this.xt.timer = null; return; }
           this.xtrack.status = d.status || {};
           this.xtrack.accounts = d.accounts || [];
           if (!(d.status || {}).running) {
-            clearInterval(this.xt.timer); this.xt.timer = null;
+            this.xt.timer = null;
             this.loadXtrack();
             if (this.xtSel) this.loadXtDetail();
+            return;
           }
         } catch (e) {}
-      }, 4000);
+        this.xt.delay = Math.min(12000, this.xt.delay * 2);
+        this.xt.timer = setTimeout(step, this.xt.delay);
+      };
+      this.xt.timer = setTimeout(step, this.xt.delay);
     },
     async xtCollectNow() {   // X 模块统一采集: 一轮拉全部启用账号
       if (this.xt.busy) return;
@@ -466,13 +475,14 @@ WB.pages.track = {
       this.published = d.published; this.stats = d.stats;
     } catch (e) {}
     WB.api.get("/yt/status").then((st) => {          // 页面打开时已在采集 → 续上轮询
+      if (this.disposed) return;                     // 迟到响应不得重建轮询
       if (st && st.running) { this.ytCollecting = true; this.pollYtCollect(); }
     }).catch(() => {});
   },
   unmounted() {
     this.disposed = true;
     if (WB.shell) WB.shell.setSubs([]);
-    if (this.xt.timer) { clearInterval(this.xt.timer); this.xt.timer = null; }
+    if (this.xt.timer) { clearTimeout(this.xt.timer); this.xt.timer = null; }
     clearTimeout(this.ytCollectPoll);
   },
   template: `

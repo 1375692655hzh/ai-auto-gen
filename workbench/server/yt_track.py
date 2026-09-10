@@ -664,7 +664,7 @@ def build_view(range: str = "24h", sort: str = "views", kind: str = "all",
     hit = _VIEW_CACHE["data"]
     if hit is not None and _VIEW_CACHE["key"] == key \
             and time.time() - _VIEW_CACHE["at"] < _VIEW_TTL_S:
-        return hit
+        return json.loads(json.dumps(hit))     # 深拷贝: 前端改 items 字段不得污染缓存
     now = time.time()
     store = load_store()
     channels = [c for c in config.load_yt_channels()
