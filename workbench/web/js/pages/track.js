@@ -23,6 +23,7 @@ WB.pages.track = {
       xtRanges: [[7, "近7天"], [30, "近30天"], [90, "近90天"], [365, "近一年"], [9999, "全部"]],
       /* ── YouTube 模块(原视频页「追踪账号」; 紧凑表替代大卡片) ── */
       chs: [], chMeta: null, chQ: "", chBusyId: "",
+      chForm: { input: "", note: "" }, adding: false,
       ytCollecting: false, ytCollectPoll: null,
       disposed: false,
       /* YTB 频道行内展开曲线(对齐 X 追踪的 accordion 图表) */
@@ -345,7 +346,7 @@ WB.pages.track = {
     async toggleCh(c) {
       this.chBusyId = c.id;
       try {
-        const d = await WB.api.post("/yt/channels/" + c.id + "/enabled", { on: c.enabled === false });
+        const d = await WB.api.post("/yt-own/channels/" + c.id + "/enabled", { on: c.enabled === false });
         c.enabled = d.enabled;
       } catch (e) { WB.toast(e.error); }
       this.chBusyId = "";
@@ -353,7 +354,7 @@ WB.pages.track = {
     async delCh(c) {
       if (!confirm("删除追踪 " + (c.title || c.input) + " ?\n已采集的历史数据保留在本地, 但不再更新")) return;
       try {
-        const d = await WB.api.del("/yt/channels/" + c.id);
+        const d = await WB.api.del("/yt-own/channels/" + c.id);
         this.chs = d.channels;
         if (this.ytbSel === c.channel_id) this.ytbSel = "";
         WB.toast("已删除");
@@ -370,9 +371,23 @@ WB.pages.track = {
       if (c.resolve_status === "resolved") return "已解析";
       return "待解析";
     },
+    async addChannel() {
+      if (!this.chForm.input.trim()) { WB.toast("请粘贴自己频道的 @handle / 链接 / 频道名"); return; }
+      this.adding = true;
+      try {
+        const d = await WB.api.post("/yt-own/channels",
+          { input: this.chForm.input, note: this.chForm.note });
+        this.chs = d.channels;
+        WB.toast("已添加" + (d.added.title ? ": " + d.added.title : "(下一轮采集时解析)"));
+        this.chForm.input = ""; this.chForm.note = "";
+        if (this.chMeta && this.chMeta.configured) this.ytCollectNow();  // 让新账号尽快出数据
+      } catch (e) { WB.toast(e.error + (e.hint ? " — " + e.hint : "")); }
+      this.adding = false;
+      this.registerSubs();
+    },
     async loadChannels() {
       try {
-        const d = await WB.api.get("/yt/channels");
+        const d = await WB.api.get("/yt-own/channels");
         this.chs = d.channels; this.chMeta = d.meta;
       } catch (e) {}
       this.registerSubs();
@@ -390,7 +405,7 @@ WB.pages.track = {
       this.ytbDetail.loading = true;
       const cid = this.ytbSel;                     // 快速切换时丢弃过期响应
       try {
-        const d = await WB.api.get("/yt/channels/" + cid + "/series?days=" + this.ytbChart.range);
+        const d = await WB.api.get("/yt-own/channels/" + cid + "/series?days=" + this.ytbChart.range);
         if (cid !== this.ytbSel) return;
         this.ytbDetail.raw = d;
       } catch (e) { if (cid === this.ytbSel) this.ytbDetail.raw = null; }
@@ -608,21 +623,27 @@ WB.pages.track = {
     <!-- ═══ 模块二: YouTube ═══ -->
     <div v-show="sec==='ytb'">
       <div class="card">
-        <h3>YouTube 频道追踪({{ chs.length }})
+        <h3>YouTube 我的频道({{ chs.length }})
+          <span class="muted" style="font-weight:400">只追踪你自己的账号; 与视频页【账号管理】独立</span>
           <span v-if="chMeta && !chMeta.configured" class="muted" style="font-weight:400">
             · 未配 Key, 添加后待解析</span>
           <span style="float:right"><button class="btn" @click="loadChannels">刷新</button></span></h3>
         <div class="feed-toolbar">
-          <input type="text" v-model="chQ" placeholder="搜索(频道名/handle/备注)" style="width:160px">
+          <input type="text" v-model="chForm.input" @keyup.enter="addChannel"
+                 placeholder="你自己频道的 youtube.com/@handle 链接或频道名" style="width:300px" :disabled="adding">
+          <input type="text" v-model="chForm.note" @keyup.enter="addChannel"
+                 placeholder="备注(可选)" style="width:140px" :disabled="adding">
+          <button class="btn primary" @click="addChannel" :disabled="adding">{{ adding ? '保存中…' : '添加' }}</button>
+          <input type="text" v-model="chQ" placeholder="搜索" style="width:130px">
           <span style="flex:1"></span>
           <button class="btn primary" @click="ytCollectNow" :disabled="ytCollecting"
                   :title="ytCollecting ? '采集进行中' : '拉取全部启用频道的最新统计'">{{ ytCollecting ? '采集中…' : '⟳ 立即采集' }}</button>
         </div>
         <div class="muted" style="margin:6px 0 10px">
-          统一采集: 一次拉取全部启用频道的最新统计(计划任务每天一次, 或点右上「立即采集」)。
-          添加/备注管理在视频页【账号管理】, 本页追踪用户已设频道(可启停采集与删除)。</div>
+          统一采集: 一次拉取全部启用频道的最新统计(计划任务每天一次, 或点「立即采集」)。
+          这里只追踪你自己的频道(订阅/增粉/更新/流量曲线); 他人频道的热点采集在视频页【账号管理】——两边独立存储。</div>
         <div v-if="!chs.length" class="muted" style="padding:8px 0">
-          尚未追踪频道 —— 到视频页【账号管理】添加并启用频道; 本页只读追踪数据。</div>
+          尚未添加自己的频道 —— 上方粘贴自己频道的链接或 @handle; 添加后点「立即采集」出数。</div>
         <table v-else class="tbl">
           <thead><tr><th>频道</th><th>订阅</th><th>今日增粉</th><th>今日更新</th>
             <th>最新视频流量</th><th>近7日总流量</th><th>7日流量变化</th><th>采集</th><th>操作</th></tr></thead>

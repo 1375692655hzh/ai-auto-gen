@@ -883,7 +883,7 @@ def channel_stats() -> dict:
     return out
 
 
-def channel_series(cid: str, days: int = 30) -> dict | None:
+def channel_series(cid: str, days: int = 30, row: dict | None = None) -> dict | None:
     """YTB 频道追踪曲线数据(2026-09-10, 对齐 X 追踪的行内展开图): 零外呼读缓存。
 
     四条指标序列(逐日, 近 days 天):
@@ -899,7 +899,7 @@ def channel_series(cid: str, days: int = 30) -> dict | None:
     store = load_store()
     videos = [v for v in (store.get("videos") or {}).values()
               if v.get("channel_id") == cid]
-    c = next((c for c in config.load_yt_channels() if c.get("channel_id") == cid), None)
+    c = row or next((c for c in config.load_yt_channels() if c.get("channel_id") == cid), None)
 
     day_list = [datetime.fromtimestamp(now - i * 86400).strftime("%Y-%m-%d")
                 for i in range(days - 1, -1, -1)]

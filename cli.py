@@ -520,9 +520,10 @@ def workbench_cmd(args) -> int:
         return 0 if not rep.get("circuit_break") else 3
     if args.sub == "refresh-yt-track":
         sys.path.insert(0, str(WB))
-        from server import yt_track
+        from server import yt_own, yt_track
         _, code = yt_track.collect(force=args.force)   # 0 正常/跳过, 3 配额熔断, 4 无 key
-        return code
+        _, own_code = yt_own.collect(force=args.force)  # 自频道(追踪页)同轮捎带, 独立存储
+        return code if code != 0 else own_code
     if args.sub == "refresh-x-track":
         sys.path.insert(0, str(WB))
         from server import x_track

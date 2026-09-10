@@ -18,7 +18,7 @@ from fastapi import Body, FastAPI, Request
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
-from . import config, gcompose, omniroute_ctl, ondemand_translate, proxy, retrieve, stats, views, vstudio, x_track, xaccounts, x_profile_enricher, x_reply, x_surge, xsurge_ctl, yt_track
+from . import config, gcompose, omniroute_ctl, ondemand_translate, proxy, retrieve, stats, views, vstudio, x_track, xaccounts, x_profile_enricher, x_reply, x_surge, xsurge_ctl, yt_own, yt_track
 
 WEB = Path(__file__).resolve().parent.parent / "web"
 
@@ -635,6 +635,12 @@ def create_app() -> FastAPI:
             return JSONResponse(out, status_code=400 if p.returncode == 4 else 502)
         return {"cached": False, **out}
 
+    # ── 人设面板: 内置预设卡全字段下发(读模块常量, 零外呼零写; 当前选中仍由 settings 读) ──
+    @app.get("/wb-api/x-reply/personas")
+    def x_reply_personas():
+        return {"personas": [{"id": pid, **card, "prompt": x_reply._card_base(card)}
+                             for pid, card in x_reply.PERSONAS.items()]}
+
     # ── 视频页【热点追踪/追踪账号】: YouTube 账号库+快照增量榜(读缓存零外呼;
     #    外呼只在 /yt/collect spawn 的 CLI 进程, 同 x_surge 架构) ────────────────
     @app.get("/wb-api/yt/hot")
@@ -693,6 +699,41 @@ def create_app() -> FastAPI:
         rows = [r for r in config.load_yt_channels() if r.get("id") != cid]
         return {"removed": 1, "channels": config.save_yt_channels(rows)}
         # 已采视频/快照保留为孤儿数据(防误删丢历史), 榜单按启用频道过滤自然隐去
+
+    # ── YTB 自有频道(独立系统, 追踪用户自己的账号; 采集走 CLI 捎带, 端点零外呼) ──
+    @app.get("/wb-api/yt-own/channels")
+    def yt_own_channels_list():
+        return yt_own.list_view()
+
+    @app.post("/wb-api/yt-own/channels")
+    async def yt_own_channels_add(request: Request):
+        body = await request.json()
+        row, err = yt_own.add(str(body.get("input") or ""),
+                              str(body.get("note") or ""),
+                              bool(body.get("enabled", True)))
+        if err:
+            dup = "已在自有追踪列表" in err["error"]
+            return JSONResponse(err, status_code=409 if dup else 400)
+        return {"added": row, "channels": config.load_yt_own_channels()}
+
+    @app.get("/wb-api/yt-own/channels/{cid}/series")
+    def yt_own_channel_series(cid: str, days: str = "30"):
+        d = yt_own.series(cid, days=int(days) if days.isdigit() else 30)
+        if d is None:
+            return JSONResponse({"error": "channel_not_found"}, status_code=404)
+        return d
+
+    @app.post("/wb-api/yt-own/channels/{cid}/enabled")
+    async def yt_own_channel_enabled(cid: str, request: Request):
+        body = await request.json()
+        r = yt_own.set_enabled(cid, bool(body.get("on")))
+        if not r:
+            return JSONResponse({"error": "频道不存在"}, status_code=404)
+        return {"id": cid, "enabled": r["enabled"]}
+
+    @app.delete("/wb-api/yt-own/channels/{cid}")
+    def yt_own_channel_del(cid: str):
+        return {"removed": 1, "channels": yt_own.remove(cid)}
 
     @app.post("/wb-api/yt/channels/import")
     async def yt_channels_import():

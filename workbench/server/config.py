@@ -453,6 +453,16 @@ def save_yt_channels(rows: list) -> list:
     return save_rows("yt_channels.json", rows)
 
 
+def load_yt_own_channels() -> list:
+    """追踪页 YTB 自有频道库(用户自己的账号; 与视频页【账号管理】他人频道库独立,
+    2026-09-11 用户拍板)。"""
+    return load_rows("yt_own_channels.json")
+
+
+def save_yt_own_channels(rows: list) -> list:
+    return save_rows("yt_own_channels.json", rows)
+
+
 def load_video_pool() -> list:
     rows = load_rows("video_pool.json")
     return rows if isinstance(rows, list) and all(isinstance(r, dict) for r in rows) else []
