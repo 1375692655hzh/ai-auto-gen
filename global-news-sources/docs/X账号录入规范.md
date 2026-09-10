@@ -15,7 +15,7 @@
 - 市场覆盖:               # 多选标签，一律用分类体系中文全称: A股/港股/美股/日本/韩国/台湾/土耳其
                          #   + 外汇/大宗(资产类别) + 全球(全球宏观不限定单一市场)
                          #   X 财经号多为全球视角，故比机构源多一个'全球'值且允许多选
-- 账号定位 role:          # 八选一（见下方定位表），决定进 flash 流还是观点 digest
+- 账号定位 role:          # 九选一（见下方定位表），决定进 flash 流还是观点 digest
 - 语言:                   # en / zh / ja / ko / tr（synth 多语言支持，输出始终中文）
 - 粉丝量级:               # 接口读数，备查（不设门槛，只记录）
 - 活跃作息:               # 活跃时段（美股盘/亚盘/全天）× 频率量级（日更几条），依据录入时近 20 条样本
@@ -35,10 +35,11 @@
 | `trader` | 交易员/基金经理 | 仓位分享、盘面解读 | 深度观点 | `twitter_kol_views` |
 | `kol` | 财经博主/观点流（匿名为多） | 推特股票池主力人群 | 深度观点 | `twitter_kol_views` |
 | `company` | 上市公司官号 | IR、产品官宣 | 快讯流 | `twitter_kol_flash` |
+| `research` | 研究机构官方号（一手研究坊） | SemiAnalysis 类 | 快讯流（同 media 逐推一条，定位=机构） | `twitter_kol_flash` |
 | `insider` | 公司高管/内部人士 | CEO 个人号 | 深度观点 | `twitter_kol_views` |
 | `breaks` | 爆料/内部消息号 | 老记者、线人 | 快讯流 | `twitter_kol_flash` |
 
-- **risk 分级随定位走**：`media`/`company`/`analyst` 默认 low；`trader`/`insider` 默认 medium；`kol`/`breaks`/`data_bot` 默认 medium（匿名或立场强），账号卡可手工覆盖。风险标只影响展示与选用判断，**不构成收录门槛**（观点情绪流一律入库，2026-08-31 裁决）。
+- **risk 分级随定位走**：`media`/`company`/`analyst`/`research` 默认 low；`trader`/`insider` 默认 medium；`kol`/`breaks`/`data_bot` 默认 medium（匿名或立场强），账号卡可手工覆盖。风险标只影响展示与选用判断，**不构成收录门槛**（观点情绪流一律入库，2026-08-31 裁决）。
 - 与机构源的重叠提示：`media` 类账号若与在册源同稿率高（如 CNBC 官号 vs cnbc_morning），登记卡备注里注明，选用时由用户取舍。
 
 ## 三、池文件格式
@@ -81,7 +82,7 @@ accounts:
 
 | 源 id | kind | 消费面 | 收录范围 |
 |---|---|---|---|
-| `twitter_kol_flash` | flash | morning-paper rank 精排 | role ∈ media/data_bot/company/breaks |
+| `twitter_kol_flash` | flash | morning-paper rank 精排 | role ∈ media/data_bot/company/breaks/research |
 | `twitter_kol_views` | peer_article | peer_article 条目流 | role ∈ analyst/trader/kol/insider |
 
 工作流运行时按三层粒度选取：`--set twitter_kol.markets=us`（市场过滤）、`tiers=core`（核心池）、`min_priority=high`（提门槛）——三层参数在 turkey 技能 fetch 脚本里均有实装先例。

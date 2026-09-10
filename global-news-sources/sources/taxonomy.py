@@ -57,6 +57,8 @@ _SOURCE_POSITIONING = {                       # aggregator 逐源(2026-09-03盘�
 ROLE_TO_POSITIONING = {
     "media": "新闻源", "data_bot": "快讯源", "breaks": "快讯源",
     "company": "机构",
+    "research": "机构",          # 研究机构(SemiAnalysis 这类一手研究坊, 2026-09-09 用户拍板新增;
+                                 # 抓取面同 media 走 flash 逐推一条, 仅定位升档)
     "analyst": "大V", "trader": "大V", "kol": "大V", "insider": "大V",
 }
 

@@ -327,7 +327,7 @@ def fetch_threads_kol_digest(conf: dict | None = None) -> list:
 # 通路: api.fxtwitter.com/2/profile/<handle>/statuses 免登录(2026-09-01 实测零限流)
 
 TW_POOL_DEFAULT = Path(__file__).resolve().parent.parent / "config" / "twitter_pool.yaml"
-TW_ROLE_FLASH = {"media", "data_bot", "company", "breaks"}
+TW_ROLE_FLASH = {"media", "data_bot", "company", "breaks", "research"}   # research=研究机构, 抓取同 media 逐推一条
 TW_ROLE_VIEWS = {"analyst", "trader", "kol", "insider"}
 _TW_PRIORITY = {"high": 3, "medium": 2, "low": 1}
 

@@ -380,11 +380,11 @@ accounts:
   homepage: https://x.com/SemiAnalysis_
   markets:
   - 全球
-  role: media
+  role: research
   lang: en
   priority: high
   risk: low
-  note: 半导体权威研究机构官方号(15.9万粉), 台股池KOL(阿雪等)常引用的一手源; 注意handle带下划线, @SemiAnalysis 是仿号404
+  note: 半导体权威研究机构官方号(15.9万粉), 台股池KOL(阿雪等)常引用的一手源; 2026-09-09 用户拍板 media→research(定位升机构, 抓取仍走 flash 逐推); 注意handle带下划线, @SemiAnalysis 是仿号404
 - handle: unusual_whales
   uid: '1200616796295847936'
   name: unusual_whales
