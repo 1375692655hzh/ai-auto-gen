@@ -23,8 +23,9 @@ WB.pages.video = {
       styles: [], drafts: [],
       scripts: [], scriptSel: null, scriptFilter: '', reusableOnly: false,
       /* ── 追踪账号 ── */
-      chs: [], chMeta: null, chQ: "",
-      chForm: { input: "", note: "" }, showChForm: false, adding: false, chBusyId: "",
+      /* YouTube 频道管理已迁追踪页(2026-09-10); 本页只读 chs 供热点筛选。 */
+      chs: [], chMeta: null,
+      coverForm: { open: false, busy: false, err: '', done: '', title: '', kicker: '', sub: '', bg_asset_id: '', person_asset_id: '' },
       /* ── 视频制作(原视频页内容) ── */
       videos: [], sel: null, error: null,
       /* 四段制作：草稿持久化，任务槽独立恢复。 */
@@ -67,19 +68,7 @@ WB.pages.video = {
     enabledChs() {
       return (this.chs || []).filter((c) => c.enabled !== false);
     },
-    /* 追踪账号列表过滤: 关键词(频道名/handle/备注/频道ID), 账号多了好找 */
-    chRows() {
-      const q = (this.chQ || "").trim().toLowerCase();
-      if (!q) return this.chs;
-      return this.chs.filter((c) =>
-        (c.title || "").toLowerCase().includes(q) ||
-        (c.handle || "").toLowerCase().includes(q) ||
-        (c.note || "").toLowerCase().includes(q) ||
-        (c.channel_id || "").toLowerCase().includes(q));
-    },
-    pendingChs() {
-      return this.enabledChs.filter((c) => c.resolve_status === "pending");
-    },
+
     filteredScripts() {
       return (this.scripts || []).filter((r) =>
         (!this.scriptFilter || r.kind === this.scriptFilter) && (!this.reusableOnly || r.reusable));
@@ -154,9 +143,6 @@ WB.pages.video = {
         { id: 'scripts', title: '脚本仓库', cnt: this.scripts.length || '',
           icon: I('<path d="M4 4h16v16H4z"/><path d="M8 8h8M8 12h8M8 16h5"/>'),
           onPick: () => { this.tab = 'scripts'; } },
-        { id: "tracked", title: "追踪账号", cnt: this.chs.length || "",
-          icon: I('<path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/>'),
-          onPick: () => { this.tab = "tracked"; } },
       ], this.tab);
     },
     /* ── 展示格式化 ── */
@@ -248,16 +234,7 @@ WB.pages.video = {
       const star = (b === "first_seen" || b === false) ? "*" : "";
       return sign + this.fmtNum(Math.abs(v)) + star + (v < 0 ? "↓" : "");
     },
-    chStatusClass(c) {
-      if (c.resolve_status === "failed") return "dead";
-      if (c.resolve_status === "resolved") return c.enabled !== false ? "ok" : "off";
-      return "off";
-    },
-    chStatusText(c) {
-      if (c.resolve_status === "failed") return "解析失败";
-      if (c.resolve_status === "resolved") return "已解析";
-      return "待解析";
-    },
+
     /* ── 热点追踪 ── */
     hotQuery() {
       const p = new URLSearchParams();
@@ -316,47 +293,7 @@ WB.pages.video = {
       } catch (e) {}
       this.registerSubs();
     },
-    async addChannel() {
-      if (!this.chForm.input.trim()) { WB.toast("请粘贴频道链接 / @handle / UC 频道 ID"); return; }
-      this.adding = true;
-      try {
-        const d = await WB.api.post("/yt/channels",
-          { input: this.chForm.input, note: this.chForm.note });
-        this.chs = d.channels;
-        WB.toast("已添加" + (d.added.title ? ": " + d.added.title : "(下一轮采集时解析)"));
-        this.chForm.input = ""; this.chForm.note = ""; this.showChForm = false;
-        if (this.hotMeta && this.hotMeta.configured) this.doCollect();  // 让新账号尽快出数据
-      } catch (e) {
-        WB.toast(e.error + (e.hint ? " — " + e.hint : ""));
-      }
-      this.adding = false;
-      this.registerSubs();
-    },
-    async toggleCh(c) {
-      this.chBusyId = c.id;
-      try {
-        const d = await WB.api.post("/yt/channels/" + c.id + "/enabled", { on: c.enabled === false });
-        c.enabled = d.enabled;
-      } catch (e) { WB.toast(e.error); }
-      this.chBusyId = "";
-    },
-    async delCh(c) {
-      if (!confirm("删除追踪 " + (c.title || c.input) + " ?\n已采集的历史数据保留在本地, 但不再更新")) return;
-      try {
-        const d = await WB.api.del("/yt/channels/" + c.id);
-        this.chs = d.channels;
-        WB.toast("已删除");
-      } catch (e) { WB.toast(e.error); }
-      this.registerSubs();
-    },
-    async importLegacy() {
-      try {
-        const d = await WB.api.post("/yt/channels/import", {});
-        this.chs = d.channels;
-        WB.toast("导入 " + d.imported.length + " 个 · 跳过 " + d.skipped.length + " 个(重复/格式无法识别)");
-      } catch (e) { WB.toast(e.error); }
-      this.registerSubs();
-    },
+
     /* ── 视频分析 / 素材池 ── */
     async addToPool(r) {
       try {
@@ -719,6 +656,31 @@ WB.pages.video = {
     },
     copyPubCmd() { WB.copyText(this.pubCmd); },
     makeError(e) { return String(e.error || e.message || e || '请求失败') + (e.hint ? ' — ' + e.hint : ''); },
+    coverAssetName(field) { const a = this.libAssets.find((x) => x.asset_id === this.coverForm[field]); return a && a.name; },
+    async uploadCoverAsset(field, ev) {
+      const file = ev.target.files && ev.target.files[0]; ev.target.value = '';
+      if (!file) return;
+      this.coverForm.err = '';
+      try {
+        const q = new URLSearchParams({ name: file.name });
+        const resp = await fetch('/wb-api/video-assets?' + q, { method: 'PUT', body: file });
+        const d = await resp.json(); if (!resp.ok) throw d;
+        this.coverForm[field] = d.asset.asset_id;
+        await this.loadLibAssets();
+      } catch (e) { this.coverForm.err = this.makeError(e); }
+    },
+    async submitCover() {
+      if (this.coverForm.busy || !this.curMake.project_id) return;
+      this.coverForm.busy = true; this.coverForm.err = ''; this.coverForm.done = '';
+      try {
+        const d = await WB.api.post('/videos/' + encodeURIComponent(this.curMake.project_id) + '/cover', {
+          title: this.coverForm.title, kicker: this.coverForm.kicker, sub: this.coverForm.sub,
+          bg_asset_id: this.coverForm.bg_asset_id, person_asset_id: this.coverForm.person_asset_id });
+        this.coverForm.done = '封面已生成 ' + (d.output || 'out/cover.png') + '（成片文件夹内查看）';
+        this.coverForm.open = false;
+      } catch (e) { this.coverForm.err = this.makeError(e); }
+      finally { this.coverForm.busy = false; }
+    },
     normalizeMake(m) {
       return { ...m, narration: { text: '', ref_text: '', style_id: '', source: '', locked: false, ...m.narration },
         script_meta: { locked: false, ...m.script_meta }, voice: { profile_id: '', voice: '', voice_key: '', items: {}, ...m.voice },
@@ -1769,6 +1731,19 @@ WB.pages.video = {
                   <a class="btn" v-if="makeProject.has_review" :href="'/wb-api/videos/'+encodeURIComponent(curMake.project_id)+'/file/'+encodeURIComponent('发布前核对.md')" download="发布前核对.md">发布前核对</a>
                   <span class="muted" style="font-size:11px">含 final.mp4 / 封面 / 字幕 SRT</span></div>
                 <p class="muted" style="margin-top:6px">该成片同时会出现在右侧「视频项目」列表。</p>
+                <div style="margin-top:10px;border-top:1px dashed var(--line,#ccc);padding-top:10px">
+                  <button class="btn" @click="coverForm.open=!coverForm.open">{{ coverForm.open ? '收起封面制作' : '制作封面' }}</button>
+                  <span v-if="coverForm.done" class="muted" style="margin-left:8px">✓ {{ coverForm.done }}</span>
+                  <div v-if="coverForm.open" style="margin-top:8px">
+                    <div class="form-row"><label>背景图</label><input type="file" accept=".png,.jpg,.jpeg,.webp" @change="uploadCoverAsset('bg_asset_id',$event)"><span class="muted">{{ coverAssetName('bg_asset_id') || '必选' }}</span></div>
+                    <div class="form-row"><label>人物形象</label><input type="file" accept=".png,.jpg,.jpeg,.webp" @change="uploadCoverAsset('person_asset_id',$event)"><span class="muted">{{ coverAssetName('person_asset_id') || '可选，右侧站立' }}</span></div>
+                    <div class="form-row"><label>标题</label><input type="text" v-model="coverForm.title" placeholder="主标题；**文字** 琥珀高亮" style="width:340px"></div>
+                    <div class="form-row"><label>眉题</label><input type="text" v-model="coverForm.kicker" placeholder="可选，顶部小字" style="width:240px"></div>
+                    <div class="form-row"><label>副题</label><input type="text" v-model="coverForm.sub" placeholder="可选，底部小字" style="width:240px"></div>
+                    <div class="form-row"><button class="btn primary" :disabled="coverForm.busy || !coverForm.title.trim() || !coverForm.bg_asset_id" @click="submitCover">{{ coverForm.busy ? '渲染中…（约 1 分钟）' : '生成封面' }}</button>
+                      <span v-if="coverForm.err" class="err-text" style="color:#c0392b">{{ coverForm.err }}</span></div>
+                  </div>
+                </div>
               </template>
               <div v-else class="muted">本项目尚未出片 —— 第四段点「开始制作」后，成片会出现在这里。</div>
             </div>
@@ -1825,53 +1800,6 @@ WB.pages.video = {
       </div>
     </div>
 
-    <!-- ═══ 子页7: 追踪账号 ═══ -->
-    <div v-show="tab==='tracked'">
-      <div class="card">
-        <h3>YouTube 追踪账号({{ chs.length }})
-          <span v-if="chMeta && !chMeta.configured" class="muted" style="font-weight:400">
-            · 未配 Key, 添加后待解析</span>
-          <span style="float:right">
-            <input type="text" v-model="chQ" class="mat-search" placeholder="搜索(频道名/handle/备注)"
-                   style="width:200px;margin-right:8px">
-            <button class="btn" @click="importLegacy" title="从「追踪」主页面的清单导入 platform=YouTube 的行">从追踪页导入</button>
-            <button class="btn primary" @click="showChForm = !showChForm">＋ 添加频道</button>
-          </span></h3>
-        <div v-if="showChForm" style="margin-bottom:12px;padding:10px;border:1px dashed var(--border);border-radius:8px">
-          <div class="form-row"><label>频道</label>
-            <input type="text" v-model="chForm.input" style="width:360px"
-                   placeholder="@handle / youtube.com 链接 / 频道名(中文自动搜索解析, 每个耗 100 配额)" @keyup.enter="addChannel"></div>
-          <div class="form-row"><label>备注</label>
-            <input type="text" v-model="chForm.note" placeholder="可选: 券商 / 宏观 / 芯片…"></div>
-          <button class="btn primary" :disabled="adding" @click="addChannel">{{ adding ? '保存中…' : '保存' }}</button>
-        </div>
-        <div v-if="!chs.length" class="muted" style="padding:8px 0">
-          尚未添加频道 —— 粘贴 YouTube 频道主页链接或 @handle; 添加后由采集器自动解析出频道名与订阅数。
-          此清单与「追踪」主页面的账号通讯录相互独立。</div>
-        <div class="acct-grid">
-          <div v-for="c in chRows" :key="c.id" class="acct-card">
-            <div class="plat">YouTube</div>
-            <div class="name">{{ c.title || c.input }}</div>
-            <div class="muted" style="font-size:11px">
-              <span v-if="c.handle">{{ c.handle }} · </span>{{ c.channel_id || '待解析' }}</div>
-            <div class="muted" style="margin-top:4px">
-              <span class="pill" :class="chStatusClass(c)">{{ chStatusText(c) }}</span>
-              <span v-if="c.resolve_status === 'failed'" :title="c.resolve_error" style="color:var(--red);font-size:11px"> {{ c.resolve_error }}</span>
-              <span v-if="c.subs != null" class="muted" style="font-size:11px"> 订阅≈{{ fmtNum(c.subs) }}(取整)</span></div>
-            <div class="muted" style="font-size:11px;margin-top:4px">{{ c.note || '—' }} · 添加于 {{ c.added_at }}</div>
-            <div style="margin-top:8px;display:flex;align-items:center;justify-content:space-between">
-              <span class="switch" :class="{on: c.enabled !== false, busy: chBusyId === c.id}"
-                    role="switch" tabindex="0" :aria-checked="c.enabled === false ? 'false' : 'true'"
-                    :title="(c.enabled === false ? '启用' : '停用') + '追踪'"
-                    @click="toggleCh(c)" @keydown.enter="toggleCh(c)"></span>
-              <a style="font-size:12px" @click="delCh(c)">删除</a></div>
-          </div>
-        </div>
-        <div v-if="!chRows.length && chs.length" class="muted" style="padding:8px 0">无匹配频道</div>
-        <p class="muted" style="margin-top:10px">
-          启停只影响采集范围(停用频道不外呼); 解析与首轮数据在下一轮采集完成
-          (计划任务每小时, 或到【热点追踪】点「立即采集」)。删除不停用历史快照。</p>
-      </div>
-    </div>
+
   </div>`,
 };
