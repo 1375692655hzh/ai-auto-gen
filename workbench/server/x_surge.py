@@ -288,6 +288,24 @@ def _is_zh(s: str) -> bool:
     return len(_ZH_RE.findall(s)) * 30 >= len(s)
 
 
+def translate_chain(cfg: dict) -> list:
+    """解析翻译模型链 → [(base, key, model), ...]。用户显式单服务在链头优先,
+    models 段(出厂默认含 OmniRoute 本地免费位)兜底依次尝试; 全空 = 未配置。"""
+    chain = []
+    b, k, m = (cfg or {}).get("base_url"), (cfg or {}).get("api_key"), (cfg or {}).get("model")
+    if b and k and m:
+        chain.append((b, k, m))
+    for it in (cfg or {}).get("models") or []:
+        if not isinstance(it, dict):
+            continue
+        mb = str(it.get("base_url") or "").strip()
+        mk = str(it.get("api_key") or "").strip()
+        mm = str(it.get("model") or "").strip()
+        if mb and mk and mm:
+            chain.append((mb, mk, mm))
+    return chain
+
+
 def _call_translate(base: str, key: str, model: str, text: str, max_tokens: int = 600) -> str | None:
     import urllib.error
     import urllib.request
@@ -311,10 +329,10 @@ def _call_translate(base: str, key: str, model: str, text: str, max_tokens: int 
 
 
 def translate_pending(cands: list, limit: int = 60) -> dict:
-    """给候选里没译文的补翻译; 已是中文的直接记原生; 未配置则静默跳过。"""
+    """给候选里没译文的补翻译; 已是中文的直接记原生; 模型链(免费优先)逐条依次尝试。"""
     from . import config as wb_config
     cfg = wb_config.load().get("translate") or {}
-    base, key, model = cfg.get("base_url"), cfg.get("api_key"), cfg.get("model")
+    chain = translate_chain(cfg)
     cache = load_texts()
     now_s = time.strftime("%Y-%m-%d %H:%M:%S")
     zh_native = 0
@@ -334,7 +352,7 @@ def translate_pending(cands: list, limit: int = 60) -> dict:
             zh_native += 1
         else:
             todo.append(c)
-    if not (base and key and model):
+    if not chain:
         if zh_native:
             _save_texts(cache)
         return {"translated": 0, "translate_failed": 0, "zh_native": zh_native,
@@ -344,7 +362,12 @@ def translate_pending(cands: list, limit: int = 60) -> dict:
     for i, c in enumerate(todo):
         if i:                                        # 轻微间隔, 防 API 限流
             time.sleep(0.25)
-        zh = _call_translate(base, key, model, c["text"])
+        zh = None
+        for cb, ck, cm in chain:                     # 链式: 前一失败自动落下一(免费优先)
+            zh = _call_translate(cb, ck, cm, c["text"])
+            if zh:
+                break
+            time.sleep(0.1)
         if zh:
             cache[c["status_id"]] = {"zh": zh, "ts": now_s}
             ok += 1

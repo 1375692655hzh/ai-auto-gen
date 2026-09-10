@@ -42,10 +42,14 @@ DEFAULTS = {
         "timeout_s": 15,
     },
     "ui": {"theme": "light", "page_size": 100, "remember_filters": True},   # 出厂默认亮色
-    "translate": {                                  # 蹭蹭流量推文翻译(OpenAI兼容 /chat/completions)
-        "base_url": "",                             # 如 https://api.deepseek.com
+    "translate": {                                  # 浏览层/轮末推文翻译(OpenAI兼容链, 免费优先)
+        "base_url": "",                             # 单服务三项(用户显式配置, 链头优先)
         "api_key": "",                              # 仅存服务端, 打码回显
         "model": "",                                # 如 deepseek-v4-flash
+        "models": [                                  # 模型链兜底: 依次尝试, 前一失败自动落下一
+            {"base_url": "http://127.0.0.1:20128/v1", "api_key": "omniroute-local",
+             "model": "oc/muse-spark-1.2-contributor-free"},   # OmniRoute 本地免费(装了即生效, 零费用)
+        ],
     },
     "youtube": {                                    # YouTube 热点追踪(Data API v3, 视频页)
         "api_key": "",                              # 仅存服务端, 打码回显
@@ -124,6 +128,12 @@ def public_view(cfg: dict) -> dict:
     v["translate"]["api_key"] = ""
     v["translate"]["has_key"] = bool(tkey)
     v["translate"]["key_tail"] = tkey[-4:] if tkey else ""
+    for m in (v.get("translate") or {}).get("models") or []:   # 链位 key 同打码
+        if isinstance(m, dict):
+            mk = m.get("api_key") or ""
+            m["api_key"] = ""
+            m["has_key"] = bool(mk)
+            m["key_tail"] = mk[-4:] if mk else ""
     ykey = (v.get("youtube") or {}).get("api_key") or ""
     v["youtube"]["api_key"] = ""
     v["youtube"]["has_key"] = bool(ykey)

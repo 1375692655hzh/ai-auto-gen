@@ -71,16 +71,22 @@ def _segments(text: str) -> list:
     return parts[:SEG_MAX] or [text[:SEG_CHARS]]
 
 
-def _translate_one(base: str, key: str, model: str, text: str) -> str | None:
+def _translate_one(chain: list, text: str) -> str | None:
+    """按模型链翻一条(免费优先): 每段从链头试到链尾, 段内任一链位成功即用它。"""
     segs = _segments(text)
     out = []
     for n, seg in enumerate(segs):
         if n:
             time.sleep(SLEEP)
-        # max_tokens=1600: 1500 字符英文段的完整译文(~1000 token), 防 600 截断
-        zh = x_surge._call_translate(base, key, model, seg, max_tokens=1600)
+        zh = None
+        for cb, ck, cm in chain:
+            # max_tokens=1600: 1500 字符英文段的完整译文(~1000 token), 防 600 截断
+            zh = x_surge._call_translate(cb, ck, cm, seg, max_tokens=1600)
+            if zh:
+                break
+            time.sleep(0.1)
         if not zh:
-            return None            # 任一段失败整条放弃, 下轮/下次再试
+            return None            # 任一段全链失败整条放弃, 下轮/下次再试
         out.append(zh)
     return "\n\n".join(out)
 
@@ -90,7 +96,7 @@ def translate_batch(items: list) -> dict:
     {"results": [{"i","hash","zh"}], "failed": n, "native": n, "cached": n, "unconfigured": bool}"""
     from . import config as wb_config
     cfg = wb_config.load().get("translate") or {}
-    base, key, model = cfg.get("base_url"), cfg.get("api_key"), cfg.get("model")
+    chain = x_surge.translate_chain(cfg)
     cache = _load()
     now_s = time.strftime("%Y-%m-%d %H:%M:%S")
     results, todo = [], []
@@ -112,12 +118,12 @@ def translate_batch(items: list) -> dict:
             cached += 1
             continue
         todo.append((i, h, text))
-    unconfigured = not (base and key and model)
+    unconfigured = not chain
     if not unconfigured:
         for n, (i, h, text) in enumerate(todo):
             if n:
                 time.sleep(SLEEP)
-            zh = _translate_one(base, key, model, text)
+            zh = _translate_one(chain, text)
             if zh:
                 cache[h] = {"zh": zh, "ts": now_s}
                 results.append({"i": i, "hash": h, "zh": zh})
