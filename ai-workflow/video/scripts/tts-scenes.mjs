@@ -2,7 +2,7 @@
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
-import { synthOnce, hashNarration, loadEnv, FFPROBE } from "./tts-engines.mjs";
+import { synthOnce, writeSidecar, sidecarPath, matchesSidecar, hashNarration, loadEnv, FFPROBE } from "./tts-engines.mjs";
 
 loadEnv();
 
@@ -11,7 +11,7 @@ async function main() {
 	if (!jobFile || !path.isAbsolute(jobFile))
 		throw new Error("用法: node scripts/tts-scenes.mjs <job.json 绝对路径>");
 	const job = JSON.parse(readFileSync(jobFile, "utf-8"));
-	if (!Array.isArray(job.scenes) || !["edge", "dashscope", "custom"].includes(job.provider) ||
+	if (!Array.isArray(job.scenes) || !["edge", "dashscope", "custom", "volc"].includes(job.provider) ||
 		typeof job.voice !== "string" || !job.voice.trim() ||
 		typeof job.out_dir !== "string" || !job.out_dir.trim())
 		throw new Error("job 必须包含 scenes、out_dir、provider(edge|dashscope) 和 voice");
@@ -32,18 +32,20 @@ async function main() {
 	rmSync(resultPath, { force: true });
 	const saveManifest = () => writeFileSync(manifestPath, JSON.stringify(manifest, null, 2));
 	async function synthAll(engine, voice) {
-		const customCfg = engine === "custom" ? (job.provider_config || {}) : undefined;
+		const customCfg = ["custom", "volc"].includes(engine) ? (job.provider_config || {}) : undefined;
 		const made = [];
 		for (const s of job.scenes) {
 			const outFile = path.join(outDir, `${s.id}.mp3`);
 			const hash = hashNarration(s.narration);
-			if (existsSync(outFile) && manifest[s.id] === hash) continue;
+			if (existsSync(outFile) && (existsSync(sidecarPath(outFile))
+                ? matchesSidecar(outFile, engine, voice, s.narration) : manifest[s.id] === hash)) continue;
 			rmSync(outFile, { force: true });
 			delete manifest[s.id];
 			saveManifest();
 			process.stdout.write(`合成语音: ${s.id} ... `);
 			if (await synthOnce(engine, voice, s.narration, outFile, customCfg)) {
-				console.log("ok");
+				writeSidecar(outFile, engine, voice, s.narration);
+			console.log("ok");
 				manifest[s.id] = hash;
 				saveManifest();
 				made.push(outFile);

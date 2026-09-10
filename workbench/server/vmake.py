@@ -161,6 +161,9 @@ def _build_meta(script: dict, settings: dict, fmt: str, fps: int, theme: str, la
                **({"style": custom_cfg["style"]} if custom_cfg.get("style") else {}),
                **({"format": custom_cfg["format"]} if custom_cfg.get("format") else {})}
         meta_voice = voice
+    elif provider == "volc":
+        meta_voice = settings.get("voice") or "zh_male_liufei_uranus_bigtts"
+        tts = {"provider": "volc", "voice": meta_voice}
     elif use_dash:
         voice = settings.get("voice") or DEFAULT_DASHSCOPE_VOICE
         meta_voice = voice

@@ -52,6 +52,7 @@
 		"materials_dir": "E:\\ai-gen-article-publish\\ai-workflow\\video\\videos\\demo-mixed-0909\\input\\materials",
 		"require_selected_audio": true
 	},
-	"builtAt": "2026-09-08",
-	"output": "out/final.mp4 (0.53 min)"
+	"builtAt": "2026-09-10",
+	"output": "out/final.mp4 (0.56 min)",
+	"qaStatus": "built"
 }

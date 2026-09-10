@@ -89,7 +89,7 @@ export const Video: React.FC = () => {
 								active={(f) => f >= (frame.visualDurationInFrames ?? frame.durationInFrames)}>
 							<Comp
 								scene={ACTIVE.story.scenes[index]}
-								duration={frame.visualDurationInFrames ?? frame.durationInFrames}
+								duration={frame.durationInFrames}
 								caption={frame.cues ?? frame.caption}
 							/>
 							</Freeze>

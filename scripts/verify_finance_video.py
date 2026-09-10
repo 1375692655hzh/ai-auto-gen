@@ -139,11 +139,82 @@ def prepare_short():
     print("Prepared short-scene archived-audio fixture")
 
 
+def check():
+    from PIL import Image, ImageChops, ImageStat
+    sys.path.insert(0, str(ROOT / "workbench"))
+    from server.finance_compliance import NUMBER_FACT
+    result = read(RUN / "narration/video_jobs.json")["generate"]["result"]
+    text = result["text"]
+    checks = {
+        "disclaimer": "不构成投资建议" in result["disclaimer"] and "不构成投资建议" in text,
+        "position": "重仓" not in text and any(t in text for t in ("承受能力", "自行判断", "参与比例")),
+        "returns": "必涨" not in text and any(t in text for t in ("若", "如果", "条件")),
+        "source": any(t in text for t in ("材料声称", "待核", "待核实", "尚待核实")),
+        "living_person": all(t not in text for t in ("据前员工描述", "张某", "挪用")),
+        "company_expectation": "有望受益" in text or "市场预期" in text,
+        "fiction": "虚构" in text,
+    }
+    assert all(checks.values()), checks
+    print("NARRATION", checks)
+    compositor = VIDEO / "node_modules/@remotion/compositor-win32-x64-msvc"
+    reports = []
+    for pid in (SAMPLE_ID, "finance-short-0909"):
+        project = VIDEO / "videos" / pid
+        out = project / "out"
+        qa, timeline, story = read(out / "verify.json"), read(out / "timeline.json"), read(project / "story.json")
+        assert not qa["errors"], qa
+        assert qa["stills"] == len(story["scenes"])
+        frames, fps = timeline["frames"], timeline["fps"]
+        assert all(f["durationInFrames"] >= 5.5 * fps for f in frames)
+        assert all(f["alignmentMethod"] == "approximate-text-weight" for f in frames)
+        for frame, scene in zip(frames, story["scenes"]):
+            previous = 0
+            for cue in frame["cues"]:
+                assert cue["start"] >= previous and cue["end"] > cue["start"]
+                previous = cue["end"]
+            assert previous <= frame["durationInFrames"]
+            assert "".join("".join(c["t"].split()) for c in frame["cues"]) == "".join(scene["narration"].split())
+            assert (out / "keyframes" / (scene["id"] + ".png")).is_file()
+        doc = (out / "发布前核对.md").read_text(encoding="utf-8")
+        facts = [m.group() for s in story["scenes"] for m in NUMBER_FACT.finditer(s["narration"])]
+        assert all(value in doc for value in facts)
+        media = json.loads(subprocess.check_output([str(compositor / "ffprobe.exe"), "-v", "error", "-show_streams",
+                                                   "-show_format", "-of", "json", str(out / "final.mp4")]))
+        assert {s["codec_type"] for s in media["streams"]} >= {"video", "audio"}
+        assert abs(float(media["format"]["duration"]) - qa["durationS"]) < .15
+        subprocess.run([str(compositor / "ffmpeg.exe"), "-v", "error", "-i", str(out / "final.mp4"),
+                        "-c:v", "rawvideo", "-c:a", "pcm_s16le", "-f", "null", "-"], check=True, capture_output=True)
+        reports.append({"project": pid, "duration": qa["durationS"], "stills": qa["stills"], "errors": qa["errors"],
+                        "min_scene_seconds": min(f["durationInFrames"] / fps for f in frames),
+                        "caption_methods": qa["captionMethods"], "facts": facts, "decode": "PASS"})
+        if pid == "finance-short-0909":
+            first = frames[0]
+            assert first["durationInFrames"] == 5.5 * fps > first["visualDurationInFrames"]
+            def pixels(n):
+                png = RUN / f"frozen-tail-{n}.png"
+                subprocess.run([str(compositor / "ffmpeg.exe"), "-v", "error", "-y", "-i", str(out / "final.mp4"),
+                    "-vf", f"trim=start_frame={n}:end_frame={n+1}", "-frames:v", "1", "-update", "1", str(png)], check=True)
+                with Image.open(png) as image:
+                    return image.convert("RGB")
+            delta = ImageStat.Stat(ImageChops.difference(pixels(first["visualDurationInFrames"] - 1),
+                                                       pixels(first["durationInFrames"] - 1))).mean
+            assert max(delta) < 1, delta
+            reports[-1]["frozen_tail_mean_pixel_difference"] = delta
+    for origin in read(VIDEO / "videos" / SAMPLE_ID / "acceptance-origin.json")["audio"]:
+        assert hashlib.sha256(Path(origin["source"]).read_bytes()).hexdigest() == origin["sha256"]
+        assert hashlib.sha256(Path(origin["target"]).read_bytes()).hexdigest() == origin["sha256"]
+    save(RUN / "checks.json", {"narration": checks, "videos": reports, "source_audio_unchanged": True,
+                              "edge_live": "BLOCKED EACCES; no actual provider cues produced"})
+    print(json.dumps(reports, ensure_ascii=False, indent=2))
+
+
 if __name__ == "__main__":
     action = sys.argv[1]
     if action == "prepare":
         prepare()
     elif action == "prepare-short":
         prepare_short()
+    elif action == "check":
+        check()
     else:
         sys.exit(run(action))

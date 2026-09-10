@@ -96,6 +96,15 @@ TEXT_ANALYZE_PROMPT = r"""你是财经视频文本分析师。根据下方字幕
 输入材料：
 """
 
+CLAIMS_PROMPT = r"""
+同时输出顶层 "claims" 数组（事实账本，供发布前人工集中核对）：
+"claims":[{"text":"原文引句（逐字摘自口播）","level":"verified|opinion|pending|high_risk","status":"与 level 对应的中文标签","source":"来源（已核验时必填）","suggestion":"建议核实方式或删改建议"}]
+四级定义：verified=有可信出处且数字/时间/主体已核对（必须给 source）；
+opinion=博主立场或推测（不得伪装成事实）；pending=数字或事实拿不准、需人工核实；
+high_risk=涉法规、股价敏感、医疗健康等高危表述（优先删除，必须保留时给可归因、有限定的改写建议）。
+写不出核实方式的一律 pending；claims 逐条覆盖 narration 中的数字事实、点名与高危表述，宁多勿漏。"""
+
+
 GEN_SYSTEM = r"""你是财经口播脚本主编。只输出一个 ```json 代码块，不要解释。
 写作前逐句扫描九类禁令：
 ①二元对比壳（不是A而是B）；②命令模板开头（别急着）；③伪洞察标记（真正、其实、本质上、说白了）；④冒号讲义腔；⑤模糊指代（这一点、它）；⑥时态错位（曾经…如今）；⑦没有参照物的空泛比较级（更、明显）；⑧抽象施压（很多人都没意识到）；⑨隐喻口号收尾（起航、破浪）。
@@ -103,7 +112,7 @@ GEN_SYSTEM = r"""你是财经口播脚本主编。只输出一个 ```json 代码
 输出 wb-video-script/v1：
 {"schema":"wb-video-script/v1","title":"不超过30字","format":"horizontal|vertical","style_id":"风格ID","duration_est_s":0,"word_count":0,"hook":{"type":"主钩子类型","variants":[{"type":"互异类型","text":"钩子"},{"type":"互异类型","text":"钩子"},{"type":"互异类型","text":"钩子"}]},"beats":[{"id":"b1","role":"hook|setup|move|gives|payoff|cta","duration_est_s":0,"narration":"纯口播","on_screen":[],"visual_hint":"画面建议","subtitle":"字幕"}],"cta":{"action":"动作","line":"唯一CTA原句"},"warnings":[]}
 必须恰好给 3 个类型互异的 hook variants；满足指定字数预算。
-带参考分析时：套用其开场时序与至少 2 种话术装置机制，章节推进节奏对齐其 chapters 骨架；只学机制，严禁复写参考中的原文、事实与标的。"""
+带参考分析时：套用其开场时序与至少 2 种话术装置机制，章节推进节奏对齐其 chapters 骨架；只学机制，严禁复写参考中的原文、事实与标的。""" + CLAIMS_PROMPT
 
 
 def _now() -> str:
@@ -186,6 +195,54 @@ def validate_script(script: dict, style: dict) -> list[str]:
     if len(cta_beats) != 1 or not cta.get("action") or not cta.get("line"):
         warnings.append("CTA 必须唯一，且 cta.action/cta.line 均非空")
     return warnings
+
+
+# ── claims 事实账本（对齐 ai-video claims-ledger：写稿期 LLM 四级分类）──────
+CLAIM_LEVELS = ("verified", "opinion", "pending", "high_risk")
+CLAIM_LEVEL_LABELS = {"verified": "已核验（带源）", "opinion": "观点",
+                      "pending": "待确认", "high_risk": "高危删改"}
+_CLAIM_LEVEL_ALIASES = {"已核验": "verified", "观点": "opinion", "待确认": "pending",
+                        "高危": "high_risk", "高危删改": "high_risk"}
+
+
+def _extract_claims(obj) -> tuple[list, str | None]:
+    """宽容解析 LLM 输出的顶层 claims 数组。解析失败不阻断主流程：
+    返回 ([], warning)；单条不合规只丢弃该条。逐字引句/来源/建议截断防脏数据。"""
+    raw = obj.get("claims") if isinstance(obj, dict) else None
+    if raw is None:
+        return [], None
+    if isinstance(raw, str):
+        try:
+            raw = json.loads(raw)
+        except Exception:
+            return [], "claims 字段不是合法 JSON，已忽略（claims=[]）"
+    if not isinstance(raw, list):
+        return [], "claims 字段不是数组，已忽略（claims=[]）"
+    claims, dropped = [], 0
+    for item in raw:
+        if not isinstance(item, dict) or not str(item.get("text") or "").strip():
+            dropped += 1
+            continue
+        level = str(item.get("level") or "").strip().lower()
+        level = _CLAIM_LEVEL_ALIASES.get(level, level)
+        if level not in CLAIM_LEVELS:
+            level = "pending"   # 未知分级保留该条但降级为待确认
+        claims.append({"text": str(item["text"]).strip()[:200], "level": level,
+                       "status": str(item.get("status") or "").strip()[:50],
+                       "source": str(item.get("source") or "").strip()[:200],
+                       "suggestion": str(item.get("suggestion") or "").strip()[:300]})
+    warning = f"claims 有 {dropped} 条格式不合规已忽略" if dropped else None
+    return claims, warning
+
+
+def _attach_claims(target: dict, warnings: list, source_claims: list | None = None) -> None:
+    """把 claims 落到脚本/口播稿对象上：LLM 输出优先，缺省回退上游（口播稿）claims。"""
+    claims, note = _extract_claims(target)
+    if note:
+        warnings.append(note)
+    if not claims and source_claims:
+        claims = copy.deepcopy(source_claims)
+    target["claims"] = claims
 
 
 def _tc_s(ts: str) -> float:
@@ -906,6 +963,7 @@ def run_generate(request: dict) -> tuple[dict, int]:
     for warning in validate_script(script, style):
         if warning not in warnings:
             warnings.append(warning)
+    _attach_claims(script, warnings)
     script["warnings"] = warnings
     _set_job_result("generate", script)
     finish_job("generate", 0, "")
@@ -1272,7 +1330,7 @@ NARRATION_SYSTEM = r"""你是财经口播稿主编。输出且仅输出一个 ``
 ①二元对比壳（不是A而是B）；②命令模板开头（别急着）；③伪洞察标记（真正、其实、本质上、说白了）；④冒号讲义腔；⑤模糊指代（这一点、它）；⑥时态错位（曾经…如今）；⑦没有参照物的空泛比较级（更、明显）；⑧抽象施压（很多人都没意识到）；⑨隐喻口号收尾（起航、破浪）。
 数字写成可念形式，例如百分之十八。节拍短句，每5-8字一顿的口播节奏。
 首句必须是“谁+做了什么+带张力的结果”，结尾悬念收束。paragraphs 3-8 段。
-纯口播禁止 Markdown、角色前缀、镜头指示、元话语。""" + FINANCE_DISCIPLINE
+纯口播禁止 Markdown、角色前缀、镜头指示、元话语。""" + FINANCE_DISCIPLINE + CLAIMS_PROMPT
 
 STORYBOARD_SYSTEM = r"""你是口播分镜编辑。输入是已定稿口播稿全文，只输出一个 ```json 代码块。
 输出 wb-video-script/v1：
@@ -1280,7 +1338,7 @@ STORYBOARD_SYSTEM = r"""你是口播分镜编辑。输入是已定稿口播稿�
 铁律：beats[].narration 按顺序拼接（去空白）必须等于口播稿全文（去空白），一字符不许改。
 role 序列首 hook 尾 cta，中段 setup/move/gives/payoff。on_screen 每条≤6词。
 visual_hint/subtitle 必填。hook.variants 恰好3条，type互异，variant[0].text 默认等于首 beat narration。
-只切分并设计画面，不改写、删减或新增口播。""" + FINANCE_DISCIPLINE
+只切分并设计画面，不改写、删减或新增口播。""" + FINANCE_DISCIPLINE + CLAIMS_PROMPT
 
 
 def run_narration(request: dict) -> tuple[dict, int]:
@@ -1310,7 +1368,11 @@ def run_narration(request: dict) -> tuple[dict, int]:
             isinstance(p, dict) and isinstance(p.get("text"), str) for p in paragraphs):
         return {"error": "llm_failed", "hint": "模型未返回有效口播稿 JSON"}, 3
     text = "\n\n".join(p["text"] for p in paragraphs)
-    obj.setdefault("disclaimer", disclaimer_for(text, style_id))
+    if not isinstance(obj.get("disclaimer"), str) or not obj["disclaimer"].strip():
+        obj["disclaimer"] = disclaimer_for(text, style_id)
+    if not isinstance(obj.get("warnings"), list):
+        obj["warnings"] = []
+    _attach_claims(obj, obj["warnings"])
     obj.update(schema="wb-narration/v1", title=str(obj.get("title") or "未命名口播稿")[:30],
                format=style["format"], text=text, word_count=_word_count(text))
     if row:
@@ -1319,7 +1381,8 @@ def run_narration(request: dict) -> tuple[dict, int]:
             return {"error": "make_changed", "hint": "生成期间口播稿已定稿或项目已删除"}, 4
         current["narration"].update(source="llm", style_id=style_id,
                                     ref_text=str(request.get("ref_text") or "")[:2000],
-                                    text=text, locked=False, locked_at=None, hash="")
+                                    text=text, locked=False, locked_at=None, hash="",
+                                    claims=obj.get("claims") or [])
         current["status"] = "editing_narration"
         _make_save(current)
     _set_job_result("generate", obj)
@@ -1378,8 +1441,12 @@ def run_storyboard(request: dict) -> tuple[dict, int]:
     script.update(schema="wb-video-script/v1", style_id="make-storyboard", format=fmt,
                   title=str(script.get("title") or row["title"])[:30],
                   word_count=_word_count(text), duration_est_s=round(_word_count(text)/4.2))
-    script.setdefault("disclaimer", disclaimer_for(text, row["narration"]["style_id"]))
+    if not isinstance(script.get("disclaimer"), str) or not script["disclaimer"].strip():
+        script["disclaimer"] = disclaimer_for(text, row["narration"]["style_id"])
     warnings = script.get("warnings") if isinstance(script.get("warnings"), list) else []
+    _attach_claims(script, warnings, source_claims=(row["narration"].get("claims")
+                                                    if isinstance(row["narration"].get("claims"), list)
+                                                    else None))
     script["warnings"] = list(dict.fromkeys(warnings + validate_script(script, _STYLES.get(
         row["narration"]["style_id"], _STYLES["recap-ask-conclude"]))))
     current = make_get(row["id"])
@@ -1413,7 +1480,7 @@ def _tts_provider(provider_id: str, voice: str, allow_disabled: bool = False):
                      if p.get("id") == provider_id), None)
     if (not provider or not _safe_id(provider_id) or not _safe_id(voice)
             or (not allow_disabled and not provider.get("enabled"))
-            or provider.get("engine") not in ("edge", "dashscope", "custom")
+            or provider.get("engine") not in ("edge", "dashscope", "custom", "volc")
             or voice not in [v.get("id") for v in provider.get("voices", [])]):
         return None
     return provider
@@ -1434,6 +1501,8 @@ def _tts_node(scenes: list, out_dir: Path, provider: dict, voice: str, progress:
                                   "model": provider.get("model") or "",
                                   "style": provider.get("style") or "",
                                   "format": provider.get("format") or ""}
+    if provider["engine"] == "volc":
+        job["provider_config"] = {"api_key": provider.get("api_key") or ""}
     _atomic_json(job_json, job)
     env = os.environ.copy()
     if provider["engine"] == "dashscope":
@@ -1459,7 +1528,8 @@ def _tts_node(scenes: list, out_dir: Path, provider: dict, voice: str, progress:
     (out_dir / "tts.log").write_text("\n".join(diagnostics), encoding="utf-8")
     if code:
         key = provider.get("api_key") or ""
-        detail = next((line for line in reversed(diagnostics) if "TTS 重试" in line or "TTS 失败" in line), last)
+        detail = next((line for line in reversed(diagnostics)
+                       if "TTS 重试" in line or "TTS 失败" in line or "VOLC_EMPTY" in line), last)
         return None, (detail.replace(key, "***") if key else detail)[-200:] or "tts_failed"
     try:
         result = json.loads(result_json.read_text(encoding="utf-8"))
@@ -1797,6 +1867,15 @@ def _fill_collage_images(project_id: str, story: dict, warnings: list, budget=No
         shutil.copy2(cached, dest)
 
 
+def _write_project_claims(proj: Path, script: dict) -> None:
+    """claims 事实账本随项目落盘（项目目录为既有约定位置）；无 claims 不写。"""
+    claims = script.get("claims") if isinstance(script, dict) else None
+    if not isinstance(claims, list) or not claims:
+        return
+    payload = {"schema": "wb-video-claims/v1", "claims": claims}
+    _atomic_json(proj / "claims.json", payload)
+
+
 def run_build_cli(args) -> int:
     """CLI 子进程入口：读 build.request → vmake 转换建项目 → 渲染跟进。
 
@@ -1824,6 +1903,7 @@ def run_build_cli(args) -> int:
         tick("build", "convert", 15, f"分镜就绪（{len(story['scenes'])} 场）")
         tick("build", "create", 20, "创建项目目录…")
         vmake.create_project(project_id, story, request)
+        _write_project_claims(vmake.VIDEOS_DIR / project_id, script)
         _fill_collage_images(project_id, story, warnings, settings.get("image_budget"))   # paper-board 场景生图(幂等, 失败回退无图)
         cmd = ["node", "scripts/build.mjs", project_id] \
             + (["--estimate"] if mode == "estimate" else [])
@@ -1876,7 +1956,10 @@ def _run_make_build_cli(request: dict) -> int:
             code = 4
             report = {"error": "script_not_locked" if row else "make_not_found"}
             return code
-        if mode == "build" and voice_missing(row):
+        if mode not in ("build", "estimate", "keyframes", "sample"):
+            mode = "build"
+        if mode != "estimate" and voice_missing(row):
+            # 带音模式(正式/样片/静帧)都依赖真实音频定时长，无声预览才放行
             code = 4
             report = {"error": "voice_missing", "hint": "、".join(voice_missing(row))}
             return code
@@ -1912,11 +1995,13 @@ def _run_make_build_cli(request: dict) -> int:
         story, notes = vmake.script_to_story(row["script"], settings, row["video"].get("hook_index"))
         warnings.extend(notes)
         proj = vmake.create_project(project_id, story, {**request, "settings": settings})
+        _write_project_claims(proj, row["script"])
         material_dir = proj / "input" / "materials"
         material_dir.mkdir(parents=True, exist_ok=True)
         for path in materials:
             shutil.copy2(path, material_dir / path.name)
-        settings.update(beat_overrides=overrides, materials_dir=str(material_dir), require_selected_audio=mode == "build")
+        settings.update(beat_overrides=overrides, materials_dir=str(material_dir),
+                        require_selected_audio=mode != "estimate")
         # 覆盖层复用首次转换的结果，避免 enrich=llm 重复外呼。
         story, notes = vmake.apply_beat_overrides(story, row["script"], settings, [])
         warnings.extend(notes)
@@ -1937,6 +2022,12 @@ def _run_make_build_cli(request: dict) -> int:
             if path and _safe_id(scene["id"]):
                 shutil.copy2(path, audio_dir / f"{scene['id']}.mp3")
                 manifest[scene["id"]] = item["hash"]
+                tts_sidecar = path.with_suffix(".tts.json")
+                target_sidecar = audio_dir / f"{scene['id']}.tts.json"
+                if tts_sidecar.is_file():
+                    shutil.copy2(tts_sidecar, target_sidecar)
+                else:
+                    target_sidecar.unlink(missing_ok=True)
                 alignment = path.with_suffix(".alignment.json")
                 if alignment.is_file():
                     shutil.copy2(alignment, audio_dir / f"{scene['id']}.alignment.json")
@@ -1955,7 +2046,8 @@ def _run_make_build_cli(request: dict) -> int:
         project["settings"] = settings
         _atomic_json(proj / "project.json", project)
         _fill_collage_images(project_id, story, warnings, settings.get("image_budget"))
-        cmd = ["node", "scripts/build.mjs", project_id] + (["--estimate"] if mode == "estimate" else [])
+        mode_flags = {"estimate": ["--estimate"], "keyframes": ["--keyframes"], "sample": ["--sample=20"]}
+        cmd = ["node", "scripts/build.mjs", project_id] + mode_flags.get(mode, [])
         logs = config.DATA_DIR / "video_builds"
         logs.mkdir(parents=True, exist_ok=True)
         env = os.environ.copy()
@@ -1964,6 +2056,8 @@ def _run_make_build_cli(request: dict) -> int:
                 env["DASHSCOPE_API_KEY"] = provider["api_key"]
             if provider.get("base_url"):
                 env["DASHSCOPE_BASE_URL"] = provider["base_url"]
+        if provider.get("engine") == "volc":
+            env["VOLC_TTS_API_KEY"] = provider.get("api_key") or ""
         if provider.get("engine") == "custom" and provider.get("api_key"):
             env["CUSTOM_TTS_API_KEY"] = provider["api_key"]   # custom 协议参数走 meta, 密钥走环境
         timeout = BUILD_TIMEOUT_S * (2 if vmake.normalize_fps(settings.get("fps")) == 60 else 1)

@@ -4,12 +4,12 @@
 //   node scripts/build.mjs <projectId> --force    跳过审核门禁
 //   node scripts/build.mjs <projectId> --estimate 仅按字数估时长出片（无语音预览用）
 //   node scripts/build.mjs <projectId> --no-render 只生成 active-story（配 remotion studio 预览）
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { existsSync, readFileSync, writeFileSync, mkdirSync, rmSync, statSync, copyFileSync, readdirSync, realpathSync } from "node:fs";
 import path from "node:path";
 import { validateStory } from "./story-validate.mjs";
 import { TEMPLATE_IDS } from "./template-ids.mjs";
-import { synthOnce, hashNarration, loadEnv, FFPROBE } from "./tts-engines.mjs";
+import { synthOnce, writeSidecar, sidecarPath, matchesSidecar, hashNarration, loadEnv, FFPROBE } from "./tts-engines.mjs";
 
 import { captionTimeline, toSrt } from "../shared/captions.mjs";
 
@@ -18,12 +18,16 @@ loadEnv();
 const args = process.argv.slice(2);
 const projectId = args.find((a) => !a.startsWith("--"));
 if (!projectId || !/^[a-zA-Z0-9_-]+$/.test(projectId)) {
-	console.error("用法: node scripts/build.mjs <projectId> [--force] [--estimate] [--no-render]");
+	console.error("用法: node scripts/build.mjs <projectId> [--force] [--estimate] [--no-render] [--keyframes] [--sample=秒]");
 	process.exit(1);
 }
 const FORCE = args.includes("--force");
 const ESTIMATE = args.includes("--estimate");
 const NO_RENDER = args.includes("--no-render");
+const KEYFRAMES = args.includes("--keyframes");
+const sampleArg = args.find((a) => a.startsWith("--sample="));
+const sampleSeconds = sampleArg ? Number(sampleArg.slice("--sample=".length)) : 0;
+const SAMPLE = Number.isFinite(sampleSeconds) && sampleSeconds > 0;
 
 const projDir = path.join("videos", projectId);
 const projFile = path.join(projDir, "project.json");
@@ -113,6 +117,7 @@ syncMaterials();
 /** 按项目配置分发引擎（story.json meta.tts：dashscope/custom 走 meta 配置，缺省 edge + meta.voice） */
 const ttsConf = (() => {
 	const tts = story.meta.tts;
+    if (tts?.provider === "volc") return {engine: "volc", voice: tts.voice, customCfg: {api_key: process.env.VOLC_TTS_API_KEY ?? ""}};
 	if (tts && tts.provider === "dashscope")
 		return { engine: "dashscope", voice: tts.voice ?? "longanlufeng", customCfg: undefined };
 	if (tts && tts.provider === "custom")
@@ -134,10 +139,15 @@ async function synthAll(engine, voice, customCfg) {
 	for (const s of story.scenes) {
 		if (s.silent) continue;                  // 静默场景无旁白，不需要音频
 		const outFile = path.join(audioDir, `${s.id}.mp3`);
-		if (existsSync(outFile)) continue;
+		if (existsSync(outFile)) {
+            if (!existsSync(sidecarPath(outFile)) || matchesSidecar(outFile, engine, voice, s.narration)) continue;
+            if (project.settings?.require_selected_audio) throw new Error(`已选语音供应商/音色不匹配: ${s.id}，请重新选择语音 take`);
+            rmSync(outFile, {force: true});
+        }
 		if (project.settings?.require_selected_audio) throw new Error(`已选语音缺失: ${s.id}，请重新选择语音 take`);
 		process.stdout.write(`合成语音: ${s.id} ... `);
 		if (await synthOnce(engine, voice, s.narration, outFile, customCfg)) {
+			writeSidecar(outFile, engine, voice, s.narration);
 			console.log("ok");
 			made.push(outFile);
 		} else {
@@ -158,14 +168,23 @@ if (!ESTIMATE) {
 		// 音频缓存按 narration 内容哈希失效: 改稿后复用旧音频会音画错位
 		const hash = hashNarration(s.narration);
 		const outFile = path.join(audioDir, `${s.id}.mp3`);
-		if (existsSync(outFile) && manifest[s.id] !== hash) {
+		if (existsSync(outFile) && !existsSync(sidecarPath(outFile)) && manifest[s.id] !== hash) {
 			throw new Error(`语音已过期或缺少匹配哈希: ${s.id}，请在语音阶段重新选择/生成；保留原音频`);
 		}
 		manifest[s.id] = hash;
 	}
 	writeFileSync(manifestPath, JSON.stringify(manifest, null, 2));
 	let r = await synthAll(ttsConf.engine, ttsConf.voice, ttsConf.customCfg);
-	if (!r.ok) {
+	if (!r.ok && ["dashscope", "volc"].includes(ttsConf.engine) && !project.settings?.require_selected_audio) {
+        console.warn(`${ttsConf.engine} 不可用，清理本批音频，整批降级 Edge`);
+        for (const s of story.scenes) {
+            if (s.silent) continue;
+            for (const suffix of [".mp3", ".tts.json", ".cues.json", ".alignment.json"])
+                rmSync(path.join(audioDir, s.id + suffix), {force: true});
+        }
+        r = await synthAll("edge", "zh-CN-XiaoxiaoNeural");
+    }
+    if (!r.ok) {
 		console.error(`\n语音合成失败: ${r.failedId}（网络问题可重跑，已有音频会跳过）`);
 		process.exit(1);
 	}
@@ -184,6 +203,47 @@ function probeDuration(file) {
 		file,
 	]).toString();
 	return Number(out.trim());
+}
+
+/* ---- 引擎无关对轴（whisper.cpp）：无线界引擎(volc/dashscope/custom)的场景补齐 alignment，
+ * 字幕与手绘跟随用真实音频时间而不是纯文本权重估算。对齐失败/缺失一律回退估算，不阻断制作。
+ * 本机组件不存在时整段跳过（隔离测试环境没有 whisper 二进制，且那里必须保持估算口径）。
+ * 注意：本段位于 "/* ---- 测时长" 标记之后 —— tts-volc.test.mjs 按标记切片 vm 执行 TTS 块，勿移回。 ---- */
+const whisperReady = ["main.exe", "main"].some((name) =>
+	existsSync(path.join("node_modules", ".cache", "whisper-cpp", name)));
+if (!ESTIMATE && whisperReady) {
+	const { ensurePhraseTimeline } = await import("./align.mjs");
+	for (const s of story.scenes) {
+		if (s.silent) continue;
+		if (existsSync(path.join(audioDir, `${s.id}.cues.json`))) continue;   // Edge 词界轨已存在，优先且更准
+		const alignmentFile = path.join(audioDir, `${s.id}.alignment.json`);
+		let fresh = false;
+		if (existsSync(alignmentFile)) {
+			try {
+				const saved = JSON.parse(readFileSync(alignmentFile, "utf-8"));
+				fresh = saved?.narrationHash === hashNarration(s.narration)
+					&& Array.isArray(saved?.segments) && saved.segments.length > 0;
+			} catch { fresh = false; }
+		}
+		if (fresh) continue;
+		try {
+			const timeline = await ensurePhraseTimeline(s, path.join(audioDir, `${s.id}.mp3`), fps);
+			if (timeline) {
+				writeFileSync(alignmentFile, JSON.stringify({
+					v: 1, unit: "seconds", origin: "audio", source: "whisper", model: timeline.model,
+					narrationHash: hashNarration(s.narration),
+					segments: timeline.phrases.map((p) => ({ t: p.text, start: p.startSec, end: p.endSec })),
+				}, null, 2));
+				console.log(`✓ 对轴完成 ${s.id}: ${timeline.phrases.length} 条短语（whisper/${timeline.model}）`);
+			} else {
+				console.warn(`⚠ 对轴匹配率过低 ${s.id}，字幕回退文本估算`);
+			}
+		} catch (error) {
+			console.warn(`⚠ 对轴失败 ${s.id}: ${String(error?.message ?? error).slice(0, 120)}，字幕回退文本估算`);
+		}
+	}
+} else if (!ESTIMATE && !whisperReady) {
+	console.log("对轴：未检测到 whisper.cpp 本地组件，无线界引擎场景字幕按文本估算");
 }
 
 const frames = [];
@@ -212,10 +272,19 @@ for (const s of story.scenes) {
 			if (providerTrack.narrationHash && providerTrack.narrationHash !== hashNarration(s.narration)) providerTrack = {};
 		} catch { providerTrack = {}; }
 	}
+	let alignmentTrack;
+	if (!providerTrack && !ESTIMATE && existsSync(alignmentFile)) {
+		try {
+			const saved = JSON.parse(readFileSync(alignmentFile, "utf-8"));
+			if (saved?.narrationHash === hashNarration(s.narration)
+				&& Array.isArray(saved?.segments) && saved.segments.length > 0)
+				alignmentTrack = saved;
+		} catch { /* 损坏或哈希不符的对齐轨按缺失处理，走文本估算 */ }
+	}
 	const subtitles = silent ? {cues: [], method: "silent"} : captionTimeline({
 		text: s.narration, duration: dur, fps, lead: LEAD_S, cues: s.captions,
 		providerTrack,
-		alignment: !providerTrack && !ESTIMATE && existsSync(alignmentFile) ? JSON.parse(readFileSync(alignmentFile, "utf-8")) : undefined,
+		alignment: alignmentTrack,
 	});
 	frames.push({
 		id: s.id,
@@ -272,10 +341,114 @@ for (const f of frames) {
 	console.log(`  ${f.id.padEnd(10)} ${f.audioDuration.toFixed(1)}s -> ${f.durationInFrames}f`);
 }
 
+/* ---- 渲染前预检（delivery promise）：语速区间 + 静态版式驻留风险 ---- */
+{
+	const issues = [];
+	for (const f of frames) {
+		const s = story.scenes.find((x) => x.id === f.id);
+		if (!s || s.silent) continue;
+		if (!ESTIMATE) {
+			const rate = s.narration.length / f.audioDuration;
+			if (rate < 2.2 || rate > 5.5)
+				issues.push(`语速 ${rate.toFixed(1)} 字/秒（${f.id}，正常区间 2.2–5.5，考虑增删旁白）`);
+		}
+		const durS = f.durationInFrames / fps;
+		if (durS > 22 && ["title", "vtitle", "cards", "checklist", "conclusion"].includes(s.template))
+			issues.push(`幻灯片风险：${f.id} 静态版式驻留 ${durS.toFixed(0)}s（建议拆段或换信息更密版式）`);
+	}
+	for (const i of issues) console.log(`⚠ 预检 ${i}`);
+	if (issues.length === 0) console.log("预检：无风险提示");
+}
+
 /* ---- 渲染 ---- */
 if (NO_RENDER) {
 	console.log("\n--no-render：已生成 active-story，可用以下命令预览：");
 	console.log(`  npx remotion studio --public-dir ${projDir}`);
+	process.exit(0);
+}
+
+/* ---- 渲前关键帧预览：逐场景 renderStill 出 start/mid/60% 三位置静帧，不改项目状态 ---- */
+if (KEYFRAMES) {
+	const [{ bundle }, { enableTailwind }, { renderStill, selectComposition }, { tmpdir }] =
+		await Promise.all([
+			import("@remotion/bundler"),
+			import("@remotion/tailwind-v4"),
+			import("@remotion/renderer"),
+			import("node:os"),
+		]);
+	const outDir = path.join(projDir, "out", "keyframes");
+	mkdirSync(outDir, { recursive: true });
+	// 清掉上一轮预览，防旧图残留误导审片
+	for (const entry of readdirSync(outDir, { withFileTypes: true })) {
+		if (entry.isFile() && (entry.name.endsWith(".png") || entry.name === "README.txt")) {
+			rmSync(path.join(outDir, entry.name), { force: true });
+		}
+	}
+	console.log(`\n开始生成关键帧 -> ${outDir}`);
+	const serveUrl = await bundle({
+		entryPoint: path.resolve("src/index.ts"),
+		webpackOverride: (c) => enableTailwind(c),
+		publicDir: path.resolve(projDir),
+	});
+	const outputs = [];
+	try {
+		const composition = await selectComposition({ serveUrl, id: compositionId });
+		let from = 0;
+		let sequence = 1;
+		for (let i = 0; i < frames.length; i++) {
+			const f = frames[i];
+			const positions = [
+				{ label: "start", frame: from + Math.round(0.8 * fps), description: "场景开始后0.8秒" },
+			];
+			if (f.durationInFrames / fps > 15) {
+				positions.push({ label: "mid", frame: from + Math.round(0.5 * f.durationInFrames), description: "中段" });
+			}
+			positions.push({ label: "60", frame: from + Math.round(0.6 * f.durationInFrames), description: "时长60%处" });
+			for (const position of positions) {
+				const filename = `${String(sequence).padStart(2, "0")}-${f.id}-${position.label}.png`;
+				const output = path.join(outDir, filename);
+				await renderStill({
+					composition,
+					serveUrl,
+					frame: position.frame,
+					output,
+					imageFormat: "png",
+					overwrite: true,
+					inputProps: {},
+				});
+				outputs.push(`${filename} → 场景 ${f.id}（第 ${i + 1}/共 ${frames.length} 场，模板 ${f.template}）的 ${position.description}`);
+				sequence++;
+			}
+			from += f.durationInFrames;
+		}
+		writeFileSync(path.join(outDir, "README.txt"),
+			["每个文件对应哪个场景的哪一段：", ...outputs, "确认无误后跑正式 build：node scripts/build.mjs " + projectId].join("\n") + "\n");
+	} finally {
+		const tempRoot = path.resolve(tmpdir());
+		const resolvedServeUrl = path.resolve(serveUrl);
+		const relativeToTemp = path.relative(tempRoot, resolvedServeUrl);
+		if (relativeToTemp && !relativeToTemp.startsWith("..") && !path.isAbsolute(relativeToTemp)) {
+			rmSync(resolvedServeUrl, { recursive: true, force: true });
+		}
+	}
+	console.log("\n✓ 关键帧生成完成（预览模式，项目状态不变）：");
+	for (const item of outputs) console.log(`  ${item}`);
+	process.exit(0);
+}
+
+/* ---- 带音样片预览：只渲开头 N 秒，不改项目状态 ---- */
+if (SAMPLE) {
+	const sampleOut = path.join(projDir, "out", "sample.mp4");
+	mkdirSync(path.dirname(sampleOut), { recursive: true });
+	const endFrame = Math.min(Math.round(fps * sampleSeconds), totalFrames - 1);
+	console.log(`\n开始渲染 ${sampleSeconds} 秒样片（推荐 15-25 秒）-> ${sampleOut}`);
+	const t0 = Date.now();
+	execFileSync(
+		"npx",
+		["remotion", "render", compositionId, sampleOut, "--public-dir", projDir, `--frames=0-${endFrame}`],
+		{ stdio: "inherit", shell: true },
+	);
+	console.log(`\n✓ 样片渲染完成，实际 ${probeDuration(sampleOut).toFixed(1)}s，耗时 ${((Date.now() - t0) / 1000 / 60).toFixed(1)} 分钟（预览模式，项目状态不变）`);
 	process.exit(0);
 }
 
@@ -321,8 +494,10 @@ for (const frame of frames) {
 	firstFrame += frame.durationInFrames;
 }
 
-/* ---- QA 自检（轻量版）: 结果只进日志与 out/verify.json，不新增项目状态 ----
- * 状态三态不变（draft/reviewed/built）；QA 有错时仅拒绝置 built 并以退出码 1 报告。 */
+/* ---- QA 自检: 结果进日志与 out/verify.json；有错置 qa_failed 并以退出码 1 报告，
+ * 有警告置 built 但 qaStatus=built_with_warnings。对齐参考仓 QA 口径：
+ * 分辨率 / 成片时长(±1.5s) / 音轨存在 / 音频电平(近静音判错、削波判警)。 */
+let qaStatus = "built";
 {
 	console.log("\nQA 自检:");
 	const qa = { file: path.relative(projDir, outFile), composition: compositionId,
@@ -348,12 +523,58 @@ for (const frame of frames) {
 		if (missing.length === 0) qa.checks.push("音频齐全（非静默场景均有 mp3）");
 		else for (const s of missing) qa.errors.push(`缺音频: ${s.id}.mp3`);
 	}
+	if (existsSync(outFile)) {
+		const expW = meta.width ?? 1920, expH = meta.height ?? 1080;
+		try {
+			const dims = execFileSync(FFPROBE, ["-v", "error", "-select_streams", "v:0",
+				"-show_entries", "stream=width,height", "-of", "csv=p=0", outFile]).toString().trim();
+			const [aw, ah] = dims.split(",").map(Number);
+			if (aw === expW && ah === expH) qa.checks.push(`分辨率 ${aw}×${ah} ✓`);
+			else qa.errors.push(`分辨率 ${dims} ≠ 预期 ${expW}×${expH}`);
+		} catch (e) { qa.errors.push(`分辨率读取失败: ${String(e?.message ?? e).slice(0, 80)}`); }
+		const actualDur = probeDuration(outFile);
+		if (Math.abs(actualDur - totalFrames / fps) <= 1.5) qa.checks.push(`成片时长 ${actualDur.toFixed(1)}s ✓`);
+		else qa.errors.push(`成片时长 ${actualDur.toFixed(1)}s ≠ 预期 ${(totalFrames / fps).toFixed(1)}s`);
+		if (!ESTIMATE) {
+			const hasAudio = execFileSync(FFPROBE, ["-v", "error", "-select_streams", "a",
+				"-show_entries", "stream=codec_type", "-of", "csv=p=0", outFile]).toString().trim();
+			if (hasAudio) qa.checks.push("音轨存在 ✓");
+			else qa.errors.push("缺少音轨（旁白未混入？）");
+			// 电平检测需要 volumedetect 滤镜：compositor 精简 ffmpeg 没有，优先用系统完整版。
+			const whereFfmpeg = spawnSync("where", ["ffmpeg"], { encoding: "utf8", shell: true });
+			const systemFfmpeg = (whereFfmpeg.stdout ?? "").split(/\r?\n/)[0]?.trim();
+			const levelFfmpeg = whereFfmpeg.status === 0 && systemFfmpeg && existsSync(systemFfmpeg)
+				? systemFfmpeg : ffmpeg;
+			const vol = spawnSync(levelFfmpeg, ["-hide_banner", "-nostats", "-i", outFile,
+				"-vn", "-af", "volumedetect", "-f", "null", "-"], { encoding: "utf8" });
+			const volOut = `${vol.stdout ?? ""}\n${vol.stderr ?? ""}`;
+			if (/No such filter: 'volumedetect'/.test(volOut)) {
+				qa.checks.push("音频电平检测跳过（ffmpeg 无 volumedetect 滤镜）");
+			} else {
+				const meanVol = Number(volOut.match(/mean_volume:\s*(-?[\d.]+) dB/)?.[1]);
+				const maxVol = Number(volOut.match(/max_volume:\s*(-?[\d.]+) dB/)?.[1]);
+				if (Number.isFinite(meanVol)) {
+					if (meanVol < -55) qa.errors.push(`音频近静音（mean ${meanVol}dB）`);
+					else qa.checks.push(`音频电平 mean ${meanVol}dB ✓`);
+				}
+				if (Number.isFinite(maxVol) && maxVol > -0.5) qa.warnings.push(`疑似削波（max ${maxVol}dB）`);
+			}
+		}
+	}
+	qaStatus = qa.errors.length ? "qa_failed" : qa.warnings.length ? "built_with_warnings" : "built";
+	qa.status = qaStatus;
 	for (const c of qa.checks) console.log(`  ✓ ${c}`);
 	for (const w of qa.warnings) console.warn(`  ⚠ ${w}`);
 	writeFileSync(path.join(projDir, "out", "verify.json"), JSON.stringify(qa, null, "\t"));
 	console.log(`  QA 报告 -> ${path.join(projDir, "out", "verify.json")}`);
 	if (qa.errors.length > 0) {
 		for (const e of qa.errors) console.error(`  ✗ ${e}`);
+		if (!ESTIMATE) {
+			project.status = "qa_failed";
+			project.qaReport = "out/verify.json";
+			writeFileSync(projFile, JSON.stringify(project, null, "\t"));
+			console.error("  项目状态 -> qa_failed");
+		}
 		process.exit(1);
 	}
 }
@@ -364,7 +585,8 @@ if (ESTIMATE) {
 	process.exit(0);
 }
 project.status = "built";
+project.qaStatus = qaStatus;
 project.builtAt = new Date().toISOString().slice(0, 10);
 project.output = `out/final.mp4 (${(totalFrames / fps / 60).toFixed(2)} min)`;
 writeFileSync(projFile, JSON.stringify(project, null, "\t"));
-console.log(`项目状态 -> built`);
+console.log(`项目状态 -> built（qaStatus=${qaStatus}）`);

@@ -7,6 +7,7 @@
   "private": true,
   "dependencies": {
     "@remotion/cli": "4.0.512",
+    "@remotion/install-whisper-cpp": "^4.0.512",
     "@remotion/tailwind-v4": "4.0.512",
     "msedge-tts": "^2.0.7",
     "react": "19.2.3",

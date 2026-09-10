@@ -27,7 +27,7 @@ FINANCE_DISCIPLINE = """
 财经合规纪律：
 1. 将重仓、满仓、梭哈、抄底等操作与仓位指令改为条件和倾向，参与比例由观众依风险承受能力判断。
 2. 将必涨、稳赚、肯定反弹等收益承诺改为“若条件成立，逻辑可能加强”，写出条件，不保证结果。
-3. 事实断言要带材料已有的出处主语，例如监管机构认定、公司公告披露；材料无出处则标待核，不编造来源。
+3. 事实断言要带材料已有的出处主语，例如监管机构认定、公司公告披露；无出处则删除断言或明确“材料声称，尚待核实”，不得编造公告或“网传”出处。
 4. 删除涉及在世自然人的未证实转述，包括“据前员工描述”类传闻；可改讲机制，不保留影射细节。
 5. 点名公司先说明产业链环节；供应关系缺公开披露依据时仅用“有望受益于”“市场预期”，不得写已进入供应体系。
 6. 不用核心标的、首选个股等荐股措辞；有公开依据的事实和有条件的判断可以保留。
@@ -35,6 +35,8 @@ FINANCE_DISCIPLINE = """
 8. 输出 JSON 顶层 disclaimer 字符串，按司法监管、新股打新、财报产业链选用下面一种声明，不混淆题材。
 9. 核查百分比、金额、基点、日期的主语、单位与时点，不补造数字；无法核实的事项放入 warnings。
 10. 分镜阶段已定稿 narration 逐字保留：上述改写仅用于未锁定文本及画面文案；原句违规须写 warnings 提示回第一段修改，不绕过完整性闸门。
+11. 不补写材料未提供的行业位置、订单或市场反应；虚构测试材料须保留虚构背景，不能包装成真实财经事实。
+12. 正文只给改写后的内容，不复述违规原话、不讲述改稿过程、不解释删掉了什么传闻；禁词、原句与修改说明仅可放 warnings，不能进入口播。
 声明模板：
 """ + "\n".join(f"{k}: {v}" for k, v in zip(
     ("司法/监管", "新股/打新", "财报/产业链"), DISCLAIMERS.values()))
@@ -61,6 +63,66 @@ def publication_window(text: str, style_id: str = "") -> str:
     return "复盘/认知：适合长期复用；再次发布仍需检查事实、案件与数据更新。"
 
 
+CLAIM_LEVEL_LABELS = {"verified": "已核验（带源）", "opinion": "观点",
+                      "pending": "待确认", "high_risk": "高危删改"}
+# 渲染顺序：先处理高危与待确认，再看过审的
+CLAIM_RENDER_ORDER = ("high_risk", "pending", "verified", "opinion")
+
+
+def _load_claims(project: Path, script: dict) -> list:
+    """事实账本来源：脚本存档里的 claims 字段优先，其次项目目录 claims.json。"""
+    claims = script.get("claims") if isinstance(script, dict) else None
+    if not isinstance(claims, list) or not claims:
+        claims_file = project / "claims.json"
+        if claims_file.is_file():
+            import json
+            try:
+                payload = json.loads(claims_file.read_text(encoding="utf-8"))
+                claims = (payload or {}).get("claims") if isinstance(payload, dict) else payload
+            except Exception:
+                claims = None
+    if not isinstance(claims, list):
+        return []
+    out = []
+    for item in claims:
+        if not isinstance(item, dict) or not str(item.get("text") or "").strip():
+            continue
+        level = str(item.get("level") or "").strip().lower()
+        if level not in CLAIM_LEVEL_LABELS:
+            level = "pending"
+        out.append({"text": str(item["text"]).strip(), "level": level,
+                    "status": str(item.get("status") or "").strip(),
+                    "source": str(item.get("source") or "").strip(),
+                    "suggestion": str(item.get("suggestion") or "").strip()})
+    return out
+
+
+def claims_section(claims: list) -> list:
+    """分级槽位表：四级分组 + 来源 + 建议核实方式；空账本返回空列表。"""
+    if not claims:
+        return []
+
+    def cell(value):
+        return str(value).replace("|", "\\|").replace("\n", " ").replace("\r", " ")
+
+    lines = ["### claims 事实账本（写稿期 LLM 四级分级，请人工集中裁决）", "",
+             "逐字引句来自生成期事实账本，未经独立核实；请先处理高危与待确认，再通读口播。", ""]
+    for level in CLAIM_RENDER_ORDER:
+        group = [c for c in claims if c["level"] == level]
+        lines.append(f"#### {CLAIM_LEVEL_LABELS[level]}（{len(group)} 条）")
+        lines.append("")
+        if not group:
+            lines.append("")
+            continue
+        lines += ["| 原文引句 | 来源 | 建议核实方式 |", "| --- | --- | --- |"]
+        for c in group:
+            status = f"[{cell(c['status'])}] " if c["status"] else ""
+            lines.append(f"| {status}{cell(c['text'])} | {cell(c['source'] or '—')} "
+                         f"| {cell(c['suggestion'] or '—')} |")
+        lines.append("")
+    return lines
+
+
 def review_markdown(story: dict, project: Path, script: dict | None = None) -> str:
     script = script or {}
     scenes = story.get("scenes") or []
@@ -72,8 +134,11 @@ def review_markdown(story: dict, project: Path, script: dict | None = None) -> s
              "## 一、我改了你原稿的地方", "",
              "本期由确定性模板生成，合规改写已在 prompt 层完成；请在下方逐项核对数字与点名", "",
              "## 二、要你核的数字/事实", "",
-             "以下仅从各场 narration 正则提取，未经独立核实；可能漏检或误检。请连同画面数字、口播与字幕核对。", "",
-             "| 场景 | 数字事实候选 | 原句 |", "| --- | --- | --- |"]
+             "以下仅从各场 narration 正则提取，未经独立核实；可能漏检或误检。请连同画面数字、口播与字幕核对。", ""]
+    claims_lines = claims_section(_load_claims(project, script))
+    if claims_lines:
+        lines += claims_lines
+    lines += ["| 场景 | 数字事实候选 | 原句 |", "| --- | --- | --- |"]
     def cell(value):
         return str(value).replace("|", "\\|").replace("\n", " ").replace("\r", " ")
     found = False

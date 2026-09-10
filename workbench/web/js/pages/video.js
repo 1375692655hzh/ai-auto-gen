@@ -11,6 +11,7 @@ WB.pages.video = {
       f: { range: "7d", sort: "views", kind: "all", channel: "", q: "" },   // 默认7d: 低活跃日24h窗口天然为空
       hotLoading: false, hotErr: null,
       voiceTesting: false, voiceTestUrl: "", voiceTestPhrase: "你好，我是特朗普的爷爷，巴菲特的爸爸，鲍威尔的祖宗",
+      claimsOpen: false,   // claims 事实账本明细展开
       /* ── 视频分析·本地文件方式 + 历史结果 ── */
       anMode: "url", anWorkflow: "gemini", anPaths: [], anPathIdx: null, anFiles: [], anFile: "",
       anHistory: [], anHistoryLoading: false,
@@ -83,6 +84,19 @@ WB.pages.video = {
     },
     curMake() { return this.makes.find((m) => m.id === this.cur) || null; },
     makeBeats() { return (this.curMake && this.curMake.script && this.curMake.script.beats) || []; },
+    /* claims 事实账本：四级分级摘要（写稿期 LLM 产出，随脚本存档锁定） */
+    makeClaims() {
+      const raw = (this.curMake && this.curMake.script && this.curMake.script.claims) || [];
+      const levels = { verified: 0, opinion: 0, pending: 0, high_risk: 0 };
+      const items = [];
+      for (const c of raw) {
+        if (!c || typeof c !== 'object' || !String(c.text || '').trim()) continue;
+        const level = Object.prototype.hasOwnProperty.call(levels, c.level) ? c.level : 'pending';
+        levels[level] += 1;
+        items.push({ text: String(c.text), level, status: String(c.status || ''), source: String(c.source || ''), suggestion: String(c.suggestion || '') });
+      }
+      return { items, levels, total: items.length };
+    },
     narrationWords() { return [...String(this.curMake && this.curMake.narration.text || '').replace(/\s+/g, '')].length; },
     importScripts() { return this.scripts.filter((r) => r.kind === 'generated' && r.script && r.script.beats && r.script.beats.length); },
     ttsProviders() { return ((this.presets && this.presets.tts && this.presets.tts.providers) || []).filter((p) => p.enabled && (p.voices || []).length); },
@@ -1630,6 +1644,21 @@ WB.pages.video = {
                         </tr></tbody></table></div>
                     </fieldset>
                     <div v-if="curMake.script.warnings && curMake.script.warnings.length" class="notice"><div v-for="(w,i) in curMake.script.warnings" :key="i">{{ w }}</div></div>
+                    <div v-if="makeClaims.total" style="margin-top:10px">
+                      <div class="form-row" style="align-items:center;gap:6px">
+                        <span class="muted">事实账本 {{ makeClaims.total }} 条：</span>
+                        <span class="badge green">已核验 {{ makeClaims.levels.verified }}</span>
+                        <span class="badge blue">观点 {{ makeClaims.levels.opinion }}</span>
+                        <span class="badge yellow">待确认 {{ makeClaims.levels.pending }}</span>
+                        <span class="badge red">高危 {{ makeClaims.levels.high_risk }}</span>
+                        <button class="btn" @click="claimsOpen=!claimsOpen">{{ claimsOpen ? '收起明细' : '展开明细' }}</button></div>
+                      <table v-if="claimsOpen" class="tbl" style="margin-top:6px"><thead><tr><th>分级</th><th>原文引句</th><th>来源</th><th>建议核实方式</th></tr></thead>
+                        <tbody><tr v-for="(c,i) in makeClaims.items" :key="i">
+                          <td><span class="badge" :class="{'green':c.level==='verified','blue':c.level==='opinion','yellow':c.level==='pending','red':c.level==='high_risk'}">{{ {verified:'已核验',opinion:'观点',pending:'待确认',high_risk:'高危'}[c.level] }}</span></td>
+                          <td style="max-width:280px">{{ c.text }}</td>
+                          <td style="max-width:140px">{{ c.source || '—' }}</td>
+                          <td style="max-width:200px">{{ c.suggestion || '—' }}</td>
+                        </tr></tbody></table></div>
                     <div v-if="curMake.script_meta.locked" style="margin-top:10px"><p class="muted mono">已定稿 hash {{ curMake.script_meta.hash }} · {{ curMake.script_meta.locked_at }}</p>
                       <button class="btn" @click="makeLock('script',true)">解锁</button></div>
                     <button v-else class="btn primary" style="margin-top:10px" @click="makeLock('script')">定稿脚本</button>
@@ -1707,8 +1736,8 @@ WB.pages.video = {
                         <div class="form-row"><label>起止（秒）</label><input type="number" min="0" step="0.1" :value="beatOverride(b).start" @input="setBeatOverride(b,'start',$event.target.value==='' ? '' : Number($event.target.value))" style="width:75px" aria-label="开始秒数">—<input type="number" min="0" step="0.1" :value="beatOverride(b).end" @input="setBeatOverride(b,'end',$event.target.value==='' ? '' : Number($event.target.value))" style="width:75px" aria-label="结束秒数"></div>
                       </details>
                     </td></tr></tbody></table></div>
-                <div class="form-row" style="margin-top:12px"><label>出片模式</label><div class="radio-group"><label><input type="radio" value="build" v-model="buildMode">正式成片</label><label><input type="radio" value="estimate" v-model="buildMode">无声预览</label></div></div>
-                <button class="btn primary" :disabled="buildBusy || !curMake.script_meta.locked || curMake.script_stale || (buildMode==='build' && !makeVoiceReady)" @click="runMakeJob('build')">开始制作</button>
+                <div class="form-row" style="margin-top:12px"><label>出片模式</label><div class="radio-group"><label><input type="radio" value="build" v-model="buildMode">正式成片</label><label><input type="radio" value="sample" v-model="buildMode">带音样片20s</label><label><input type="radio" value="keyframes" v-model="buildMode">静帧预览</label><label><input type="radio" value="estimate" v-model="buildMode">无声预览</label></div></div>
+                <button class="btn primary" :disabled="buildBusy || !curMake.script_meta.locked || curMake.script_stale || (buildMode!=='estimate' && !makeVoiceReady)" @click="runMakeJob('build')">开始制作</button>
               </fieldset>
               <div v-if="buildBusy || curMake.status==='rendering'" style="margin-top:12px">
                 <div style="display:flex;justify-content:space-between"><span>{{ buildProgress && buildProgress.message || '正在恢复制作进度…' }}</span><span>{{ buildProgress && buildProgress.pct || 0 }}%</span></div>
@@ -1716,7 +1745,7 @@ WB.pages.video = {
                 <p class="muted">{{ buildPid }} · {{ buildProgress && buildProgress.stage || 'queued' }}</p></div>
               <div v-if="buildErr" class="err-box" style="padding:12px">{{ buildErr }}<div>
                 <button class="btn" @click="showMakeBuildLog">{{ buildLogOpen ? '收起日志' : '查看日志' }}</button>
-                <button class="btn primary" :disabled="makeBusy || buildBusy || !curMake.script_meta.locked || curMake.script_stale || (buildMode==='build' && !makeVoiceReady)" @click="runMakeJob('build')">重试</button></div></div>
+                <button class="btn primary" :disabled="makeBusy || buildBusy || !curMake.script_meta.locked || curMake.script_stale || (buildMode!=='estimate' && !makeVoiceReady)" @click="runMakeJob('build')">重试</button></div></div>
               <div v-if="buildLogOpen" style="max-height:260px;overflow:auto;margin-top:8px"><p v-if="buildLogTruncated" class="muted">仅显示末尾 {{ buildLogLines.length }} 行</p><pre class="mono" style="white-space:pre-wrap">{{ buildLogLines.join('\\n') }}</pre></div>
             </div>
             <div class="card" v-if="curMake.project_id">

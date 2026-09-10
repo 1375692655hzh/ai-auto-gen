@@ -57,8 +57,10 @@ export function validateStory(story) {
 				// 自定义 OpenAI 兼容供应商(如 mimo): 协议参数随 meta 透传, 密钥走环境变量
 				if (!meta.tts.base_url || !meta.tts.model)
 					err("meta.tts.provider=custom 时必须带 base_url 与 model");
-			} else if (meta.tts.provider !== "edge" && meta.tts.provider !== "dashscope")
-				err(`meta.tts.provider 只能是 edge|dashscope|custom，收到 ${JSON.stringify(meta.tts.provider)}`);
+			} else if (meta.tts.provider === "volc") {
+                if (typeof meta.tts.voice !== "string" || !meta.tts.voice.trim()) err("volc 必须带非空 voice");
+            } else if (meta.tts.provider !== "edge" && meta.tts.provider !== "dashscope")
+				err(`meta.tts.provider 只能是 edge|dashscope|custom|volc，收到 ${JSON.stringify(meta.tts.provider)}`);
 		}
 		// format 只是标注，尺寸不匹配或缺省仅提示。
 		if (typeof meta.width !== "number" || typeof meta.height !== "number") {
@@ -96,6 +98,10 @@ export function validateStory(story) {
 			err(`${where}.template：竖版模板只能用于 9:16 项目`);
 		if (typeof s.narration !== "string" || !s.narration.trim())
 			err(`${where}.narration 必须是非空字符串`);
+		// claims-ledger 硬门禁：写稿期残留的待确认标记必须全部解决或改写后才能渲染
+		if (typeof s.narration === "string" && s.narration.trim()
+				&& (s.narration.includes("【待确认") || /\[PENDING\]/i.test(s.narration)))
+			err(`${where}.narration 含【待确认】/[PENDING] 标记：事实账本待确认项必须先解决或改写，才能进渲染`);
 		if (s.caption !== undefined && typeof s.caption !== "string")
 			warn(`${where}.caption 建议是字符串（收到 ${typeof s.caption}，放行）`);
 		if (s.data === undefined || !isObj(s.data)) {

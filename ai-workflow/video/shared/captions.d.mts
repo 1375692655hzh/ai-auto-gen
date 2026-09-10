@@ -2,6 +2,7 @@ export interface Cue {t: string; start: number; end: number}
 export interface CaptionTimeline {
 	cues: Cue[];
 	method: string;
+	warning?: string;
 }
 export function captionAt(caption: string | Cue[] | null | undefined, frame: number, duration: number, fps: number): string;
 export function splitCaption(text: string, width?: number): string[];
@@ -11,6 +12,7 @@ export function captionTimeline(args: {
 	fps: number;
 	lead?: number;
 	alignment?: {unit: string; origin: string; segments: {t: string; start: number; end: number}[]};
+	providerTrack?: {unit: string; origin: string; narrationHash?: string; cues: Cue[]};
 	cues?: Cue[];
 }): CaptionTimeline;
 export function toSrt(frames: {cues?: Cue[]; durationInFrames: number}[], fps: number): string;

@@ -1,8 +1,10 @@
 import msedgeTtsPkg from "msedge-tts";
 const { MsEdgeTTS, OUTPUT_FORMAT } = msedgeTtsPkg;
-import { existsSync, readFileSync, writeFileSync, rmSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync, rmSync, renameSync } from "node:fs";
 import { createHash } from "node:crypto";
 import path from "node:path";
+import { spawnSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
 
 const COMPOSITOR_PKG = {
 	win32: ["compositor-win32-x64-msvc", "ffprobe.exe"],
@@ -137,21 +139,58 @@ export async function synthCustom(cfg, voice, text, outFile) {
 	writeFileSync(outFile, Buffer.from(b64, "base64"));
 }
 
+export function synthVolc(text, voice, outFile, cfg = {}) {
+    if (!cfg.api_key) throw new Error("VOLC_EMPTY: missing VOLC_TTS_API_KEY");
+    const script = fileURLToPath(new URL("./volc-tts.py", import.meta.url));
+    // 解释器探测回退：py -3.12 → py -3.11 → python（沙箱/精简环境里 py 启动器可能缺注册）
+    const candidates = [["py", ["-3.12"]], ["py", ["-3.11"]], ["python", []]];
+    let r = null;
+    for (const [exe, flags] of candidates) {
+        r = spawnSync(exe, [...flags, script, text, voice, outFile], {
+            env: {...process.env, VOLC_TTS_API_KEY: cfg.api_key || "", PYTHONIOENCODING: "utf-8"},
+            encoding: "utf8", timeout: 150000, windowsHide: true,
+        });
+        if (!r.error || r.error.code !== "ENOENT") break;
+    }
+    const output = (r.stdout || "").trim();
+    if (output.startsWith("VOLC_EMPTY") || r.status !== 0 || !existsSync(outFile)) {
+        const reason = output.startsWith("VOLC_EMPTY") ? output : `VOLC_EMPTY: ${r.error?.message || r.stderr || "audio missing"}`;
+        throw new Error(reason.replaceAll(cfg.api_key, "[redacted]"));
+    }
+}
+export const sidecarPath = (outFile) => outFile.replace(/\.mp3$/i, ".tts.json");
+export const hashTts = (engine, voice, narration) => createHash("sha1")
+    .update(engine + "\0" + voice + "\0" + narration).digest("hex").slice(0, 16);
+export function writeSidecar(outFile, engine, voice, narration) {
+    writeFileSync(sidecarPath(outFile), JSON.stringify({v: 1, hash: hashTts(engine, voice, narration), engine, voice}));
+}
+export function matchesSidecar(outFile, engine, voice, narration) {
+    try {
+        const s = JSON.parse(readFileSync(sidecarPath(outFile), "utf8"));
+        return s.v === 1 && s.engine === engine && s.voice === voice && s.hash === hashTts(engine, voice, narration);
+    } catch { return false; }
+}
 export async function synthOnce(engine, voice, text, outFile, customCfg) {
 	// Sidecars belong to this exact synthesis. Never reuse timestamps from a previous take/provider.
-	for (const suffix of [".cues.json", ".alignment.json"])
+	for (const suffix of [".cues.json", ".alignment.json", ".tts.json"])
 		rmSync(outFile.replace(/\.mp3$/i, suffix), {force: true});
+	const temporary = outFile + ".tmp.mp3";
 	for (let attempt = 1; attempt <= 8; attempt++) {
 		try {
-			if (engine === "custom") {
-				await synthCustom(customCfg || {}, voice, text, outFile);
+			if (engine === "volc") {
+                synthVolc(text, voice, temporary, customCfg);
+            } else if (engine === "custom") {
+				await synthCustom(customCfg || {}, voice, text, temporary);
 			} else if (engine === "dashscope") {
-				await synthDashscope(text, voice, outFile);
+				await synthDashscope(text, voice, temporary);
 			} else {
-				await synthEdge(text, voice, outFile);
+				await synthEdge(text, voice, temporary, {cuesFile: outFile.replace(/\.mp3$/i, ".cues.json")});
 			}
+			renameSync(temporary, outFile);
 			return true;
 		} catch (e) {
+            rmSync(temporary, {force: true});
+            if (e.message.startsWith("VOLC_EMPTY")) { console.error(e.message); return false; }
 			// voiceLocale 报错 = 音色名不是合法 Edge 语音（须形如 zh-CN-XiaoxiaoNeural），
 			// 重试无意义：给出可操作提示后立即失败
 			if (engine === "edge" && /voiceLocale/i.test(e.message)) {

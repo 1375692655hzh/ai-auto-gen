@@ -148,7 +148,7 @@ export function captionTimeline({text, duration, fps, lead = 0, alignment, cues,
 	if (alignment) {
 		if (alignment.unit !== "seconds" || alignment.origin !== "audio" || !Array.isArray(alignment.segments)) throw new Error("对齐轨必须为 audio-relative seconds segments");
 		input = alignment.segments.map((c) => ({t: c.t, start: start + Math.round(c.start * fps), end: start + Math.round(c.end * fps)}));
-		method = "provider-alignment";
+		method = alignment.source === "whisper" ? "whisper-alignment" : "provider-alignment";
 	} else if (Array.isArray(cues) && cues.length) {
 		input = cues;
 		method = "supplied-scene-frames";
