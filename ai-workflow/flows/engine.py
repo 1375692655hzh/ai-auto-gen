@@ -138,8 +138,10 @@ class YamlWorkflow(WorkflowBase):
                 continue
             uses = st.get("uses")
             if uses not in STEPS:
-                out.append((sid, self._skip_fn(sid, f"未注册步骤 {uses}"), False))
-                continue
+                # 未知步骤硬失败(2026-09-11 三岗复审): 静默 skip 后照写 run.json "done",
+                # YAML 写错步骤名 = 工作流"成功"但少跑一步。lint 同样报这条, 先跑 lint 排查。
+                raise SystemExit(f"[{self.name}] 步骤 {sid}: 未注册步骤类型 uses:{uses} "
+                                 f"(可用: {sorted(STEPS)})")
             params = {k: self._resolve(v) for k, v in (st.get("with") or {}).items()}
             impl = STEPS[uses]
 

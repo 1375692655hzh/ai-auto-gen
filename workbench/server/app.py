@@ -371,13 +371,12 @@ def create_app(bind_host: str = "127.0.0.1") -> FastAPI:
     @app.post("/wb-api/gen-compose")
     async def gen_compose(request: Request):
         body = await request.json()
-        if gcompose.job_running():
-            return JSONResponse({"error": "生成任务进行中, 等它跑完再试"}, status_code=409)
         items = [m for m in (body.get("items") or []) if isinstance(m, dict)][:8]
         if not items:
             return JSONResponse({"error": "no_items", "hint": "先勾选参与生成的素材"},
                                 status_code=400)
-        gcompose.begin_job({**body, "items": items})
+        if not gcompose.try_begin_job({**body, "items": items}):   # 原子占位, 防双开
+            return JSONResponse({"error": "生成任务进行中, 等它跑完再试"}, status_code=409)
         try:
             gcompose.spawn_cli()
         except Exception as e:
@@ -785,9 +784,8 @@ def create_app(bind_host: str = "127.0.0.1") -> FastAPI:
     # ── 视频工坊: 端点只读/写自有 JSON；分析与生成仅 spawn CLI 外呼 ──────────
     def start_video_job(kind, payload, command):
         import subprocess
-        if vstudio.job_running(kind):
+        if not vstudio.try_begin_job(kind, payload):   # 检查+占位同一临界区, 防双开
             return JSONResponse({"error": "任务进行中"}, status_code=409)
-        vstudio.begin_job(kind, payload)
         cli = Path(__file__).resolve().parents[2] / "cli.py"
         try:
             subprocess.Popen([*config.py_cmd(), str(cli), "workbench", command, "--json"],
@@ -1150,8 +1148,6 @@ def create_app(bind_host: str = "127.0.0.1") -> FastAPI:
     async def video_analyze(request: Request):
         import subprocess
         body = await request.json()
-        if vstudio.job_running("analyze"):
-            return JSONResponse({"error": "分析任务进行中"}, status_code=409)
         cfg = config.load()
         gemini_ok = bool((cfg.get("gemini") or {}).get("api_key"))
         translate = cfg.get("translate") or {}
@@ -1177,7 +1173,8 @@ def create_app(bind_host: str = "127.0.0.1") -> FastAPI:
             if not parsed:
                 return JSONResponse({"error": "bad_video_input"}, status_code=400)
             result_key = vstudio.analysis_key_of(parsed["video_id"], parsed["url"])
-        vstudio.begin_job("analyze", body)
+        if not vstudio.try_begin_job("analyze", body):   # 校验完再原子占位, 防双开
+            return JSONResponse({"error": "分析任务进行中"}, status_code=409)
         cli = Path(__file__).resolve().parents[2] / "cli.py"
         try:
             subprocess.Popen(
@@ -1237,8 +1234,6 @@ def create_app(bind_host: str = "127.0.0.1") -> FastAPI:
     async def video_script_generate(request: Request):
         import subprocess
         body = await request.json()
-        if vstudio.job_running("generate"):
-            return JSONResponse({"error": "脚本生成任务进行中"}, status_code=409)
         style_ids = {style["id"] for style in vstudio.STYLE_PRESETS}
         style_id = str(body.get("style_id") or "")
         if style_id not in style_ids:
@@ -1248,7 +1243,8 @@ def create_app(bind_host: str = "127.0.0.1") -> FastAPI:
         if not any(str(body.get(k) or "").strip() for k in ("brief", "draft_id", "pasted")):
             return JSONResponse({"error": "no_input",
                                  "hint": "填一句话简报、粘贴文章或选草稿"}, status_code=400)
-        vstudio.begin_job("generate", body)
+        if not vstudio.try_begin_job("generate", body):   # 校验完再原子占位, 防双开
+            return JSONResponse({"error": "脚本生成任务进行中"}, status_code=409)
         cli = Path(__file__).resolve().parents[2] / "cli.py"
         try:
             subprocess.Popen(
@@ -1340,8 +1336,6 @@ def create_app(bind_host: str = "127.0.0.1") -> FastAPI:
         if not script or not isinstance(script.get("beats"), list) or not script.get("beats"):
             return JSONResponse({"error": "no_script",
                                  "hint": "需要 script_id 或带 beats 的 script"}, status_code=400)
-        if vstudio.job_running("build"):
-            return JSONResponse({"error": "制作任务进行中"}, status_code=409)
         aspect = body.get("aspect")
         if not isinstance(aspect, str) or aspect not in ASPECTS:
             old_format = body.get("format")
@@ -1385,10 +1379,11 @@ def create_app(bind_host: str = "127.0.0.1") -> FastAPI:
                     "voice": str(body.get("voice") or ""),
                     "tts_provider": tts_provider, "enrich": enrich, "title": title}
         project_id = "wb" + time.strftime("%m%d%H%M%S")
-        vstudio.begin_job("build", {"script": script, "settings": settings,
-                                    "project_id": project_id, "mode": mode,
-                                    "hook_index": hook_index,
-                                    "text": str(body.get("text") or "")})
+        if not vstudio.try_begin_job("build", {"script": script, "settings": settings,
+                                               "project_id": project_id, "mode": mode,
+                                               "hook_index": hook_index,
+                                               "text": str(body.get("text") or "")}):
+            return JSONResponse({"error": "制作任务进行中"}, status_code=409)
         cli = Path(__file__).resolve().parents[2] / "cli.py"
         try:
             subprocess.Popen(

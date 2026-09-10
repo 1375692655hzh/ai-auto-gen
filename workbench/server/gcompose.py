@@ -154,26 +154,40 @@ def _save_jobs(jobs: dict) -> None:
 
 
 def begin_job(request: dict) -> None:
-    job = _empty_job()
-    job.update({"running": True, "started_at": _now(), "request": dict(request or {})})
-    _save_jobs({"compose": job})
+    with config.file_lock("gen_jobs"):
+        job = _empty_job()
+        job.update({"running": True, "started_at": _now(), "request": dict(request or {})})
+        _save_jobs({"compose": job})
+
+
+def try_begin_job(request: dict) -> bool:
+    """检查+占位同一临界区(2026-09-11 三岗复审修复): 防并发 POST 双开两个生成 CLI。"""
+    with config.file_lock("gen_jobs"):
+        if job_running():
+            return False
+        job = _empty_job()
+        job.update({"running": True, "started_at": _now(), "request": dict(request or {})})
+        _save_jobs({"compose": job})
+        return True
 
 
 def tick(stage: str, pct: int, msg: str) -> None:
-    jobs = load_jobs()
-    jobs["compose"]["progress"] = {"stage": stage, "pct": pct, "message": msg}
-    _save_jobs(jobs)
+    with config.file_lock("gen_jobs"):
+        jobs = load_jobs()
+        jobs["compose"]["progress"] = {"stage": stage, "pct": pct, "message": msg}
+        _save_jobs(jobs)
 
 
 def finish_job(code: int, error: str, hint: str = "", result: str = "") -> None:
-    jobs = load_jobs()
-    jobs["compose"].update({"running": False, "finished_at": _now(), "exit": code,
-                            "error": error or "", "hint": hint or ""})
-    if result:
-        jobs["compose"]["result"] = result
-    if code == 0:
-        jobs["compose"]["progress"] = {"stage": "done", "pct": 100, "message": "完成"}
-    _save_jobs(jobs)
+    with config.file_lock("gen_jobs"):
+        jobs = load_jobs()
+        jobs["compose"].update({"running": False, "finished_at": _now(), "exit": code,
+                                "error": error or "", "hint": hint or ""})
+        if result:
+            jobs["compose"]["result"] = result
+        if code == 0:
+            jobs["compose"]["progress"] = {"stage": "done", "pct": 100, "message": "完成"}
+        _save_jobs(jobs)
 
 
 def job_running() -> bool:

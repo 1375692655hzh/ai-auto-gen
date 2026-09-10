@@ -447,8 +447,10 @@ def load_rows(name: str) -> list:
 
 
 class file_lock:
-    """跨进程读改写互斥(短临界区, 2026-09-11 复审 P0): Windows 用 msvcrt 锁
-    data/workbench/<name>.lock 首字节(阻塞至系统 ~10s 上限); 其它平台退化进程内锁。
+    """跨进程读改写互斥(短临界区, 2026-09-11 复审 P0): 先进程内线程锁串行化, 再
+    msvcrt 锁 data/workbench/<name>.lock 首字节做跨进程互斥。
+    注意: msvcrt 区域锁在同进程两线程抢同一字节时**立即报 EDEADLK 而不是等待**,
+    进程内线程锁必须先行(压测实证); 跨进程竞争则由 LK_LOCK 阻塞至系统 ~10s 上限。
     用法: with config.file_lock("video_jobs"): load→改→save。"""
 
     _LOCAL: dict = {}
@@ -458,26 +460,28 @@ class file_lock:
             raise ValueError("bad lock name")
         self._name = name
         self._fh = None
+        self._lk = None
 
     def __enter__(self):
+        import threading
+        self._lk = self._LOCAL.setdefault(self._name, threading.Lock())
+        self._lk.acquire()                           # dict.setdefault 在 GIL 下原子
         if os.name == "nt":
             import msvcrt
-            DATA_DIR.mkdir(parents=True, exist_ok=True)
-            self._fh = open(DATA_DIR / f"{self._name}.lock", "a+b")
-            self._fh.seek(0)
-            msvcrt.locking(self._fh.fileno(), msvcrt.LK_LOCK, 1)
-        else:
-            import threading
-            lk = self._LOCAL.setdefault(self._name, threading.Lock())
-            lk.acquire()
-            self._fh = lk
+            try:
+                DATA_DIR.mkdir(parents=True, exist_ok=True)
+                self._fh = open(DATA_DIR / f"{self._name}.lock", "a+b")
+                self._fh.seek(0)
+                msvcrt.locking(self._fh.fileno(), msvcrt.LK_LOCK, 1)
+            except Exception:
+                self._lk.release()
+                self._lk = None
+                raise
         return self
 
     def __exit__(self, *exc):
         fh, self._fh = self._fh, None
-        if fh is None:
-            return False
-        if os.name == "nt":
+        if fh is not None:
             import msvcrt
             try:
                 fh.seek(0)
@@ -485,8 +489,9 @@ class file_lock:
             except OSError:
                 pass
             fh.close()
-        else:
-            fh.release()
+        lk, self._lk = self._lk, None
+        if lk is not None:
+            lk.release()
         return False
 
 

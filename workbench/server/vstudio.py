@@ -624,6 +624,28 @@ def job_running(kind: str) -> bool:
     return bool(job.get("running")) and _age_seconds(job.get("started_at")) <= stale
 
 
+def try_begin_job(kind: str, request: dict) -> bool:
+    """检查+占位同一临界区(2026-09-11 三岗复审修复): job_running+begin_job 分开调
+    是 check-then-act, 并发 POST 会双开拉起两个 CLI 互踩。端点一律改调本函数。"""
+    with config.file_lock("video_jobs"):
+        jobs = load_jobs()
+        job = jobs.get(kind) or {}
+        stale = JOB_STALE_S.get(kind, 20 * 60)
+        if job.get("running") and _age_seconds(job.get("started_at")) <= stale:
+            return False
+        new = _empty_job()
+        new.update({"running": True, "started_at": _now(), "request": dict(request or {})})
+        if kind == "analyze":
+            new["result_key"] = ""
+        elif kind == "build":
+            new["result"] = _empty_build_result()
+        else:
+            new["result"] = None
+        jobs[kind] = new
+        _save_jobs(jobs)
+        return True
+
+
 def status_payload() -> dict:
     jobs = load_jobs()
     common = ("running", "started_at", "finished_at", "exit", "progress", "error",

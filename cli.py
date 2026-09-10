@@ -599,8 +599,10 @@ def flows_cmd(args) -> int:
         return EXIT_FAIL if errs else EXIT_OK
 
     if args.sub in ("run", "resume"):
+        # resume 解析器只定义 name(兼容占位), 共用分支的其余参数一律 getattr 兜底
+        # (2026-09-11 codex 复审: resume 曾必崩 AttributeError)
         overrides = {}
-        for kv in args.set:
+        for kv in (getattr(args, "set", None) or []):
             k, _, v = kv.partition("=")
             if not k or not v:
                 print(f"--set 格式应为 k=v: {kv}", file=sys.stderr)
@@ -614,10 +616,14 @@ def flows_cmd(args) -> int:
                     pass
             overrides[k] = v
         try:
-            run_flow(args.name, date=args.date, auto=args.auto,
-                     from_step=args.from_step, fresh=args.fresh,
-                     only=args.only, overrides=overrides)
+            run_flow(args.name, date=getattr(args, "date", None),
+                     auto=getattr(args, "auto", False),
+                     from_step=getattr(args, "from_step", None),
+                     fresh=getattr(args, "fresh", False),
+                     only=getattr(args, "only", None), overrides=overrides)
         except SystemExit as e:
+            if e.code and not isinstance(e.code, int):
+                print(e.code, file=sys.stderr)
             return int(e.code) if isinstance(e.code, int) else EXIT_FAIL
         return EXIT_OK
 

@@ -130,16 +130,25 @@ def release_collect_lock() -> None:
 
 
 class store_locked:
-    """读改写短临界区互斥(端点增删改 与 CLI 收尾合并共用), LK_LOCK 阻塞至 ~10s。"""
+    """读改写短临界区互斥(端点增删改 与 CLI 收尾合并共用)。
+    先进程内线程锁(msvcrt 区域锁同进程抢同字节会立即 EDEADLK, 压测实证),
+    再 msvcrt 跨进程互斥(LK_LOCK 阻塞至系统 ~10s 上限)。"""
+
+    _LOCAL_LOCK = threading.Lock()
 
     def __enter__(self):
         self._fh = None
+        self._LOCAL_LOCK.acquire()
         if os.name == "nt":
             import msvcrt
-            DATA_DIR.mkdir(parents=True, exist_ok=True)
-            self._fh = open(DATA_DIR / "x_track.store.lock", "a+b")
-            self._fh.seek(0)
-            msvcrt.locking(self._fh.fileno(), msvcrt.LK_LOCK, 1)
+            try:
+                DATA_DIR.mkdir(parents=True, exist_ok=True)
+                self._fh = open(DATA_DIR / "x_track.store.lock", "a+b")
+                self._fh.seek(0)
+                msvcrt.locking(self._fh.fileno(), msvcrt.LK_LOCK, 1)
+            except Exception:
+                self._LOCAL_LOCK.release()
+                raise
         return self
 
     def __exit__(self, *exc):
@@ -151,6 +160,7 @@ class store_locked:
             except OSError:
                 pass
             self._fh.close()
+        self._LOCAL_LOCK.release()
         return False
 
 
@@ -408,11 +418,15 @@ def collect(force: bool = False, handles: list | None = None) -> tuple[dict, int
     if not acquire_collect_lock():
         return {"skipped": "already_running",
                 "note": "另一实例在跑(跨进程文件锁), 本轮放弃"}, 0
-    started_s = time.strftime("%Y-%m-%d %H:%M:%S")
-    store["last_collect"] = {**(store.get("last_collect") or {}),
-                             "running": True, "started_at": started_s}
-    save_store(store)                                # 真占锁(文件锁+running标志)再外呼
     try:
+        started_s = time.strftime("%Y-%m-%d %H:%M:%S")
+        with store_locked():
+            # 置 running 必须重读库再写(复审回归: 旧版用锁前快照整文件覆盖,
+            # 窗口内端点增删账号会被丢); 且必须在 try 内, 抛异常也要放锁。
+            fresh = load_store()
+            fresh["last_collect"] = {**(fresh.get("last_collect") or {}),
+                                     "running": True, "started_at": started_s}
+            save_store(fresh)                            # 真占锁(文件锁+running标志)再外呼
         report = {"total": len(todo), "ok": 0, "fail": 0, "circuit_break": False,
                   "failures": {}}
         lock = threading.Lock()
