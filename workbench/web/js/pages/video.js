@@ -1230,11 +1230,12 @@ WB.pages.video = {
           未配置解读模型(设置 → 翻译模型), 暂无 AI 简介/标签</div>
         <table class="tbl">
           <thead><tr>
-            <th>标题</th><th>素材</th><th>频道</th><th>类型</th><th>发布</th><th>播放</th><th>赞</th><th>评</th>
+            <th>#</th><th>标题</th><th>素材</th><th>频道</th><th>类型</th><th>发布</th><th>播放</th><th>赞</th><th>评</th>
             <th>内容简介</th><th>内容标签</th>
           </tr></thead>
           <tbody>
-            <tr v-for="r in hotInsights" :key="r.video_id">
+            <tr v-for="(r, i) in hotInsights" :key="r.video_id">
+              <td class="mono muted">{{ i + 1 }}</td>
               <td style="max-width:200px"><a :href="r.url" target="_blank" rel="noopener"
                    :title="r.channel_title + ' · ' + r.title">{{ cut(r.title, 20) }}</a></td>
               <td><span v-if="poolIds[r.video_id]" class="act-done">已加入 ✓</span>
