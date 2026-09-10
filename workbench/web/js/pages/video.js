@@ -156,7 +156,7 @@ WB.pages.video = {
         { id: 'scripts', title: '脚本仓库', cnt: this.scripts.length || '',
           icon: I('<path d="M4 4h16v16H4z"/><path d="M8 8h8M8 12h8M8 16h5"/>'),
           onPick: () => { this.tab = 'scripts'; } },
-        { id: "tracked", title: "追踪账号", cnt: this.chs.length || "",
+        { id: "tracked", title: "账号管理", cnt: this.chs.length || "",
           icon: I('<path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/>'),
           onPick: () => { this.tab = "tracked"; } },
       ], this.tab);
@@ -1909,7 +1909,7 @@ WB.pages.video = {
     <!-- ═══ 子页7: 追踪账号 ═══ -->
     <div v-show="tab==='tracked'">
       <div class="card">
-        <h3>YouTube 追踪账号({{ chs.length }})
+        <h3>YouTube 账号管理({{ chs.length }})
           <span v-if="chMeta && !chMeta.configured" class="muted" style="font-weight:400">
             · 未配 Key, 添加后待解析</span>
           <span style="float:right">
