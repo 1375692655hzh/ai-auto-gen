@@ -23,7 +23,7 @@ WB.pages.video = {
       styles: [], drafts: [],
       scripts: [], scriptSel: null, scriptFilter: '', reusableOnly: false,
       /* ── 追踪账号 ── */
-      chs: [], chMeta: null,
+      chs: [], chMeta: null, chQ: "",
       chForm: { input: "", note: "" }, showChForm: false, adding: false, chBusyId: "",
       /* ── 视频制作(原视频页内容) ── */
       videos: [], sel: null, error: null,
@@ -66,6 +66,16 @@ WB.pages.video = {
     },
     enabledChs() {
       return (this.chs || []).filter((c) => c.enabled !== false);
+    },
+    /* 追踪账号列表过滤: 关键词(频道名/handle/备注/频道ID), 账号多了好找 */
+    chRows() {
+      const q = (this.chQ || "").trim().toLowerCase();
+      if (!q) return this.chs;
+      return this.chs.filter((c) =>
+        (c.title || "").toLowerCase().includes(q) ||
+        (c.handle || "").toLowerCase().includes(q) ||
+        (c.note || "").toLowerCase().includes(q) ||
+        (c.channel_id || "").toLowerCase().includes(q));
     },
     pendingChs() {
       return this.enabledChs.filter((c) => c.resolve_status === "pending");
@@ -1822,6 +1832,8 @@ WB.pages.video = {
           <span v-if="chMeta && !chMeta.configured" class="muted" style="font-weight:400">
             · 未配 Key, 添加后待解析</span>
           <span style="float:right">
+            <input type="text" v-model="chQ" class="mat-search" placeholder="搜索(频道名/handle/备注)"
+                   style="width:200px;margin-right:8px">
             <button class="btn" @click="importLegacy" title="从「追踪」主页面的清单导入 platform=YouTube 的行">从追踪页导入</button>
             <button class="btn primary" @click="showChForm = !showChForm">＋ 添加频道</button>
           </span></h3>
@@ -1837,7 +1849,7 @@ WB.pages.video = {
           尚未添加频道 —— 粘贴 YouTube 频道主页链接或 @handle; 添加后由采集器自动解析出频道名与订阅数。
           此清单与「追踪」主页面的账号通讯录相互独立。</div>
         <div class="acct-grid">
-          <div v-for="c in chs" :key="c.id" class="acct-card">
+          <div v-for="c in chRows" :key="c.id" class="acct-card">
             <div class="plat">YouTube</div>
             <div class="name">{{ c.title || c.input }}</div>
             <div class="muted" style="font-size:11px">
@@ -1855,6 +1867,7 @@ WB.pages.video = {
               <a style="font-size:12px" @click="delCh(c)">删除</a></div>
           </div>
         </div>
+        <div v-if="!chRows.length && chs.length" class="muted" style="padding:8px 0">无匹配频道</div>
         <p class="muted" style="margin-top:10px">
           启停只影响采集范围(停用频道不外呼); 解析与首轮数据在下一轮采集完成
           (计划任务每小时, 或到【热点追踪】点「立即采集」)。删除不停用历史快照。</p>

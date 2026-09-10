@@ -26,6 +26,7 @@ WB.pages.article = {
       xExpanded: {},                     /* 长文卡片展开态: status_id → bool(3行折叠↔全文) */
       /* ── 账号管理(全 X 池只读 + 本地偏好 x_account_prefs.json) ── */
       xaccts: { items: [], meta: {}, q: "", pos: "", followOnly: false, loading: false },
+      xBusyId: "",   /* 看与不看开关进行中的 handle */
       /* 蹭蹭流量 = SoPilot 热帖 RSS(唯一来源, 不走数据站) */
       xfSurge: { sort: "prob", items: [], total: 0, meta: {}, loading: false },
       /* 一键采集(纯工作台部署无计划任务, 空态直接拉数, xsurge_ctl) */
@@ -321,6 +322,17 @@ WB.pages.article = {
       this.saveXPref(a, { follow: a.follow });
     },
     saveXNote(a) { this.saveXPref(a, { note: a.local_note }); },
+    /* 看与不看: 停用后该账号内容从推荐信息/蹭蹭流量消失且不再采集(本地偏好, 池文件不动) */
+    async toggleXEnabled(a) {
+      if (!a.pool_enabled) { WB.toast("该账号在池内被停用, 须改池文件或 local 覆盖启用"); return; }
+      this.xBusyId = a.handle;
+      try {
+        const d = await WB.api.post("/x-accounts/" + a.handle + "/enabled", { on: !a.enabled });
+        a.enabled = d.enabled;
+        this.xaccts.meta.disabled_n = Math.max(0, (this.xaccts.meta.disabled_n || 0) + (d.enabled ? -1 : 1));
+      } catch (e) { WB.toast("切换失败: " + (e.error || "")); }
+      this.xBusyId = "";
+    },
     xfCopy(r) { WB.copyText(this.dispText(r)); },
     /* ── 评论生成: 端点同步 spawn CLI(零外呼), 缓存命中秒回; 3 候选复制进 X 卡位 ── */
     async genReply(r, force) {
@@ -1516,13 +1528,14 @@ WB.pages.article = {
           <button class="btn" @click="loadXaccts">{{ xaccts.loading ? '刷新中…' : '刷新' }}</button>
         </div>
         <div class="muted" style="margin:6px 0 10px">
-          池数据来自板块一 twitter_pool.yaml(只读): 启停/角色/市场改池文件或 local 覆盖后点刷新;
-          关注与备注是本板块自有偏好, 只存 data/workbench/。</div>
+          池数据来自板块一 twitter_pool.yaml(只读); 启用开关=本机偏好(停用后推荐信息/蹭蹭流量
+          不再出现该账号内容, 也不再采集), 关注与备注同样只存 data/workbench/。</div>
         <table class="tbl">
-          <thead><tr><th>账号</th><th>市场</th><th>定位</th><th>标签</th><th>粉丝</th><th>状态</th><th>关注</th><th>备注</th></tr></thead>
+          <thead><tr><th>账号</th><th>市场</th><th>定位</th><th>标签</th><th>粉丝</th><th>启用</th><th>关注</th><th>备注</th></tr></thead>
           <tbody>
             <tr v-for="a in xacctRows" :key="a.handle"
-                :style="{background: a.follow ? 'var(--accent-weak)' : ''}">
+                :style="{background: a.follow ? 'var(--accent-weak)' : '',
+                         opacity: a.enabled ? '' : .5}">
               <td>
                 <a :href="a.homepage" target="_blank" rel="noopener"><b>{{ a.name || '@'+a.handle }}</b></a>
                 <span v-if="a.verified" class="badge blue" title="X 认证账号" style="margin-left:4px">✓</span>
@@ -1535,7 +1548,12 @@ WB.pages.article = {
                 <span v-if="a.priority" class="badge" style="margin-left:4px">{{ a.priority }}</span>
                 <div class="muted" style="font-size:11px" v-if="a.note" :title="a.note">{{ a.note.slice(0, 24) }}</div></td>
               <td class="mono">{{ a.followers ? fmtFol(a.followers) : '—' }}</td>
-              <td><span class="badge" :class="a.enabled ? 'green' : 'red'">{{ a.enabled ? '启用' : '停用' }}</span></td>
+              <td><span class="switch" :class="{ on: a.enabled, busy: xBusyId === a.handle }"
+                    role="switch" tabindex="0" :aria-checked="a.enabled ? 'true' : 'false'"
+                    :title="a.pool_enabled
+                      ? (a.enabled ? '停看(推荐/蹭蹭流量隐藏此账号)' : '恢复看(重新出现在推荐/蹭蹭流量)')
+                      : '池内停用账号 — 须改池文件或 local 覆盖启用'"
+                    @click="toggleXEnabled(a)" @keydown.enter="toggleXEnabled(a)"></span></td>
               <td><span class="act" :style="{color: a.follow ? 'var(--yellow)' : ''}"
                     @click="toggleXFollow(a)">{{ a.follow ? '★ 已关注' : '☆ 关注' }}</span></td>
               <td><input type="text" v-model="a.local_note" @change="saveXNote(a)" placeholder="本地备注"

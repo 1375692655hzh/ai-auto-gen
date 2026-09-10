@@ -100,15 +100,60 @@ def load_accounts(force: bool = False) -> dict:
         return _cache["accounts"]
 
     pos_map = _role_positioning_map()
+    prefs_off = _pref_disabled_handles()
     out = {}
     for a in (_load_raw().get("accounts") or []):
         v = _acct_view(a, pos_map)
         if not v["handle"] or a.get("enabled", True) is False:
             continue
+        if v["handle"].lower() in prefs_off:             # 本地偏好停用(看与不看开关)
+            continue
         out[v["handle"].lower()] = v
     _cache["mtime"] = mtime
     _cache["accounts"] = out
     return out
+
+
+def _pref_disabled_handles() -> set:
+    """本地偏好里被停用的 handle 集(x_account_prefs.json 的 enabled=False 键)。"""
+    from . import config as wb_config
+    prefs = wb_config.load_x_prefs()
+    return {h for h, p in prefs.items()
+            if isinstance(p, dict) and p.get("enabled") is False}
+
+
+def disabled_handles() -> set:
+    """全量停用集 = 池内 enabled=False + 本地偏好 enabled=False; 供视图/采集过滤(看与不看)。"""
+    off = set()
+    for a in (_load_raw().get("accounts") or []):
+        if a.get("enabled", True) is False:
+            h = str(a.get("handle") or "").strip().lstrip("@").lower()
+            if h:
+                off.add(h)
+    return off | _pref_disabled_handles()
+
+
+def set_enabled(handle: str, on: bool) -> dict:
+    """看与不看开关(板块四自有写口 x_account_prefs.json, 池文件保持只读守红线7)。
+
+    三态语义: on=True 恢复看(清本地停用标记, 池内原本启用的账号回到启用);
+    on=False 停看(本地标记 enabled=False, 推荐信息/蹭蹭流量/采集候选全部过滤)。
+    """
+    from . import config as wb_config
+    key = str(handle or "").strip().lstrip("@").lower()
+    if key not in pool_handles():
+        raise KeyError(key)
+    prefs = wb_config.load_x_prefs()
+    p = prefs.setdefault(key, {})
+    if on:
+        p.pop("enabled", None)                           # 回归池默认(恢复"看")
+    else:
+        p["enabled"] = False
+    p["updated_at"] = time.strftime("%Y-%m-%d %H:%M:%S")
+    if not any(k in p for k in ("follow", "note", "enabled")):
+        prefs.pop(key, None)                             # 空偏好不落孤儿键
+    wb_config.save_x_prefs(prefs)
+    return {"handle": key, "enabled": key not in _pref_disabled_handles()}
 
 
 def pool_handles() -> set:
@@ -133,10 +178,12 @@ def manage_payload() -> dict:
     pos_map = _role_positioning_map()
     profiles = x_profile_enricher.load_cache()["profiles"]
     prefs = wb_config.load_x_prefs()
+    pref_off = _pref_disabled_handles()
     rows = []
     for a in (_load_raw().get("accounts") or []):
         key = str(a.get("handle") or "").strip().lstrip("@").lower()
         base = live.get(key)
+        pool_on = a.get("enabled", True) is not False
         if base is not None:
             row, enabled = dict(base), True
         else:
@@ -147,7 +194,8 @@ def manage_payload() -> dict:
         prof = profiles.get(key) or {}
         pref = prefs.get(key) or {}
         row.update({
-            "enabled": enabled,
+            "enabled": pool_on and key not in pref_off,      # 生效状态(池 ∧ 本地)
+            "pool_enabled": pool_on,                         # 池内原生状态(UI 区分停用来源)
             "followers": int(prof.get("followers") or 0),
             "verified": bool(prof.get("verified")),
             "bio": str(prof.get("bio") or ""),

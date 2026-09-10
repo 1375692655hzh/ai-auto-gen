@@ -150,7 +150,13 @@ def _fetch_window(range_h: int, max_pages: int = 5) -> list:
 
 
 def _x_cands(items: list) -> list:
-    """条目 → X 候选(handle/status_id/time/url/text), 去重。"""
+    """条目 → X 候选(handle/status_id/time/url/text), 去重。
+    停用账号(看与不看开关)不进候选——不浪费互动抓取与翻译。"""
+    from . import xaccounts
+    try:
+        off = xaccounts.disabled_handles()
+    except Exception:
+        off = set()
     seen, cands = set(), []
     for it in items:
         m = _URL_RE.search(it.get("url") or "")
@@ -159,8 +165,11 @@ def _x_cands(items: list) -> list:
         sid = m.group(2)
         if sid in seen:
             continue
+        handle = m.group(1).lower()
+        if handle in off:
+            continue
         seen.add(sid)
-        cands.append({"handle": m.group(1).lower(), "status_id": sid,
+        cands.append({"handle": handle, "status_id": sid,
                       "time": it.get("time") or "", "url": it.get("url"),
                       "text": (it.get("text_display") or it.get("text") or "")[:2000]})
     cands.sort(key=lambda c: c["time"], reverse=True)
@@ -509,12 +518,19 @@ def build_view(range_h: int = 24, golden: bool = False, market: str = "",
             pass
 
     profiles = x_profile_enricher.load_cache()["profiles"]
+    try:                                         # 看与不看: 停用账号整行不进推荐流
+        from . import xaccounts
+        off_handles = xaccounts.disabled_handles()
+    except Exception:
+        off_handles = set()
     rows, sector_counter = [], {}
     for it in _fetch_window(range_h):
         m = _URL_RE.search(it.get("url") or "")
         if not m or not it.get("author_handle"):
             continue                             # 非 X 条目不进这两页
         sid, handle = m.group(2), m.group(1).lower()
+        if handle in off_handles:
+            continue
         s = eng["statuses"].get(sid)
         series = (s or {}).get("series") or []
         last = series[-1] if series else None
@@ -740,8 +756,15 @@ def fetch_rss() -> dict:
 def rss_view(sort: str = "prob", limit: int = 100) -> dict:
     """蹭蹭流量页(RSS 版): 读缓存排序, 无外呼。sort= prob|views|exposure|time。"""
     cache = load_rss()
+    try:                                         # 看与不看: 停用账号不进蹭蹭流量
+        from . import xaccounts
+        off_handles = xaccounts.disabled_handles()
+    except Exception:
+        off_handles = set()
     rows = []
     for sid, it in cache["items"].items():
+        if it.get("handle", "").lower() in off_handles:
+            continue
         t_local = it["pub"]
         try:                                         # GMT 原文 → 本地可读
             t_local = datetime.strptime(it["pub"], "%a, %d %b %Y %H:%M:%S %Z") \

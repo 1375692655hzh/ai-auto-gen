@@ -249,6 +249,15 @@ def create_app() -> FastAPI:
     def x_accounts_manage():
         return xaccounts.manage_payload()
 
+    @app.post("/wb-api/x-accounts/{handle}/enabled")
+    async def x_account_enabled(handle: str, request: Request):
+        body = await request.json()
+        on = bool(body.get("on", True))
+        try:
+            return xaccounts.set_enabled(handle, on)
+        except KeyError:
+            return JSONResponse({"error": f"池内无此账号: {handle}"}, status_code=404)
+
     # ── 内容生成·信息检索: 素材回查全文/同簇多源/同标的扩展(纯只读, 零 LLM) ────
     @app.post("/wb-api/retrieve")
     async def retrieve_view(request: Request):
