@@ -20,7 +20,7 @@ WB.pages.track = {
       xtChart: { metric: "followers", range: 30 },
       xtMetrics: [["followers", "粉丝量"], ["delta", "每日增粉"],
                   ["updates", "每日更新"], ["views", "每日流量"]],
-      xtRanges: [[7, "近7天"], [30, "近30天"], [90, "近90天"]],
+      xtRanges: [[7, "近7天"], [30, "近30天"], [90, "近90天"], [365, "近一年"], [9999, "全部"]],
       /* ── X 模块: 账号池管理(原图文页「账号管理」) ── */
       xaccts: { items: [], meta: {}, q: "", pos: "", followOnly: false, loading: false },
       xBusyId: "",   /* 看与不看开关进行中的 handle */
@@ -35,7 +35,7 @@ WB.pages.track = {
       ytbChart: { metric: "views7d", range: 30 },
       ytbMetrics: [["views7d", "近7日总流量"], ["subs", "订阅"], ["subs_delta", "订阅增粉"],
                    ["updates", "每日更新"], ["latest", "最新视频播放"]],
-      ytbRanges: [[7, "近7天"], [30, "近30天"], [90, "近90天"]],
+      ytbRanges: [[7, "近7天"], [30, "近30天"], [90, "近90天"], [365, "近一年"], [9999, "全部"]],
       /* ── 发布与通讯录 ── */
       accounts: [], published: [], stats: null,
       form: { platform: "雪球", account: "", note: "" },
@@ -102,6 +102,27 @@ WB.pages.track = {
         title: `${s[i].date}  ${v.toLocaleString()}` }));
       return { pts, area, bars, dots, yTicks, xTicks, zeroY: barMode ? +y(0).toFixed(1) : null,
                single: n === 1, W, H };
+    },
+    /* X 追踪图读数: 最后非空点(日期+数值+较前点差), 长期视图下一眼见当前状态 */
+    xtLatest() {
+      const s = this.xtDetail.series || [];
+      const key = this.xtChart.metric;
+      for (let i = s.length - 1; i >= 0; i--) {
+        const v = Number(s[i][key]);
+        if (s[i][key] != null && !isNaN(v)) {
+          const prev = i > 0 && s[i - 1][key] != null ? v - Number(s[i - 1][key]) : null;
+          return { date: s[i].date, v, delta: prev };
+        }
+      }
+      return null;
+    },
+    /* YTB 追踪图读数(同款) */
+    ytbLatest() {
+      const s = this.ytbSeries.filter((p) => p && p.date && p.v != null);
+      if (!s.length) return null;
+      const v = Number(s[s.length - 1].v);
+      const prev = s.length > 1 ? v - Number(s[s.length - 2].v) : null;
+      return { date: s[s.length - 1].date, v, delta: prev };
     },
     /* 池管理行过滤: 关键词(名称/handle/市场) + 定位 chips + 仅看关注; 排序服务端已定 */
     xacctRows() {
@@ -612,6 +633,9 @@ WB.pages.track = {
                     <span v-for="[r, t] in xtRanges" :key="r" class="chip" :class="{on: xtChart.range===r}"
                           @click="xtChart.range=r">{{ t }}</span>
                   </div>
+                  <div v-if="xtLatest && !xtDetail.loading" class="mono" style="font-size:12.5px;margin-bottom:4px">
+                    最新 {{ xtLatest.date }} · {{ xtLatest.v.toLocaleString() }}
+                    <span v-if="xtLatest.delta != null" :style="{color: deltaCls(xtLatest.delta)}">({{ xtLatest.delta >= 0 ? '+' : '' }}{{ fmtN(xtLatest.delta) }})</span></div>
                   <div v-if="xtDetail.loading" class="muted">加载中…</div>
                   <div v-else-if="!xtDetail.series.length" class="muted">暂无快照 — 点右上「立即采集」出数</div>
                   <svg v-else-if="xtGeom" :viewBox="'0 0 '+xtGeom.W+' '+xtGeom.H"
@@ -712,26 +736,22 @@ WB.pages.track = {
         <h3>YouTube 频道追踪({{ chs.length }})
           <span v-if="chMeta && !chMeta.configured" class="muted" style="font-weight:400">
             · 未配 Key, 添加后待解析</span>
-          <span style="float:right">
-            <input type="text" v-model="chQ" class="mat-search" placeholder="搜索(频道名/handle/备注)"
-                   style="width:200px;margin-right:8px">
-            <button class="btn" @click="importLegacy" title="从「发布与通讯录」导入 platform=YouTube 的行">从通讯录导入</button>
-            <button class="btn primary" @click="showChForm = !showChForm">＋ 添加频道</button>
-          </span></h3>
-        <div v-if="showChForm" style="margin-bottom:12px;padding:10px;border:1px dashed var(--border);border-radius:8px">
-          <div class="form-row"><label>频道</label>
-            <input type="text" v-model="chForm.input" style="width:360px"
-                   placeholder="@handle / youtube.com 链接 / 频道名(中文自动搜索解析, 每个耗 100 配额)" @keyup.enter="addChannel"></div>
-          <div class="form-row"><label>备注</label>
-            <input type="text" v-model="chForm.note" placeholder="可选: 券商 / 宏观 / 芯片…"></div>
-          <button class="btn primary" :disabled="adding" @click="addChannel">{{ adding ? '保存中…' : '保存' }}</button>
-        </div>
-        <div class="feed-toolbar" style="margin-bottom:8px">
-          <span class="muted">统一采集: 一次拉取全部启用频道的最新统计</span>
+          <span style="float:right"><button class="btn" @click="loadChannels">刷新</button></span></h3>
+        <div class="feed-toolbar">
+          <input type="text" v-model="chForm.input" @keyup.enter="addChannel"
+                 placeholder="youtube.com/@handle 链接 或频道名(中文自动解析, 每个耗 100 配额)" style="width:300px" :disabled="adding">
+          <input type="text" v-model="chForm.note" @keyup.enter="addChannel"
+                 placeholder="备注(可选)" style="width:140px" :disabled="adding">
+          <button class="btn primary" @click="addChannel" :disabled="adding">{{ adding ? '保存中…' : '添加' }}</button>
+          <button class="btn" @click="importLegacy" :disabled="adding"
+                  title="从「发布与通讯录」导入 platform=YouTube 的行">从通讯录导入</button>
           <span style="flex:1"></span>
-          <button class="btn primary" :disabled="ytCollecting" @click="ytCollectNow"
+          <input type="text" v-model="chQ" placeholder="搜索(频道名/handle/备注)" style="width:160px">
+          <button class="btn primary" @click="ytCollectNow" :disabled="ytCollecting"
                   :title="ytCollecting ? '采集进行中' : '拉取全部启用频道的最新统计'">{{ ytCollecting ? '采集中…' : '⟳ 立即采集' }}</button>
         </div>
+        <div class="muted" style="margin:6px 0 10px">
+          统一采集: 一次拉取全部启用频道的最新统计(计划任务每天一次, 或点右上「立即采集」)。</div>
         <div v-if="!chs.length" class="muted" style="padding:8px 0">
           尚未添加频道 —— 粘贴 YouTube 频道主页链接或 @handle; 添加后由采集器自动解析出频道名与订阅数。</div>
         <table v-else class="tbl">
@@ -782,6 +802,9 @@ WB.pages.track = {
                   </div>
                   <div v-if="ytbChart.metric==='latest' && ytbLatestTitle()" class="muted" style="margin-bottom:4px">
                     最新视频: {{ ytbLatestTitle() }}</div>
+                  <div v-if="ytbLatest && !ytbDetail.loading" class="mono" style="font-size:12.5px;margin-bottom:4px">
+                    最新 {{ ytbLatest.date }} · {{ ytbLatest.v.toLocaleString() }}
+                    <span v-if="ytbLatest.delta != null" :style="{color: deltaCls(ytbLatest.delta)}">({{ ytbLatest.delta >= 0 ? '+' : '' }}{{ fmtN(ytbLatest.delta) }})</span></div>
                   <div v-if="ytbDetail.loading" class="muted">加载中…</div>
                   <div v-else-if="!ytbSeries.length || !ytbGeom" class="muted">
                     暂无快照 — 订阅曲线自 2026-09-10 起逐日积累; 流量/更新数据点「立即采集」即出</div>

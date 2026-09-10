@@ -34,8 +34,8 @@ VIDEOS_FILE = DATA_DIR / "yt_videos.json"
 _YT_API = "https://www.googleapis.com/youtube/v3"
 HTTP_TIMEOUT = 15
 
-SNAPSHOT_RETAIN_D = 28        # 快照保留天数(覆盖 Δ7d 口径 + 4 倍容差)
-MAX_POINTS = 200              # 单视频快照点上限(超出丢最旧)
+SNAPSHOT_RETAIN_D = 366       # 快照保留天数(2026-09-10 用户裁决: 长期记录)
+MAX_POINTS = 730              # 单视频快照点上限(长期记录, 每天1-2点≈1-2年)
 MAX_VIDEOS = 5000             # 全库视频硬顶(按最近统计时间淘汰最旧)
 MAX_PER_CHANNEL = 40          # 发现阶段单频道库存上限(28d 窗够用)
 DISCOVER_TAKE = 50            # 每频道发现条数(playlistItems 第 1 页)
@@ -327,7 +327,7 @@ def _merge_enabled(channels: list) -> list:
     return channels
 
 
-SUBS_SERIES_MAX = 90        # 频道订阅快照保留天数(与视频快照 28d 不同口径: 订阅变化慢, 留长些)
+SUBS_SERIES_MAX = 730       # 频道订阅快照保留天数(长期记录)
 
 
 def _snap_subs(c: dict, now: float, now_s: str) -> None:
@@ -894,7 +894,7 @@ def channel_series(cid: str, days: int = 30) -> dict | None:
     - updates: 每日新发布视频数(柱)
     - latest: 最新一条视频的播放演进(带标题)
     """
-    days = min(max(int(days), 7), 90)
+    days = min(max(int(days), 7), 9999)   # 上限由数据长度自然截断(全部维度)
     now = time.time()
     store = load_store()
     videos = [v for v in (store.get("videos") or {}).values()
