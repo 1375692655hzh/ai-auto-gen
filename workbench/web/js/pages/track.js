@@ -1,8 +1,8 @@
-/* 追踪页(2026-09-10 改版): 账号追踪统一归口 —— 左侧子导航选模块(X / YouTube / 发布与通讯录)。
-   X 模块 = 自选追踪(日快照: 粉丝/增粉/更新/流量, 原图文页「账号追踪」) + 池管理(原「账号管理」),
-   统一采集 = 「立即采集」一轮拉全部启用账号;
-   YouTube 模块 = 频道追踪(原视频页「追踪账号」, 大卡片改紧凑表) + 统一采集;
-   发布与通讯录 = 旧通讯录(紧凑表) + 发布账本只读。 */
+/* 追踪页(2026-09-11 优化): 只追踪用户自己设的账号, 不做管理——
+   X 模块 = 自选追踪(日快照: 粉丝/增粉/更新/流量曲线);
+   YouTube 模块 = 追踪已设频道(订阅/增粉/更新/流量曲线), 管理(添加/启停/删除)在视频页【账号管理】;
+   X 池管理已归图文页【账号管理】。发布与通讯录模块不变。 */
+
 window.WB = window.WB || {};
 WB.pages = WB.pages || {};
 
@@ -21,12 +21,8 @@ WB.pages.track = {
       xtMetrics: [["followers", "粉丝量"], ["delta", "每日增粉"],
                   ["updates", "每日更新"], ["views", "每日流量"]],
       xtRanges: [[7, "近7天"], [30, "近30天"], [90, "近90天"], [365, "近一年"], [9999, "全部"]],
-      /* ── X 模块: 账号池管理(原图文页「账号管理」) ── */
-      xaccts: { items: [], meta: {}, q: "", pos: "", followOnly: false, loading: false },
-      xBusyId: "",   /* 看与不看开关进行中的 handle */
       /* ── YouTube 模块(原视频页「追踪账号」; 紧凑表替代大卡片) ── */
       chs: [], chMeta: null, chQ: "",
-      chForm: { input: "", note: "" }, showChForm: false, adding: false, chBusyId: "",
       ytCollecting: false, ytCollectPoll: null,
       disposed: false,
       /* YTB 频道行内展开曲线(对齐 X 追踪的 accordion 图表) */
@@ -124,18 +120,6 @@ WB.pages.track = {
       const prev = s.length > 1 ? v - Number(s[s.length - 2].v) : null;
       return { date: s[s.length - 1].date, v, delta: prev };
     },
-    /* 池管理行过滤: 关键词(名称/handle/市场) + 定位 chips + 仅看关注; 排序服务端已定 */
-    xacctRows() {
-      const q = this.xaccts.q.trim().toLowerCase();
-      let rows = this.xaccts.items;
-      if (this.xaccts.pos) rows = rows.filter((a) => a.positioning === this.xaccts.pos);
-      if (this.xaccts.followOnly) rows = rows.filter((a) => a.follow);
-      if (q) rows = rows.filter((a) =>
-        (a.name || "").toLowerCase().includes(q) ||
-        (a.handle || "").toLowerCase().includes(q) ||
-        (a.markets || []).some((m) => m.toLowerCase().includes(q)));
-      return rows;
-    },
     /* YouTube 频道行过滤: 关键词(频道名/handle/备注/频道ID) */
     chRows() {
       const q = (this.chQ || "").trim().toLowerCase();
@@ -222,7 +206,7 @@ WB.pages.track = {
       WB.shell.setSubs([
         { id: "x", title: "X 账号", cnt: this.xtrack.count || "",
           icon: I('<path d="M4 4l16 16M20 4L4 20"/>'),
-          onPick: () => { this.sec = "x"; this.loadXtrack(); this.loadXaccts(); } },
+          onPick: () => { this.sec = "x"; this.loadXtrack(); } },
         { id: "ytb", title: "YouTube", cnt: this.chs.length || "",
           icon: I('<polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2"/>'),
           onPick: () => { this.sec = "ytb"; this.loadChannels(); } },
@@ -357,42 +341,7 @@ WB.pages.track = {
         (i * (100 / (a.length - 1))).toFixed(1) + "," + (24 - ((v - min) / span) * 22).toFixed(1)
       ).join(" ");
     },
-    /* ── X 账号池管理(推荐/蹭蹭流量数据源; 池只读, 关注/备注/启停为板块四自有偏好) ── */
-    async loadXaccts() {
-      this.xaccts.loading = true;
-      try {
-        const d = await WB.api.get("/x-accounts-manage");
-        this.xaccts.items = d.accounts || [];
-        this.xaccts.meta = { count: d.count, followed_n: d.followed_n,
-                             disabled_n: d.disabled_n };
-      } catch (e) {
-        this.xaccts.items = [];
-        this.xaccts.meta = { ...(this.xaccts.meta || {}), err: (e && e.error) || "接口不可用" };
-      }
-      this.xaccts.loading = false;
-    },
-    async saveXPref(a, patch) {
-      try { await WB.api.post("/x-account-pref", { handle: a.handle, ...patch }); }
-      catch (e) { WB.toast("保存失败: " + (e.error || "")); }
-    },
-    toggleXFollow(a) {
-      a.follow = !a.follow;                              // 乐观更新, 失败由 toast 提示
-      this.xaccts.meta.followed_n = (this.xaccts.meta.followed_n || 0) + (a.follow ? 1 : -1);
-      this.saveXPref(a, { follow: a.follow });
-    },
-    saveXNote(a) { this.saveXPref(a, { note: a.local_note }); },
-    /* 看与不看: 停用后该账号内容从推荐信息/蹭蹭流量消失且不再采集(本地偏好, 池文件不动) */
-    async toggleXEnabled(a) {
-      if (!a.pool_enabled) { WB.toast("该账号在池内被停用, 须改池文件或 local 覆盖启用"); return; }
-      this.xBusyId = a.handle;
-      try {
-        const d = await WB.api.post("/x-accounts/" + a.handle + "/enabled", { on: !a.enabled });
-        a.enabled = d.enabled;
-        this.xaccts.meta.disabled_n = Math.max(0, (this.xaccts.meta.disabled_n || 0) + (d.enabled ? -1 : 1));
-      } catch (e) { WB.toast("切换失败: " + (e.error || "")); }
-      this.xBusyId = "";
-    },
-    /* ── YouTube 频道追踪(原视频页「追踪账号」; 管理+统一采集归口本模块) ── */
+    /* ── YouTube 追踪(只读数据面; 管理在视频页【账号管理】) ── */
     chStatusClass(c) {
       if (c.resolve_status === "failed") return "dead";
       if (c.resolve_status === "resolved") return c.enabled !== false ? "ok" : "off";
@@ -408,47 +357,6 @@ WB.pages.track = {
         const d = await WB.api.get("/yt/channels");
         this.chs = d.channels; this.chMeta = d.meta;
       } catch (e) {}
-      this.registerSubs();
-    },
-    async addChannel() {
-      if (!this.chForm.input.trim()) { WB.toast("请粘贴频道链接 / @handle / UC 频道 ID"); return; }
-      this.adding = true;
-      try {
-        const d = await WB.api.post("/yt/channels",
-          { input: this.chForm.input, note: this.chForm.note });
-        this.chs = d.channels;
-        WB.toast("已添加" + (d.added.title ? ": " + d.added.title : "(下一轮采集时解析)"));
-        this.chForm.input = ""; this.chForm.note = ""; this.showChForm = false;
-        if (this.chMeta && this.chMeta.configured) this.ytCollectNow();  // 让新账号尽快出数据
-      } catch (e) {
-        WB.toast(e.error + (e.hint ? " — " + e.hint : ""));
-      }
-      this.adding = false;
-      this.registerSubs();
-    },
-    async toggleCh(c) {
-      this.chBusyId = c.id;
-      try {
-        const d = await WB.api.post("/yt/channels/" + c.id + "/enabled", { on: c.enabled === false });
-        c.enabled = d.enabled;
-      } catch (e) { WB.toast(e.error); }
-      this.chBusyId = "";
-    },
-    async delCh(c) {
-      if (!confirm("删除追踪 " + (c.title || c.input) + " ?\n已采集的历史数据保留在本地, 但不再更新")) return;
-      try {
-        const d = await WB.api.del("/yt/channels/" + c.id);
-        this.chs = d.channels;
-        WB.toast("已删除");
-      } catch (e) { WB.toast(e.error); }
-      this.registerSubs();
-    },
-    async importLegacy() {
-      try {
-        const d = await WB.api.post("/yt/channels/import", {});
-        this.chs = d.channels;
-        WB.toast("导入 " + d.imported.length + " 个 · 跳过 " + d.skipped.length + " 个(重复/格式无法识别)");
-      } catch (e) { WB.toast(e.error); }
       this.registerSubs();
     },
     /* YTB 行内展开曲线(对齐 X 追踪 accordion): 点行开/收, 指标与范围 chips 切换 */
@@ -518,7 +426,7 @@ WB.pages.track = {
   },
   async mounted() {
     this.registerSubs();
-    this.loadXtrack(); this.loadXaccts(); this.loadChannels();
+    this.loadXtrack(); this.loadChannels();
     try { this.accounts = (await WB.api.get("/track/accounts")).accounts; } catch (e) {}
     try {
       const d = await WB.api.get("/ledger");
@@ -549,7 +457,7 @@ WB.pages.track = {
                  placeholder="备注(可选)" style="width:140px" :disabled="xtAdd.busy">
           <button class="btn primary" @click="xtAddSubmit" :disabled="xtAdd.busy">添加</button>
           <button class="btn" @click="xtImportFollowed" :disabled="xtAdd.busy"
-                  title="把下方池管理里标记为关注的账号批量加入追踪">从关注导入</button>
+                  title="把图文页【账号管理】里标记为关注的账号批量加入追踪">从关注导入</button>
           <span style="flex:1"></span>
           <input type="text" v-model="xtrack.q" placeholder="搜索(名称/handle)" style="width:150px">
           <button class="btn" @click="xtScheduleToggle" :disabled="xt.busy"
@@ -677,57 +585,6 @@ WB.pages.track = {
         </table>
       </div>
 
-      <div class="card">
-        <h3>X 账号池管理({{ xaccts.meta.count || 0 }})
-          <span class="muted">关注 {{ xaccts.meta.followed_n || 0 }} ·
-            停用 {{ xaccts.meta.disabled_n || 0 }} · 显示 {{ xacctRows.length }}</span>
-          <span v-if="xaccts.meta.err" class="badge red" style="margin-left:8px">{{ xaccts.meta.err }}</span></h3>
-        <div class="feed-toolbar">
-          <input type="text" v-model="xaccts.q" class="mat-search" placeholder="搜索(名称/handle/市场)" style="width:220px">
-          <span class="chip" :class="{on: !xaccts.pos}" @click="xaccts.pos=''">全部</span>
-          <span v-for="p in ['新闻源','快讯源','机构','大V']" :key="p" class="chip"
-                :class="{on: xaccts.pos === p}" @click="xaccts.pos = xaccts.pos === p ? '' : p">{{ p }}</span>
-          <span class="chip" :class="{on: xaccts.followOnly}" @click="xaccts.followOnly=!xaccts.followOnly">★ 仅看关注</span>
-          <span style="flex:1"></span>
-          <button class="btn" @click="loadXaccts">{{ xaccts.loading ? '刷新中…' : '刷新' }}</button>
-        </div>
-        <div class="muted" style="margin:6px 0 10px">
-          池数据来自板块一 twitter_pool.yaml(只读); 启用开关=本机偏好(停用后推荐信息/蹭蹭流量
-          不再出现该账号内容, 也不再采集), 关注与备注同样只存 data/workbench/。</div>
-        <table class="tbl">
-          <thead><tr><th>账号</th><th>市场</th><th>定位</th><th>标签</th><th>粉丝</th><th>启用</th><th>关注</th><th>备注</th></tr></thead>
-          <tbody>
-            <tr v-for="a in xacctRows" :key="a.handle"
-                :style="{background: a.follow ? 'var(--accent-weak)' : '',
-                         opacity: a.enabled ? '' : .5}">
-              <td>
-                <a :href="a.homepage" target="_blank" rel="noopener"><b>{{ a.name || '@'+a.handle }}</b></a>
-                <span v-if="a.verified" class="badge blue" title="X 认证账号" style="margin-left:4px">✓</span>
-                <div class="muted" style="font-size:11px">@{{ a.handle }}<template v-if="a.bio"> · {{ a.bio }}</template></div>
-              </td>
-              <td><span v-for="m in a.markets" :key="m" class="badge" style="margin-right:4px">{{ m }}</span></td>
-              <td><span v-if="a.positioning" class="badge blue">{{ a.positioning }}</span>
-                <div class="muted" style="font-size:11px" v-if="a.role">{{ a.role }}</div></td>
-              <td><span v-if="a.tier" class="badge yellow">{{ a.tier }}</span>
-                <span v-if="a.priority" class="badge" style="margin-left:4px">{{ a.priority }}</span>
-                <div class="muted" style="font-size:11px" v-if="a.note" :title="a.note">{{ a.note.slice(0, 24) }}</div></td>
-              <td class="mono">{{ a.followers ? fmtFol(a.followers) : '—' }}</td>
-              <td><span class="switch" :class="{ on: a.enabled, busy: xBusyId === a.handle }"
-                    role="switch" tabindex="0" :aria-checked="a.enabled ? 'true' : 'false'"
-                    :title="a.pool_enabled
-                      ? (a.enabled ? '停看(推荐/蹭蹭流量隐藏此账号)' : '恢复看(重新出现在推荐/蹭蹭流量)')
-                      : '池内停用账号 — 须改池文件或 local 覆盖启用'"
-                    @click="toggleXEnabled(a)" @keydown.enter="toggleXEnabled(a)"></span></td>
-              <td><span class="act" :style="{color: a.follow ? 'var(--yellow)' : ''}"
-                    @click="toggleXFollow(a)">{{ a.follow ? '★ 已关注' : '☆ 关注' }}</span></td>
-              <td><input type="text" v-model="a.local_note" @change="saveXNote(a)" placeholder="本地备注"
-                         style="width:150px;font-size:11.5px"></td>
-            </tr>
-            <tr v-if="!xacctRows.length && !xaccts.loading">
-              <td colspan="8" class="muted">无匹配账号</td></tr>
-          </tbody>
-        </table>
-      </div>
     </div>
 
     <!-- ═══ 模块二: YouTube ═══ -->
@@ -738,25 +595,19 @@ WB.pages.track = {
             · 未配 Key, 添加后待解析</span>
           <span style="float:right"><button class="btn" @click="loadChannels">刷新</button></span></h3>
         <div class="feed-toolbar">
-          <input type="text" v-model="chForm.input" @keyup.enter="addChannel"
-                 placeholder="youtube.com/@handle 链接 或频道名(中文自动解析, 每个耗 100 配额)" style="width:300px" :disabled="adding">
-          <input type="text" v-model="chForm.note" @keyup.enter="addChannel"
-                 placeholder="备注(可选)" style="width:140px" :disabled="adding">
-          <button class="btn primary" @click="addChannel" :disabled="adding">{{ adding ? '保存中…' : '添加' }}</button>
-          <button class="btn" @click="importLegacy" :disabled="adding"
-                  title="从「发布与通讯录」导入 platform=YouTube 的行">从通讯录导入</button>
-          <span style="flex:1"></span>
           <input type="text" v-model="chQ" placeholder="搜索(频道名/handle/备注)" style="width:160px">
+          <span style="flex:1"></span>
           <button class="btn primary" @click="ytCollectNow" :disabled="ytCollecting"
                   :title="ytCollecting ? '采集进行中' : '拉取全部启用频道的最新统计'">{{ ytCollecting ? '采集中…' : '⟳ 立即采集' }}</button>
         </div>
         <div class="muted" style="margin:6px 0 10px">
-          统一采集: 一次拉取全部启用频道的最新统计(计划任务每天一次, 或点右上「立即采集」)。</div>
+          统一采集: 一次拉取全部启用频道的最新统计(计划任务每天一次, 或点右上「立即采集」)。
+          管理(添加/启停/删除/备注)在视频页【账号管理】, 本页只追踪用户已设频道。</div>
         <div v-if="!chs.length" class="muted" style="padding:8px 0">
-          尚未添加频道 —— 粘贴 YouTube 频道主页链接或 @handle; 添加后由采集器自动解析出频道名与订阅数。</div>
+          尚未追踪频道 —— 到视频页【账号管理】添加并启用频道; 本页只读追踪数据。</div>
         <table v-else class="tbl">
           <thead><tr><th>频道</th><th>订阅</th><th>今日增粉</th><th>今日更新</th>
-            <th>最新视频流量</th><th>近7日总流量</th><th>7日流量变化</th><th>状态</th><th>备注</th><th>启用</th><th>操作</th></tr></thead>
+            <th>最新视频流量</th><th>近7日总流量</th><th>7日流量变化</th><th>状态</th><th>备注</th></tr></thead>
           <tbody>
             <template v-for="c in chRows" :key="c.id">
             <tr :class="{sel: ytbSel === c.channel_id}"
@@ -775,15 +626,10 @@ WB.pages.track = {
                 <span v-if="c.resolve_status === 'failed'" :title="c.resolve_error"
                       style="color:var(--red);font-size:11px"> {{ c.resolve_error }}</span></td>
               <td class="muted" style="font-size:11px">{{ c.note || '—' }}</td>
-              <td><span class="switch" :class="{on: c.enabled !== false, busy: chBusyId === c.id}"
-                    role="switch" tabindex="0" :aria-checked="c.enabled === false ? 'false' : 'true'"
-                    :title="(c.enabled === false ? '启用' : '停用') + '追踪'"
-                    @click.stop="toggleCh(c)" @keydown.enter.stop="toggleCh(c)"></span></td>
-              <td><span class="act" style="color:var(--red);cursor:pointer" @click.stop="delCh(c)">删除</span></td>
             </tr>
             <!-- 行内展开: 曲线详情(五指标, 对齐 X 追踪 accordion) -->
             <tr v-if="ytbSel === c.channel_id" class="xt-detail-row">
-              <td colspan="11">
+              <td colspan="9">
                 <div class="xt-detail ytb-detail">
                   <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap">
                     <b>{{ c.title || c.input }}</b>
@@ -839,7 +685,7 @@ WB.pages.track = {
               </td>
             </tr>
             </template>
-            <tr v-if="!chRows.length"><td colspan="11" class="muted">无匹配频道</td></tr>
+            <tr v-if="!chRows.length"><td colspan="9" class="muted">无匹配频道</td></tr>
           </tbody>
         </table>
         <p class="muted" style="margin-top:10px">
