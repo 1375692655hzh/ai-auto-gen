@@ -883,6 +883,87 @@ def channel_stats() -> dict:
     return out
 
 
+def channel_series(cid: str, days: int = 30) -> dict | None:
+    """YTB 频道追踪曲线数据(2026-09-10, 对齐 X 追踪的行内展开图): 零外呼读缓存。
+
+    四条指标序列(逐日, 近 days 天):
+    - subs: 订阅数(subs_series 逐日快照, 未有快照的日子顺延前一值, 首点前为 None)
+    - subs_delta: 订阅日增(相邻两天差分, 任一侧缺失为 None)
+    - views7d: 近7天发布视频的播放合计演进(对每日 D, 取发布于 [D-7d, D] 的视频
+      在 D 时刻最后已知播放求和——由视频 series 回放重建, 上线即有历史)
+    - updates: 每日新发布视频数(柱)
+    - latest: 最新一条视频的播放演进(带标题)
+    """
+    days = min(max(int(days), 7), 90)
+    now = time.time()
+    store = load_store()
+    videos = [v for v in (store.get("videos") or {}).values()
+              if v.get("channel_id") == cid]
+    c = next((c for c in config.load_yt_channels() if c.get("channel_id") == cid), None)
+
+    day_list = [datetime.fromtimestamp(now - i * 86400).strftime("%Y-%m-%d")
+                for i in range(days - 1, -1, -1)]
+    day_end = {d: time.mktime(time.strptime(d, "%Y-%m-%d")) + 86400 for d in day_list}
+
+    # 订阅: 快照按日落位, 顺延填充(阶梯线语义)
+    subs_map: dict = {}
+    for p in sorted(c.get("subs_series") or [], key=lambda p: p["ts"]):
+        if isinstance(p.get("v"), int):
+            subs_map[datetime.fromtimestamp(p["ts"]).strftime("%Y-%m-%d")] = p["v"]
+    subs_pts, carry = [], None
+    for d in day_list:
+        if d in subs_map:
+            carry = subs_map[d]
+        subs_pts.append({"date": d, "v": carry})
+
+    subs_delta = []
+    for i, p in enumerate(subs_pts):
+        if i == 0 or p["v"] is None or subs_pts[i - 1]["v"] is None:
+            subs_delta.append({"date": p["date"], "v": None})
+        else:
+            subs_delta.append({"date": p["date"], "v": p["v"] - subs_pts[i - 1]["v"]})
+
+    # 每日发布数
+    pub_day: dict = {}
+    for v in videos:
+        if v.get("published"):
+            pub_day[datetime.fromtimestamp(v["published"]).strftime("%Y-%m-%d")] = \
+                pub_day.get(datetime.fromtimestamp(v["published"]).strftime("%Y-%m-%d"), 0) + 1
+    updates = [{"date": d, "v": pub_day.get(d, 0)} for d in day_list]
+
+    # 近7天发布视频播放合计的演进: 对每日 D 回放"当时已知"的播放
+    views7d = []
+    for d in day_list:
+        end = day_end[d]
+        total, any_v = 0, False
+        for v in videos:
+            pub = v.get("published")
+            if not pub or pub > end or pub < end - 8 * 86400:
+                continue
+            last = None
+            for p in v.get("series") or []:
+                if p["ts"] <= end and isinstance(p.get("v"), int):
+                    last = p["v"]
+            if last is not None:
+                total += last
+                any_v = True
+        views7d.append({"date": d, "v": total if any_v else None})
+
+    # 最新视频播放演进
+    latest_meta = None
+    latest_pts = []
+    if videos:
+        lv = max(videos, key=lambda v: v.get("published") or 0)
+        lser = sorted(lv.get("series") or [], key=lambda p: p["ts"])
+        latest_pts = [{"date": datetime.fromtimestamp(p["ts"]).strftime("%Y-%m-%d"),
+                       "v": p.get("v")} for p in lser if isinstance(p.get("v"), int)]
+        latest_meta = {"title": lv.get("title") or "", "video_id": lv.get("video_id")}
+
+    return {"days": days, "subs": subs_pts, "subs_delta": subs_delta,
+            "updates": updates, "views7d": views7d, "latest": latest_meta,
+            "latest_series": latest_pts}
+
+
 def add_channel(inp: str, note: str = "", enabled: bool = True) -> tuple[dict | None, dict | None]:
     """账号入库(纯本地解析, 零外呼; 解析留待下一轮采集)。返回 (row, err)。"""
     parsed = parse_channel_input(inp)

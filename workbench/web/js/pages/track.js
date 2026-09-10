@@ -29,6 +29,13 @@ WB.pages.track = {
       chForm: { input: "", note: "" }, showChForm: false, adding: false, chBusyId: "",
       ytCollecting: false, ytCollectPoll: null,
       disposed: false,
+      /* YTB 频道行内展开曲线(对齐 X 追踪的 accordion 图表) */
+      ytbSel: "", ytbBusy: "",
+      ytbDetail: { loading: false, raw: null },
+      ytbChart: { metric: "views7d", range: 30 },
+      ytbMetrics: [["views7d", "近7日总流量"], ["subs", "订阅"], ["subs_delta", "订阅增粉"],
+                   ["updates", "每日更新"], ["latest", "最新视频播放"]],
+      ytbRanges: [[7, "近7天"], [30, "近30天"], [90, "近90天"]],
       /* ── 发布与通讯录 ── */
       accounts: [], published: [], stats: null,
       form: { platform: "雪球", account: "", note: "" },
@@ -39,6 +46,7 @@ WB.pages.track = {
   },
   watch: {
     "xtChart.range"() { if (this.xtSel) this.loadXtDetail(); },
+    "ytbChart.range"() { if (this.ytbSel) this.loadYtbSeries(); },
   },
   computed: {
     /* 自选追踪行过滤: 关键词(名称/handle) */
@@ -116,6 +124,58 @@ WB.pages.track = {
         (c.handle || "").toLowerCase().includes(q) ||
         (c.note || "").toLowerCase().includes(q) ||
         (c.channel_id || "").toLowerCase().includes(q));
+    },
+    /* YTB 曲线当前指标序列: raw → [{date, v}] */
+    ytbSeries() {
+      const raw = this.ytbDetail.raw;
+      if (!raw) return [];
+      const m = this.ytbChart.metric;
+      if (m === "latest") return raw.latest_series || [];
+      return raw[m] || [];
+    },
+    /* YTB 大图几何: 折线(流量/订阅)或柱(更新/增粉), 与 X 追踪图同风格。null=缺口跳过。 */
+    ytbGeom() {
+      const s = this.ytbSeries.filter((p) => p && p.date);
+      if (!s.length) return null;
+      const barMode = this.ytbChart.metric === "updates" || this.ytbChart.metric === "subs_delta";
+      const padL = 56, padR = 16, padT = 16, padB = 28;
+      const W = 760, H = 240, plotW = W - padL - padR, plotH = H - padT - padB;
+      const n = s.length;
+      const x = (i) => padL + (n === 1 ? plotW / 2 : (i * plotW) / (n - 1));
+      const known = s.map((p, i) => ({ i, v: p.v == null ? null : Number(p.v) })).filter((p) => p.v != null);
+      if (!known.length) return null;
+      const vals = known.map((p) => p.v);
+      let yMin = Math.min(...vals), yMax = Math.max(...vals);
+      if (barMode) yMin = Math.min(0, yMin);
+      if (yMin === yMax) { yMin -= 1; yMax += 1; }
+      const spanY = yMax - yMin;
+      yMax += spanY * 0.08; yMin -= spanY * 0.04;
+      const y = (v) => padT + plotH * (1 - (v - yMin) / (yMax - yMin));
+      const pts = known.map((p) => x(p.i).toFixed(1) + "," + y(p.v).toFixed(1)).join(" ");
+      const bars = barMode ? known.map((p) => {
+        const bw = Math.max(2, Math.min(26, (plotW / n) * 0.62));
+        const yv = y(p.v), y0 = y(0);
+        return { x: +(x(p.i) - bw / 2).toFixed(1), y: +Math.min(yv, y0).toFixed(1),
+                 w: +bw.toFixed(1), h: +Math.max(1, Math.abs(yv - y0)).toFixed(1),
+                 neg: p.v < 0, title: `${s[p.i].date}  ${p.v >= 0 ? "+" : ""}${p.v.toLocaleString()}` };
+      }) : [];
+      const area = barMode ? "" : pts + " " + x(known[known.length - 1].i).toFixed(1) + "," + y(yMin).toFixed(1) +
+        " " + x(known[0].i).toFixed(1) + "," + y(yMin).toFixed(1);
+      const fmt = (v) => this.fmtN(Math.round(v));
+      const flat = vals.every((v) => v === vals[0]);
+      const yTicks = (flat
+        ? [vals[0]]
+        : [yMin + (yMax - yMin) * 0.04, (yMin + yMax) / 2, yMax - (yMax - yMin) * 0.04])
+        .map((v) => ({ y: +y(v).toFixed(1), label: fmt(v) }))
+        .filter((t, i, arr) => i === 0 || t.label !== arr[i - 1].label);
+      const mid = Math.floor((n - 1) / 2);
+      const xTicks = n >= 3
+        ? [0, mid, n - 1].map((i) => ({ x: +x(i).toFixed(1), label: s[i].date.slice(5) }))
+        : s.map((p, i) => ({ x: +x(i).toFixed(1), label: p.date.slice(5) }));
+      const dots = barMode ? [] : known.map((p) => ({
+        cx: +x(p.i).toFixed(1), cy: +y(p.v).toFixed(1),
+        title: `${s[p.i].date}  ${p.v.toLocaleString()}` }));
+      return { pts, area, bars, dots, yTicks, xTicks, zeroY: barMode ? +y(0).toFixed(1) : null, W, H };
     },
   },
   methods: {
@@ -370,6 +430,26 @@ WB.pages.track = {
       } catch (e) { WB.toast(e.error); }
       this.registerSubs();
     },
+    /* YTB 行内展开曲线(对齐 X 追踪 accordion): 点行开/收, 指标与范围 chips 切换 */
+    openYtb(c) {
+      this.ytbSel = this.ytbSel === c.channel_id ? "" : c.channel_id;
+      if (this.ytbSel) {
+        this.loadYtbSeries();
+        this.$nextTick(() => this.$el.querySelector(".ytb-detail")
+          ?.scrollIntoView({ block: "nearest", behavior: "smooth" }));
+      }
+    },
+    async loadYtbSeries() {
+      this.ytbDetail.loading = true;
+      const cid = this.ytbSel;                     // 快速切换时丢弃过期响应
+      try {
+        const d = await WB.api.get("/yt/channels/" + cid + "/series?days=" + this.ytbChart.range);
+        if (cid !== this.ytbSel) return;
+        this.ytbDetail.raw = d;
+      } catch (e) { if (cid === this.ytbSel) this.ytbDetail.raw = null; }
+      if (cid === this.ytbSel) this.ytbDetail.loading = false;
+    },
+    ytbLatestTitle() { return (this.ytbDetail.raw || {}).latest ? this.ytbDetail.raw.latest.title : ""; },
     async ytCollectNow() {   // YouTube 模块统一采集: 一轮拉全部启用频道
       if (this.ytCollecting) return;
       this.ytCollecting = true;
@@ -658,7 +738,10 @@ WB.pages.track = {
           <thead><tr><th>频道</th><th>订阅</th><th>今日增粉</th><th>今日更新</th>
             <th>最新视频流量</th><th>近7日总流量</th><th>7日流量变化</th><th>状态</th><th>备注</th><th>启用</th><th>操作</th></tr></thead>
           <tbody>
-            <tr v-for="c in chRows" :key="c.id" :style="{opacity: c.enabled !== false ? '' : .5}">
+            <template v-for="c in chRows" :key="c.id">
+            <tr :class="{sel: ytbSel === c.channel_id}"
+                :style="{opacity: c.enabled !== false ? '' : .5, cursor: 'pointer'}"
+                @click="openYtb(c)">
               <td>
                 <b>{{ c.title || c.input }}</b>
                 <div class="muted mono" style="font-size:10.5px">{{ c.channel_id || '待解析' }}</div></td>
@@ -675,9 +758,64 @@ WB.pages.track = {
               <td><span class="switch" :class="{on: c.enabled !== false, busy: chBusyId === c.id}"
                     role="switch" tabindex="0" :aria-checked="c.enabled === false ? 'false' : 'true'"
                     :title="(c.enabled === false ? '启用' : '停用') + '追踪'"
-                    @click="toggleCh(c)" @keydown.enter="toggleCh(c)"></span></td>
-              <td><span class="act" style="color:var(--red);cursor:pointer" @click="delCh(c)">删除</span></td>
+                    @click.stop="toggleCh(c)" @keydown.enter.stop="toggleCh(c)"></span></td>
+              <td><span class="act" style="color:var(--red);cursor:pointer" @click.stop="delCh(c)">删除</span></td>
             </tr>
+            <!-- 行内展开: 曲线详情(五指标, 对齐 X 追踪 accordion) -->
+            <tr v-if="ytbSel === c.channel_id" class="xt-detail-row">
+              <td colspan="11">
+                <div class="xt-detail ytb-detail">
+                  <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap">
+                    <b>{{ c.title || c.input }}</b>
+                    <a class="muted" v-if="c.handle" :href="'https://youtube.com/'+c.handle" target="_blank" rel="noopener">{{ c.handle }}</a>
+                    <span class="mono" style="font-size:14px">订阅 {{ c.subs != null ? fmtN(c.subs) : '—' }}(≈)</span>
+                    <span class="muted" v-if="c.note">{{ c.note }}</span>
+                    <span style="flex:1"></span>
+                    <button class="btn" @click.stop="ytbSel=''">收起</button>
+                  </div>
+                  <div class="feed-toolbar" style="margin:10px 0 4px">
+                    <span v-for="[m, t] in ytbMetrics" :key="m" class="chip" :class="{on: ytbChart.metric===m}"
+                          @click="ytbChart.metric=m">{{ t }}</span>
+                    <span style="flex:1"></span>
+                    <span v-for="[r, t] in ytbRanges" :key="r" class="chip" :class="{on: ytbChart.range===r}"
+                          @click="ytbChart.range=r">{{ t }}</span>
+                  </div>
+                  <div v-if="ytbChart.metric==='latest' && ytbLatestTitle()" class="muted" style="margin-bottom:4px">
+                    最新视频: {{ ytbLatestTitle() }}</div>
+                  <div v-if="ytbDetail.loading" class="muted">加载中…</div>
+                  <div v-else-if="!ytbSeries.length || !ytbGeom" class="muted">
+                    暂无快照 — 订阅曲线自 2026-09-10 起逐日积累; 流量/更新数据点「立即采集」即出</div>
+                  <svg v-else :viewBox="'0 0 '+ytbGeom.W+' '+ytbGeom.H"
+                       style="width:100%;height:auto;display:block">
+                    <g v-for="(t, i) in ytbGeom.yTicks" :key="'y'+i">
+                      <line x1="56" x2="744" :y1="t.y" :y2="t.y" stroke="currentColor" stroke-opacity=".12"/>
+                      <text :x="52" :y="t.y+4" text-anchor="end" font-size="11"
+                            fill="currentColor" fill-opacity=".55">{{ t.label }}</text>
+                    </g>
+                    <g v-for="(t, i) in ytbGeom.xTicks" :key="'x'+i">
+                      <text :x="t.x" y="234" text-anchor="middle" font-size="11"
+                            fill="currentColor" fill-opacity=".55">{{ t.label }}</text>
+                    </g>
+                    <template v-if="ytbGeom.bars.length">
+                      <line v-if="ytbGeom.zeroY != null && ytbGeom.zeroY > 16 && ytbGeom.zeroY < 212"
+                            x1="56" x2="744" :y1="ytbGeom.zeroY" :y2="ytbGeom.zeroY"
+                            stroke="currentColor" stroke-opacity=".3"/>
+                      <rect v-for="(b, i) in ytbGeom.bars" :key="'b'+i" :x="b.x" :y="b.y" :width="b.w"
+                            :height="b.h" rx="2" opacity=".85"
+                            :fill="b.neg ? 'var(--red)' : 'var(--green)'"><title>{{ b.title }}</title></rect>
+                    </template>
+                    <template v-else>
+                      <polygon :points="ytbGeom.area" fill="var(--accent)" opacity=".12"/>
+                      <polyline :points="ytbGeom.pts" fill="none" stroke="var(--accent)" stroke-width="2"
+                                stroke-linejoin="round"/>
+                      <circle v-for="(d, i) in ytbGeom.dots" :key="'d'+i" :cx="d.cx" :cy="d.cy" r="2.6"
+                              fill="var(--accent)"><title>{{ d.title }}</title></circle>
+                    </template>
+                  </svg>
+                </div>
+              </td>
+            </tr>
+            </template>
             <tr v-if="!chRows.length"><td colspan="11" class="muted">无匹配频道</td></tr>
           </tbody>
         </table>

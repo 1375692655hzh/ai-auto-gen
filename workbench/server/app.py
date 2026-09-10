@@ -661,6 +661,13 @@ def create_app() -> FastAPI:
             return JSONResponse(err, status_code=409 if dup else 400)
         return {"added": row, "channels": config.load_yt_channels()}
 
+    @app.get("/wb-api/yt/channels/{cid}/series")
+    def yt_channel_series(cid: str, days: str = "30"):
+        d = yt_track.channel_series(cid, days=int(days) if days.isdigit() else 30)
+        if d is None:
+            return JSONResponse({"error": "channel_not_found"}, status_code=404)
+        return d
+
     @app.post("/wb-api/yt/channels/{cid}/enabled")
     async def yt_channel_enabled(cid: str, request: Request):
         body = await request.json()
