@@ -18,7 +18,7 @@ from fastapi import Body, FastAPI, Request
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
-from . import config, gcompose, omniroute_ctl, ondemand_translate, proxy, retrieve, stats, views, vstudio, xaccounts, x_profile_enricher, x_reply, x_surge, yt_track
+from . import config, gcompose, omniroute_ctl, ondemand_translate, proxy, retrieve, stats, views, vstudio, xaccounts, x_profile_enricher, x_reply, x_surge, xsurge_ctl, yt_track
 
 WEB = Path(__file__).resolve().parent.parent / "web"
 
@@ -301,6 +301,25 @@ def create_app() -> FastAPI:
             out["error"] = out["error"] or "llm_connection_failed"
             return JSONResponse(out, status_code=400 if p.returncode == 4 else 502)
         return out
+
+    # ── X 采集一键入口: 纯工作台部署无计划任务, 空态页面上直接拉数(xsurge_ctl) ──
+    @app.get("/wb-api/xsurge-status")
+    def xsurge_status():
+        return xsurge_ctl.status()
+
+    @app.post("/wb-api/xsurge-collect")
+    def xsurge_collect():
+        try:
+            return xsurge_ctl.collect()
+        except Exception as e:
+            return JSONResponse({"ok": False, "msg": f"collect_failed: {e}"}, status_code=500)
+
+    @app.post("/wb-api/xsurge-schedule")
+    def xsurge_schedule():
+        try:
+            return xsurge_ctl.schedule()
+        except Exception as e:
+            return JSONResponse({"ok": False, "msg": f"schedule_failed: {e}"}, status_code=500)
 
     # ── OmniRoute 免费翻译网关: 状态探测 + 一键安装启动(分发用户开箱即用, omniroute_ctl) ──
     @app.get("/wb-api/omniroute-status")

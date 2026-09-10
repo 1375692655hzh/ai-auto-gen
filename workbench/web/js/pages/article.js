@@ -28,6 +28,8 @@ WB.pages.article = {
       xaccts: { items: [], meta: {}, q: "", pos: "", followOnly: false, loading: false },
       /* 蹭蹭流量 = SoPilot 热帖 RSS(唯一来源, 不走数据站) */
       xfSurge: { sort: "prob", items: [], total: 0, meta: {}, loading: false },
+      /* 一键采集(纯工作台部署无计划任务, 空态直接拉数, xsurge_ctl) */
+      xc: { collecting: false, scheduled: false, busy: false, msg: "", timer: null },
       rssSortOpts: [["prob", "爆火概率"], ["views", "浏览量"], ["exposure", "评论曝光"], ["time", "时间"]],
       basketIds: {},                     // 已在素材池的条目 id(「已加入」态)
       /* X 池账号档案(与资讯页同源: /x-accounts + /x-profiles) + 正文截断状态 */
@@ -223,7 +225,46 @@ WB.pages.article = {
       this.registerSubs();
       this.$nextTick(() => WB.trans.scan(this.$el));   // 视口自动翻译新渲染卡片
     },
-    /* ── FV 金融价值徽章/明细(对齐 news.js 标签辅助, 双实现保持两处一致) ── */
+    /* ── 一键采集: 空态页面直接拉数, 不碰 CLI(xsurge_ctl; 2026-09-10 分发用户反馈) ── */
+    async loadXc() {
+      try { const d = await WB.api.get("/xsurge-status");
+        this.xc.collecting = !!d.collecting; this.xc.scheduled = !!d.scheduled;
+      } catch (e) {}
+      if (this.xc.collecting && !this.xc.timer) this.watchXc();   // 页面打开时已在跑(任务计划拉的)
+    },
+    watchXc() {           // 轮询到采集结束 → 自动刷新两页数据
+      if (this.xc.timer) return;
+      this.xc.timer = setInterval(async () => {
+        try { const d = await WB.api.get("/xsurge-status");
+          this.xc.collecting = !!d.collecting; this.xc.scheduled = !!d.scheduled;
+          if (!d.collecting) {
+            clearInterval(this.xc.timer); this.xc.timer = null;
+            this.loadXF("xfReco"); this.loadSurgeRss();
+          }
+        } catch (e) {}
+      }, 5000);
+    },
+    async collectNow() {
+      if (this.xc.busy) return;
+      this.xc.busy = true;
+      try {
+        const d = await WB.api.post("/xsurge-collect", {});
+        this.xc.collecting = true;
+        WB.toast(d.note || "采集已启动");
+        this.watchXc();
+      } catch (e) { WB.toast((e && e.error) || "拉起失败, 看 data/xsurge_collect.log"); }
+      this.xc.busy = false;
+    },
+    async enableSchedule() {
+      if (this.xc.busy) return;
+      this.xc.busy = true;
+      try {
+        const d = await WB.api.post("/xsurge-schedule", {});
+        this.xc.scheduled = !!d.scheduled;
+        WB.toast(d.msg || (d.ok ? "已开启" : "登记失败"));
+      } catch (e) { WB.toast((e && e.error) || "登记失败"); }
+      this.xc.busy = false;
+    },
     tierBadge(t) { return { P0: "red", P1: "yellow", P2: "blue", P3: "" }[t] || ""; },
     fvTitle(r) {
       const p = r.fv_parts || {};
@@ -743,7 +784,7 @@ WB.pages.article = {
     this.registerSubs();
     this.syncMaterials();
     this.initBasketIds();
-    this.loadDict(); this.loadX(); this.loadXF("xfReco"); this.loadSurgeRss();
+    this.loadDict(); this.loadX(); this.loadXF("xfReco"); this.loadSurgeRss(); this.loadXc();
     this.loadFlows(); this.loadRuns(); this.loadDrafts();
     this.loadAccounts(); this.loadLedger(); this.loadTasks(); this.loadXaccts();
     WB.api.get("/gen-jobs").then((d) => {           // 页面重开时有未完成的生成 → 续上轮询
@@ -754,6 +795,7 @@ WB.pages.article = {
   unmounted() {
     if (WB.shell) WB.shell.setSubs([]);
     if (this.genTimer) { clearInterval(this.genTimer); this.genTimer = null; }
+    if (this.xc.timer) { clearInterval(this.xc.timer); this.xc.timer = null; }
   },
 
   template: `
@@ -799,11 +841,17 @@ WB.pages.article = {
         <template v-else>暂无快照</template>
         <span v-if="xfReco.meta.err" class="badge red" style="margin-left:8px">{{ xfReco.meta.err }}</span>
         <span v-if="xfReco.meta.data_age_min > 90" class="badge yellow" style="margin-left:8px">
-          数据偏旧 —— 跑 python cli.py workbench refresh-x-surge</span>
+          数据偏旧 —— 点下方「立即采集」拉最新</span>
         <span class="muted" style="margin-left:8px">{{ xfReco.meta.rule }}</span>
       </p>
       <div v-if="!xfReco.items.length && !xfReco.loading" class="empty">
-        窗口内暂无 X 内容 —— 放宽时间范围, 或先跑 sources refresh + refresh-x-surge</div>
+        窗口内暂无 X 内容<template v-if="!xc.scheduled">(纯工作台部署没有定时采集任务)</template> —
+        <span class="act" :class="{ 'act-done': xc.collecting }"
+              @click="xc.collecting ? null : collectNow()">
+          {{ xc.collecting ? '⏳ 采集中, 完成后自动刷新…' : '⚡ 立即采集' }}</span>
+        <template v-if="!xc.scheduled"> ·
+          <span class="act" @click="enableSchedule">开启每 15 分钟自动采集</span></template>
+      </div>
       <p v-if="xfReco.sort === 'fv' && xfReco.items.length" class="surge-meta">
         <label style="cursor:pointer"><input type="checkbox" v-model="hideP3"> 隐藏低值(P3 归档)</label>
       </p>
@@ -889,11 +937,17 @@ WB.pages.article = {
       <p class="surge-meta">
         <template v-if="xfSurge.meta.updated_at">RSS 抓取 {{ xfSurge.meta.updated_at }} ·
           在榜 {{ xfSurge.total }} 帖(48h 保留)</template>
-        <template v-else>暂无数据 —— 跑一轮 python cli.py workbench refresh-x-surge</template>
+        <template v-else>暂无数据 —— 点下方「立即采集」拉 SoPilot 热帖</template>
         <span class="muted" style="margin-left:8px">{{ xfSurge.meta.rule }}</span>
       </p>
       <div v-if="!xfSurge.items.length && !xfSurge.loading" class="empty">
-        暂无数据 —— 跑一轮 python cli.py workbench refresh-x-surge(RSS 每 30 分钟随任务计划自动更新)</div>
+        暂无数据<template v-if="!xc.scheduled">(纯工作台部署没有定时采集任务)</template> —
+        <span class="act" :class="{ 'act-done': xc.collecting }"
+              @click="xc.collecting ? null : collectNow()">
+          {{ xc.collecting ? '⏳ 采集中, 完成后自动刷新…' : '⚡ 立即采集' }}</span>
+        <template v-if="!xc.scheduled"> ·
+          <span class="act" @click="enableSchedule">开启每 15 分钟自动采集</span></template>
+      </div>
       <div class="feed">
         <div v-for="(r, i) in xfSurge.items" :key="r.status_id" class="news-card">
           <div class="surge-grid">
