@@ -22,7 +22,7 @@ WB.pages.track = {
                   ["updates", "每日更新"], ["views", "每日流量"]],
       xtRanges: [[7, "近7天"], [30, "近30天"], [90, "近90天"], [365, "近一年"], [9999, "全部"]],
       /* ── YouTube 模块(原视频页「追踪账号」; 紧凑表替代大卡片) ── */
-      chs: [], chMeta: null, chQ: "",
+      chs: [], chMeta: null, chQ: "", chBusyId: "",
       ytCollecting: false, ytCollectPoll: null,
       disposed: false,
       /* YTB 频道行内展开曲线(对齐 X 追踪的 accordion 图表) */
@@ -341,7 +341,25 @@ WB.pages.track = {
         (i * (100 / (a.length - 1))).toFixed(1) + "," + (24 - ((v - min) / span) * 22).toFixed(1)
       ).join(" ");
     },
-    /* ── YouTube 追踪(只读数据面; 管理在视频页【账号管理】) ── */
+    /* ── YouTube 追踪(追踪数据面; 添加/备注管理在视频页【账号管理】, 本页保留采集启停与删除) ── */
+    async toggleCh(c) {
+      this.chBusyId = c.id;
+      try {
+        const d = await WB.api.post("/yt/channels/" + c.id + "/enabled", { on: c.enabled === false });
+        c.enabled = d.enabled;
+      } catch (e) { WB.toast(e.error); }
+      this.chBusyId = "";
+    },
+    async delCh(c) {
+      if (!confirm("删除追踪 " + (c.title || c.input) + " ?\n已采集的历史数据保留在本地, 但不再更新")) return;
+      try {
+        const d = await WB.api.del("/yt/channels/" + c.id);
+        this.chs = d.channels;
+        if (this.ytbSel === c.channel_id) this.ytbSel = "";
+        WB.toast("已删除");
+      } catch (e) { WB.toast(e.error); }
+      this.registerSubs();
+    },
     chStatusClass(c) {
       if (c.resolve_status === "failed") return "dead";
       if (c.resolve_status === "resolved") return c.enabled !== false ? "ok" : "off";
@@ -602,12 +620,12 @@ WB.pages.track = {
         </div>
         <div class="muted" style="margin:6px 0 10px">
           统一采集: 一次拉取全部启用频道的最新统计(计划任务每天一次, 或点右上「立即采集」)。
-          管理(添加/启停/删除/备注)在视频页【账号管理】, 本页只追踪用户已设频道。</div>
+          添加/备注管理在视频页【账号管理】, 本页追踪用户已设频道(可启停采集与删除)。</div>
         <div v-if="!chs.length" class="muted" style="padding:8px 0">
           尚未追踪频道 —— 到视频页【账号管理】添加并启用频道; 本页只读追踪数据。</div>
         <table v-else class="tbl">
           <thead><tr><th>频道</th><th>订阅</th><th>今日增粉</th><th>今日更新</th>
-            <th>最新视频流量</th><th>近7日总流量</th><th>7日流量变化</th><th>状态</th><th>备注</th></tr></thead>
+            <th>最新视频流量</th><th>近7日总流量</th><th>7日流量变化</th><th>采集</th><th>操作</th></tr></thead>
           <tbody>
             <template v-for="c in chRows" :key="c.id">
             <tr :class="{sel: ytbSel === c.channel_id}"
@@ -615,17 +633,25 @@ WB.pages.track = {
                 @click="openYtb(c)">
               <td>
                 <b>{{ c.title || c.input }}</b>
-                <div class="muted mono" style="font-size:10.5px">{{ c.channel_id || '待解析' }}</div></td>
+                <span v-if="c.resolve_status === 'pending'" class="badge" style="margin-left:4px">待解析</span>
+                <span v-if="c.resolve_status === 'failed'" class="badge red" style="margin-left:4px"
+                      :title="c.resolve_error">解析失败</span>
+                <div class="muted mono" style="font-size:10.5px">{{ c.channel_id || '待解析' }}<span v-if="c.note" class="muted" style="font-family:inherit"> · {{ c.note }}</span></div>
+                <div v-if="c.resolve_error && c.resolve_status !== 'failed'" class="badge red" style="margin-top:4px;white-space:normal"
+                     :title="c.resolve_error">上轮异常: {{ c.resolve_error.slice(0, 30) }}</div></td>
               <td class="mono">{{ c.subs != null ? fmtN(c.subs) + '(≈)' : '—' }}</td>
               <td class="mono" :style="{color: deltaCls((c.stats || {}).subs_delta_1d)}">{{ deltaText((c.stats || {}).subs_delta_1d) }}</td>
               <td class="mono">{{ (c.stats || {}).updates_1d || '—' }}</td>
               <td class="mono" :title="(c.stats || {}).latest_title">{{ (c.stats || {}).latest_views != null ? fmtN(c.stats.latest_views) : '—' }}</td>
               <td class="mono">{{ (c.stats || {}).views_7d != null ? fmtN(c.stats.views_7d) : '—' }}</td>
               <td class="mono" :style="{color: deltaCls((c.stats || {}).views_7d_delta)}">{{ deltaText((c.stats || {}).views_7d_delta) }}</td>
-              <td><span class="pill" :class="chStatusClass(c)">{{ chStatusText(c) }}</span>
-                <span v-if="c.resolve_status === 'failed'" :title="c.resolve_error"
-                      style="color:var(--red);font-size:11px"> {{ c.resolve_error }}</span></td>
-              <td class="muted" style="font-size:11px">{{ c.note || '—' }}</td>
+              <td><span class="switch" :class="{on: c.enabled !== false, busy: chBusyId === c.id}"
+                    role="switch" tabindex="0" :aria-checked="c.enabled === false ? 'false' : 'true'"
+                    :title="(c.enabled === false ? '恢复采集' : '停用(保留数据, 暂停采集)')"
+                    @click.stop="toggleCh(c)" @keydown.enter.stop="toggleCh(c)"></span></td>
+              <td><span class="act" style="color:var(--accent);cursor:pointer" @click.stop="openYtb(c)">曲线</span>
+                <span class="act" style="color:var(--red);cursor:pointer;margin-left:8px"
+                      @click.stop="delCh(c)">删除</span></td>
             </tr>
             <!-- 行内展开: 曲线详情(五指标, 对齐 X 追踪 accordion) -->
             <tr v-if="ytbSel === c.channel_id" class="xt-detail-row">
