@@ -450,7 +450,7 @@ input[type=radio], input[type=checkbox] { accent-color: var(--accent); }
 .group-head { display: flex; align-items: center; gap: 8px; margin: 14px 0 2px; }
 .news-card.tier-p0 { border-left: 3px solid var(--red); }
 .news-card.tier-p1 { border-left: 3px solid var(--yellow); }
-.news-card.p3-dim { opacity: .55; }
+/* P3 半透明降级已取消(2026-09-09 用户裁决): 价值由人主观评判, 机器分只排序不淡化 */
 @media (max-width: 900px) { .surge-grid { grid-template-columns: 1fr; } }
 /* 账号管理表: 中文徽章/动作不竖排折行 */
 .tbl td .badge, .tbl td .act { white-space: nowrap; }

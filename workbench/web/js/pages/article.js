@@ -814,7 +814,8 @@ WB.pages.article = {
             <span class="muted">{{ g.items.length }} 条</span>
           </div>
           <div v-for="r in g.items" :key="r.status_id" class="news-card"
-               :class="{ 'tier-p0': g.key === 'p0', 'tier-p1': g.key === 'p1', 'p3-dim': r.fv_tier === 'P3' }">
+               :class="{ 'tier-p0': g.key === 'p0', 'tier-p1': g.key === 'p1' }">
+               <!-- P3 半透明降级已取消(2026-09-09 用户裁决): 价值由人主观评判, 机器分只排序不淡化 -->
           <div class="surge-grid">
             <!-- 左: 金融价值分 + P档(悬浮看六维明细) -->
             <div class="surge-rank">
