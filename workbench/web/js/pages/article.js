@@ -1,4 +1,4 @@
-/* 图文页: 四子页容器(推荐信息 / 内容生成 / 内容发布 / 自动化任务)
+/* 图文页: 七子页容器(推荐信息 / 蹭蹭流量 / 内容生成 / 内容发布 / 自动化任务 / 账号追踪 / 账号管理)
    结构定稿 = MoA 汇总(05-codex/06-cursor/07-主控):
    · 子页选择走壳层 WB.shell.setSubs(火山控制台式左侧菜单), 组件内 tab + v-show
    · 跨页素材通道 = WB.basket(localStorage, 与资讯页素材篮打通)
@@ -27,6 +27,17 @@ WB.pages.article = {
       /* ── 账号管理(全 X 池只读 + 本地偏好 x_account_prefs.json) ── */
       xaccts: { items: [], meta: {}, q: "", pos: "", followOnly: false, loading: false },
       xBusyId: "",   /* 看与不看开关进行中的 handle */
+      /* ── 账号追踪(自选 X 账号日快照: 粉丝/增粉/更新/流量; 库 data/workbench/x_track.json) ── */
+      xtrack: { accounts: [], count: 0, enabled_n: 0, status: {}, q: "", err: "", loading: false },
+      xtAdd: { input: "", note: "", busy: false },
+      xtBusy: "",                      /* 行级删除/开关进行中的 handle */
+      xt: { busy: false, timer: null },  /* 采集按钮 + 轮询 */
+      xtSel: "",                       /* 详情展开的 handle(""=收起) */
+      xtDetail: { loading: false, account: null, series: [] },
+      xtChart: { metric: "followers", range: 30 },
+      xtMetrics: [["followers", "粉丝量"], ["delta", "每日增粉"],
+                  ["updates", "每日更新"], ["views", "每日流量"]],
+      xtRanges: [[7, "近7天"], [30, "近30天"], [90, "近90天"]],
       /* 蹭蹭流量 = SoPilot 热帖 RSS(唯一来源, 不走数据站) */
       xfSurge: { sort: "prob", items: [], total: 0, meta: {}, loading: false },
       /* 一键采集(纯工作台部署无计划任务, 空态直接拉数, xsurge_ctl) */
@@ -93,6 +104,7 @@ WB.pages.article = {
   },
   watch: {
     tab(t) { if (t === "gen" && !this.historyLoaded) this.loadGenHistory(); },
+    "xtChart.range"() { if (this.xtSel) this.loadXtDetail(); },
   },
   computed: {
     wordCount() { return (this.editorContent || "").length; },
@@ -142,6 +154,56 @@ WB.pages.article = {
         (a.markets || []).some((m) => m.toLowerCase().includes(q)));
       return rows;
     },
+    /* 账号追踪行过滤: 关键词(名称/handle) */
+    xtrackRows() {
+      const q = this.xtrack.q.trim().toLowerCase();
+      if (!q) return this.xtrack.accounts;
+      return this.xtrack.accounts.filter((a) =>
+        (a.name || "").toLowerCase().includes(q) ||
+        (a.handle || "").toLowerCase().includes(q));
+    },
+    /* 追踪大图几何: 折线(粉丝量)或柱(增粉/更新/流量), viewBox 760x240。
+       全手工 SVG(免图表库, 与全仓零构建风格一致); 单点退化画文本提示。 */
+    xtGeom() {
+      const s = this.xtDetail.series || [];
+      const key = this.xtChart.metric;
+      if (!s.length) return null;
+      const padL = 56, padR = 16, padT = 16, padB = 28;
+      const W = 760, H = 240, plotW = W - padL - padR, plotH = H - padT - padB;
+      const n = s.length;
+      const vals = s.map((r) => Number(r[key]) || 0);
+      const barMode = key !== "followers";
+      let yMin = Math.min(...vals), yMax = Math.max(...vals);
+      if (barMode) yMin = Math.min(0, yMin);
+      if (yMin === yMax) { yMin -= 1; yMax += 1; }             // 常量序列防除零
+      const spanY = yMax - yMin;
+      yMax += spanY * 0.08; yMin -= spanY * 0.04;
+      const x = (i) => padL + (n === 1 ? plotW / 2 : (i * plotW) / (n - 1));
+      const y = (v) => padT + plotH * (1 - (v - yMin) / (yMax - yMin));
+      const pts = vals.map((v, i) => x(i).toFixed(1) + "," + y(v).toFixed(1)).join(" ");
+      const bars = barMode ? vals.map((v, i) => {
+        const bw = Math.max(2, Math.min(26, (plotW / n) * 0.62));
+        const yv = y(v), y0 = y(0);
+        return { x: +(x(i) - bw / 2).toFixed(1), y: +Math.min(yv, y0).toFixed(1),
+                 w: +bw.toFixed(1), h: +Math.max(1, Math.abs(yv - y0)).toFixed(1),
+                 neg: v < 0, val: v, d: s[i].date,
+                 title: `${s[i].date}  ${v >= 0 ? "+" : ""}${v.toLocaleString()}` };
+      }) : [];
+      const area = barMode ? "" : pts + " " + x(n - 1).toFixed(1) + "," + y(yMin).toFixed(1) +
+        " " + x(0).toFixed(1) + "," + y(yMin).toFixed(1);
+      const fmt = (v) => this.fmtN(Math.round(v));
+      const yTicks = [yMin + (yMax - yMin) * 0.04, (yMin + yMax) / 2, yMax - (yMax - yMin) * 0.04]
+        .map((v) => ({ y: +y(v).toFixed(1), label: fmt(v) }));
+      const mid = Math.floor((n - 1) / 2);
+      const xTicks = n >= 3
+        ? [0, mid, n - 1].map((i) => ({ x: +x(i).toFixed(1), label: s[i].date.slice(5) }))
+        : s.map((r, i) => ({ x: +x(i).toFixed(1), label: r.date.slice(5) }));
+      const dots = barMode ? [] : vals.map((v, i) => ({
+        cx: +x(i).toFixed(1), cy: +y(v).toFixed(1),
+        title: `${s[i].date}  ${v.toLocaleString()}` }));
+      return { pts, area, bars, dots, yTicks, xTicks, zeroY: barMode ? +y(0).toFixed(1) : null,
+               single: n === 1, W, H };
+    },
   },
   methods: {
     /* ── 浏览层按需翻译: 展示回退链 text_zh(服务端) → WB.trans 本地缓存 → 原文;
@@ -174,6 +236,9 @@ WB.pages.article = {
         { id: "auto", title: "自动化任务", cnt: this.tasks.length || "",
           icon: I('<circle cx="12" cy="12" r="9"/><polyline points="12 7 12 12 15.5 14"/>'),
           onPick: () => { this.tab = "auto"; } },
+        { id: "xtrack", title: "账号追踪", cnt: this.xtrack.count || "",
+          icon: I('<polyline points="3 17 9 11 13 15 21 7"/><polyline points="15 7 21 7 21 13"/>'),
+          onPick: () => { this.tab = "xtrack"; this.loadXtrack(); } },
         { id: "xaccts", title: "账号管理", cnt: this.xaccts.meta.count || "",
           icon: I('<path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/>'),
           onPick: () => { this.tab = "xaccts"; } },
@@ -334,6 +399,131 @@ WB.pages.article = {
       this.xBusyId = "";
     },
     xfCopy(r) { WB.copyText(this.dispText(r)); },
+    /* ── 账号追踪: 自选 X 账号粉丝/增粉/更新/流量日快照(采集走 CLI 子进程, 端点零外呼) ── */
+    async loadXtrack() {
+      this.xtrack.loading = true;
+      try {
+        const d = await WB.api.get("/xt/overview");
+        this.xtrack.accounts = d.accounts || [];
+        this.xtrack.count = d.count || 0;
+        this.xtrack.enabled_n = d.enabled_n || 0;
+        this.xtrack.status = d.status || {};
+        this.xtrack.err = "";
+      } catch (e) {
+        this.xtrack.accounts = [];
+        this.xtrack.err = (e && e.error) || "接口不可用";
+      }
+      this.xtrack.loading = false;
+      this.registerSubs();
+      if ((this.xtrack.status || {}).running) this.watchXt();   // 打开页面时已在跑(计划任务拉的)
+    },
+    watchXt() {          // 采集中轮询(4s): 结束后刷新列表与已展开详情
+      if (this.xt.timer) return;
+      this.xt.timer = setInterval(async () => {
+        try {
+          const d = await WB.api.get("/xt/overview");
+          this.xtrack.status = d.status || {};
+          this.xtrack.accounts = d.accounts || [];
+          if (!(d.status || {}).running) {
+            clearInterval(this.xt.timer); this.xt.timer = null;
+            this.loadXtrack();
+            if (this.xtSel) this.loadXtDetail();
+          }
+        } catch (e) {}
+      }, 4000);
+    },
+    async xtCollectNow() {
+      if (this.xt.busy) return;
+      this.xt.busy = true;
+      try {
+        await WB.api.post("/xt/collect", {});
+        this.xtrack.status = { ...(this.xtrack.status || {}), running: true };
+        WB.toast("采集已启动");
+        this.watchXt();
+      } catch (e) {
+        if (e.status === 409) { this.watchXt(); }
+        else WB.toast((e && e.error) || "拉起失败, 看 data/xtrack_collect.log");
+      }
+      this.xt.busy = false;
+    },
+    async xtScheduleToggle() {
+      if (this.xt.busy) return;
+      this.xt.busy = true;
+      try {
+        const d = await WB.api.post("/xt/schedule", { on: !((this.xtrack.status || {}).scheduled) });
+        this.xtrack.status = { ...(this.xtrack.status || {}), scheduled: !!d.scheduled };
+        WB.toast(d.msg || (d.ok ? "已更新" : "登记失败"));
+      } catch (e) { WB.toast((e && e.error) || "登记失败"); }
+      this.xt.busy = false;
+    },
+    async xtAddSubmit() {
+      if (this.xtAdd.busy || !this.xtAdd.input.trim()) return;
+      this.xtAdd.busy = true;
+      try {
+        await WB.api.post("/xt/accounts", { input: this.xtAdd.input, note: this.xtAdd.note });
+        WB.toast("已加入追踪, 点「立即采集」拉首份数据");
+        this.xtAdd = { input: "", note: "", busy: false };
+        this.loadXtrack();
+      } catch (e) { WB.toast((e && e.error) + (e.hint ? " —— " + e.hint : "") || "添加失败"); }
+      this.xtAdd.busy = false;
+    },
+    async xtImportFollowed() {
+      if (this.xtAdd.busy) return;
+      this.xtAdd.busy = true;
+      try {
+        const d = await WB.api.post("/xt/import-followed", {});
+        WB.toast(d.imported.length
+          ? `已导入 ${d.imported.length} 个关注账号` : "关注列表没有可导入的新账号");
+        this.loadXtrack();
+      } catch (e) { WB.toast((e && e.error) || "导入失败"); }
+      this.xtAdd.busy = false;
+    },
+    async xtToggle(a) {
+      this.xtBusy = a.handle;
+      try {
+        await WB.api.post("/xt/accounts/" + a.handle + "/enabled", { on: !a.enabled });
+        a.enabled = !a.enabled;
+      } catch (e) { WB.toast("切换失败: " + (e.error || "")); }
+      this.xtBusy = "";
+    },
+    async xtDel(a) {
+      if (!confirm(`停止追踪 @${a.handle} ?\n其历史快照将一并删除, 无法恢复。`)) return;
+      this.xtBusy = a.handle;
+      try {
+        await WB.api.del("/xt/accounts/" + a.handle);
+        if (this.xtSel === a.handle) { this.xtSel = ""; this.xtDetail = { loading: false, account: null, series: [] }; }
+        WB.toast(`已停止追踪 @${a.handle}`);
+        this.loadXtrack();
+      } catch (e) { WB.toast("删除失败: " + (e.error || "")); }
+      this.xtBusy = "";
+    },
+    openXt(a) {
+      this.xtSel = this.xtSel === a.handle ? "" : a.handle;
+      if (this.xtSel) this.loadXtDetail();
+    },
+    async loadXtDetail() {
+      this.xtDetail.loading = true;
+      try {
+        const d = await WB.api.get("/xt/accounts/" + this.xtSel + "?days=" + this.xtChart.range);
+        this.xtDetail.account = d.account || null;
+        this.xtDetail.series = d.series || [];
+      } catch (e) { this.xtDetail.series = []; }
+      this.xtDetail.loading = false;
+    },
+    /* 行内迷你粉丝曲线(近30点; 不足2点不画) */
+    xtSparkPts(spark) {
+      const a = (spark || []).map(Number).filter((v) => !isNaN(v));
+      if (a.length < 2) return "";
+      const min = Math.min(...a), max = Math.max(...a), span = (max - min) || 1;
+      return a.map((v, i) =>
+        (i * (100 / (a.length - 1))).toFixed(1) + "," + (24 - ((v - min) / span) * 22).toFixed(1)
+      ).join(" ");
+    },
+    deltaCls(v) { return v == null ? "" : v > 0 ? "var(--green)" : v < 0 ? "var(--red)" : ""; },
+    deltaText(v) {
+      if (v == null) return "—";
+      return (v > 0 ? "+" : "") + this.fmtN(v);
+    },
     /* ── 评论生成: 端点同步 spawn CLI(零外呼), 缓存命中秒回; 3 候选复制进 X 卡位 ── */
     async genReply(r, force) {
       const st = this.replyById[r.status_id] || {};
@@ -851,7 +1041,7 @@ WB.pages.article = {
     this.initBasketIds();
     this.loadDict(); this.loadX(); this.loadXF("xfReco"); this.loadSurgeRss(); this.loadXc();
     this.loadFlows(); this.loadRuns(); this.loadDrafts();
-    this.loadAccounts(); this.loadLedger(); this.loadTasks(); this.loadXaccts();
+    this.loadAccounts(); this.loadLedger(); this.loadTasks(); this.loadXaccts(); this.loadXtrack();
     WB.api.get("/gen-jobs").then((d) => {           // 页面重开时有未完成的生成 → 续上轮询
       const j = ((d || {}).compose) || {};
       if (j.running) { this.genJob = j; this.genTimer = setInterval(this.pollGen, 2000); }
@@ -861,6 +1051,7 @@ WB.pages.article = {
     if (WB.shell) WB.shell.setSubs([]);
     if (this.genTimer) { clearInterval(this.genTimer); this.genTimer = null; }
     if (this.xc.timer) { clearInterval(this.xc.timer); this.xc.timer = null; }
+    if (this.xt.timer) { clearInterval(this.xt.timer); this.xt.timer = null; }
   },
 
   template: `
@@ -1511,7 +1702,142 @@ WB.pages.article = {
       </div>
     </div>
 
-    <!-- ═══ 子页5: 账号管理(全 X 池账号信息来源; 池只读, 关注/备注为板块四自有偏好) ═══ -->
+    <!-- ═══ 子页5: 账号追踪(自选 X 账号粉丝/增粉/更新/流量日快照; 库 data/workbench/x_track.json) ═══ -->
+    <div v-show="tab==='xtrack'">
+      <div class="card">
+        <h3>账号追踪({{ xtrack.count || 0 }})
+          <span class="muted">启用 {{ xtrack.enabled_n || 0 }} · 显示 {{ xtrackRows.length }}</span>
+          <span v-if="xtrack.err" class="badge red" style="margin-left:8px">{{ xtrack.err }}</span></h3>
+        <div class="feed-toolbar">
+          <input type="text" v-model="xtAdd.input" @keyup.enter="xtAddSubmit"
+                 placeholder="@handle 或 x.com/账号 链接" style="width:210px" :disabled="xtAdd.busy">
+          <input type="text" v-model="xtAdd.note" @keyup.enter="xtAddSubmit"
+                 placeholder="备注(可选)" style="width:140px" :disabled="xtAdd.busy">
+          <button class="btn primary" @click="xtAddSubmit" :disabled="xtAdd.busy">添加</button>
+          <button class="btn" @click="xtImportFollowed" :disabled="xtAdd.busy"
+                  title="把账号管理页标记为关注的池账号批量加入追踪">从关注导入</button>
+          <span style="flex:1"></span>
+          <input type="text" v-model="xtrack.q" placeholder="搜索(名称/handle)" style="width:150px">
+          <button class="btn" @click="xtScheduleToggle" :disabled="xt.busy"
+                  :title="(xtrack.status.scheduled ? '已开启每小时自动采集, 点击停止' : '登记 Windows 计划任务, 每小时自动采集')">
+            {{ xtrack.status.scheduled ? '⏰ 定时中' : '⏰ 定时' }}</button>
+          <button class="btn" @click="loadXtrack">{{ xtrack.loading ? '刷新中…' : '刷新' }}</button>
+          <button class="btn primary" @click="xtCollectNow" :disabled="xt.busy || xtrack.status.running">
+            {{ xtrack.status.running ? '采集中…' : '⟳ 立即采集' }}</button>
+        </div>
+        <div class="muted" style="margin:6px 0 10px">
+          口径: 粉丝=每日快照 · 增粉=较前一日差分 · 更新=当日本人发帖+回复(转推不计) ·
+          流量=当日新帖浏览量合计(帖+回复都算, 采集时刻口径)。
+          数据经 FxTwitter 免登录通路<span v-if="xtrack.status.finished_at">;
+          上轮采集 {{ xtrack.status.finished_at }}<template v-if="xtrack.status.data_age_min != null">(距今 {{ xtrack.status.data_age_min }} 分钟)</template></span><template v-if="xtrack.status.running">;
+          <b style="color:var(--accent)">采集中…</b></template></div>
+
+        <!-- 详情大图(点行展开): 四指标 × 三区间, 手绘 SVG 免图表库 -->
+        <div v-if="xtSel && xtDetail.account"
+             style="border:1px solid var(--border); border-radius:8px; padding:12px 14px; margin-bottom:12px">
+          <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap">
+            <img v-if="xtDetail.account.avatar" :src="xtDetail.account.avatar" alt=""
+                 style="width:34px;height:34px;border-radius:50%">
+            <b>{{ xtDetail.account.name || '@'+xtDetail.account.handle }}</b>
+            <a class="muted" :href="'https://x.com/'+xtDetail.account.handle" target="_blank" rel="noopener">@{{ xtDetail.account.handle }}</a>
+            <span class="mono" style="font-size:14px">粉 {{ fmtN(xtDetail.account.followers) }}</span>
+            <span :style="{color: deltaCls(xtDetail.account.delta_7d)}">近7日 {{ deltaText(xtDetail.account.delta_7d) }}</span>
+            <span class="muted" v-if="xtDetail.account.note">{{ xtDetail.account.note }}</span>
+            <span style="flex:1"></span>
+            <button class="btn" @click="xtSel=''">收起</button>
+          </div>
+          <div class="feed-toolbar" style="margin:10px 0 4px">
+            <span v-for="[m, t] in xtMetrics" :key="m" class="chip" :class="{on: xtChart.metric===m}"
+                  @click="xtChart.metric=m">{{ t }}</span>
+            <span style="flex:1"></span>
+            <span v-for="[r, t] in xtRanges" :key="r" class="chip" :class="{on: xtChart.range===r}"
+                  @click="xtChart.range=r">{{ t }}</span>
+          </div>
+          <div v-if="xtDetail.loading" class="muted">加载中…</div>
+          <div v-else-if="!xtDetail.series.length" class="muted">暂无快照 — 点右上「立即采集」出数</div>
+          <svg v-else-if="xtGeom" :viewBox="'0 0 '+xtGeom.W+' '+xtGeom.H"
+               style="width:100%;height:auto;display:block">
+            <g v-for="(t, i) in xtGeom.yTicks" :key="'y'+i">
+              <line x1="56" x2="744" :y1="t.y" :y2="t.y" stroke="currentColor" stroke-opacity=".12"/>
+              <text :x="52" :y="t.y+4" text-anchor="end" font-size="11"
+                    fill="currentColor" fill-opacity=".55">{{ t.label }}</text>
+            </g>
+            <g v-for="(t, i) in xtGeom.xTicks" :key="'x'+i">
+              <text :x="t.x" y="234" text-anchor="middle" font-size="11"
+                    fill="currentColor" fill-opacity=".55">{{ t.label }}</text>
+            </g>
+            <template v-if="xtGeom.bars.length">
+              <line v-if="xtGeom.zeroY != null && xtGeom.zeroY > 16 && xtGeom.zeroY < 212"
+                    x1="56" x2="744" :y1="xtGeom.zeroY" :y2="xtGeom.zeroY"
+                    stroke="currentColor" stroke-opacity=".3"/>
+              <rect v-for="(b, i) in xtGeom.bars" :key="'b'+i" :x="b.x" :y="b.y" :width="b.w"
+                    :height="b.h" rx="2" opacity=".85"
+                    :fill="b.neg ? 'var(--red)' : 'var(--green)'"><title>{{ b.title }}</title></rect>
+            </template>
+            <template v-else>
+              <polygon :points="xtGeom.area" fill="var(--accent)" opacity=".12"/>
+              <polyline :points="xtGeom.pts" fill="none" stroke="var(--accent)" stroke-width="2"
+                        stroke-linejoin="round"/>
+              <circle v-for="(d, i) in xtGeom.dots" :key="'d'+i" :cx="d.cx" :cy="d.cy" r="2.6"
+                      fill="var(--accent)"><title>{{ d.title }}</title></circle>
+            </template>
+          </svg>
+        </div>
+
+        <table class="tbl">
+          <thead><tr>
+            <th>账号</th><th>粉丝</th><th>今日增粉</th><th>近7日</th>
+            <th>今日更新</th><th>今日流量</th><th>近30日粉丝</th><th>采集</th><th>操作</th>
+          </tr></thead>
+          <tbody>
+            <tr v-for="a in xtrackRows" :key="a.handle"
+                :style="{opacity: a.enabled ? '' : .5, cursor: 'pointer'}"
+                @click="openXt(a)">
+              <td>
+                <div style="display:flex;align-items:center;gap:8px">
+                  <img v-if="a.avatar" :src="a.avatar" alt=""
+                       style="width:26px;height:26px;border-radius:50%">
+                  <div>
+                    <b>{{ a.name || '@'+a.handle }}</b>
+                    <span v-if="a.verified" class="badge blue" style="margin-left:4px">✓</span>
+                    <div class="muted" style="font-size:11px">@{{ a.handle }}<template v-if="a.note"> · {{ a.note }}</template></div>
+                  </div>
+                </div>
+                <div v-if="a.error" class="badge red" style="margin-top:4px;white-space:normal"
+                     :title="a.error + ' (' + (a.error_at || '') + ')'">上轮失败: {{ a.error.slice(0, 30) }}</div>
+              </td>
+              <td class="mono">{{ a.followers ? fmtFol(a.followers) : '—' }}</td>
+              <td class="mono" :style="{color: deltaCls(a.delta_1d)}">{{ deltaText(a.delta_1d) }}</td>
+              <td class="mono" :style="{color: deltaCls(a.delta_7d)}">{{ deltaText(a.delta_7d) }}</td>
+              <td class="mono">{{ a.updates_1d || '—' }}<span v-if="a.replies_1d" class="muted" style="font-size:11px"> (回复{{ a.replies_1d }})</span></td>
+              <td class="mono">{{ a.views_1d ? fmtN(a.views_1d) : '—' }}</td>
+              <td style="width:110px">
+                <svg v-if="xtSparkPts(a.spark)" viewBox="0 0 100 26" width="100" height="26">
+                  <polyline :points="xtSparkPts(a.spark)" fill="none"
+                            stroke="var(--accent)" stroke-width="1.5"/>
+                </svg>
+                <span v-else class="muted">—</span></td>
+              <td><span class="switch" :class="{on: a.enabled, busy: xtBusy === a.handle}"
+                    role="switch" tabindex="0" :aria-checked="a.enabled ? 'true' : 'false'"
+                    :title="a.enabled ? '停用(保留数据, 暂停采集)' : '恢复采集'"
+                    @click.stop="xtToggle(a)" @keydown.enter.stop="xtToggle(a)"></span></td>
+              <td>
+                <span class="act" style="color:var(--accent);cursor:pointer" @click.stop="openXt(a)">曲线</span>
+                <span class="act" style="color:var(--red);cursor:pointer;margin-left:8px"
+                      @click.stop="xtDel(a)">删除</span>
+                <div class="muted" style="font-size:10.5px" v-if="a.days_n">{{ a.days_n }} 天快照</div>
+              </td>
+            </tr>
+            <tr v-if="!xtrackRows.length && !xtrack.loading">
+              <td colspan="9" class="muted" style="padding:18px 8px">
+                {{ xtrack.count ? '无匹配账号' :
+                  '还没有追踪账号 — 上方输入 @handle 添加, 或点「从关注导入」; 添加后点「立即采集」出数' }}</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- ═══ 子页6: 账号管理(全 X 池账号信息来源; 池只读, 关注/备注为板块四自有偏好) ═══ -->
     <div v-show="tab==='xaccts'">
       <div class="card">
         <h3>X 账号池({{ xaccts.meta.count || 0 }})

@@ -37,6 +37,7 @@
 | `python cli.py video remove <id>` | 删除视频项目目录（videos/&lt;id&gt;/ 整目录，不可恢复） | 删 ai-workflow/video/videos/&lt;id&gt;/ |
 | `python cli.py workbench serve [--bind/--port 8788/--open]` | 板块四·前端工作台（资讯/图文/视频/追踪/设置 5 页 SPA，方案见 docs/第四板块-前端工作台方案.md） | 常驻进程；只写 data/workbench/ 自有 JSON |
 | `python cli.py workbench refresh-yt-track [--force]` | YouTube 热点追踪采集（Data API v3 → yt_channels/yt_videos 快照；任务计划每天一次，方案见 docs/workbench-moa/16-18） | **真抓 YouTube 外网** |
+| `python cli.py workbench refresh-x-track [--force/--handles]` | X账号追踪采集（FxTwitter 免登录档案+时间线 → x_track.json 日快照；图文页【账号追踪】子页数据面，用户自选账号） | **真抓 X 外网** |
 | `python cli.py workbench analyze-video [--force]` / `gen-script` | 视频工坊：YouTube 视频分析(Gemini 看片→字幕→元数据降级链)与脚本生成(muse) | **真外呼 LLM/YouTube** |
 | `python cli.py workbench build-video [--json]` | 视频制作渲染编排（workbench→CLI 子进程入口：脚本转分镜→建项目→node build.mjs 真渲染，分钟级；日志落 data/workbench/video_builds/） | **真渲染**，写 videos/&lt;project_id&gt;/ 与日志 |
 | `python cli.py workbench gen-post [--json]` | 内容生成成稿编排（workbench→CLI 子进程入口：retrieve 补全→yfinance/东财行情→mplfinance K线图→摆动点支撑阻力→大V/机构观点聚合→LLM 按 X风格/语种/字数档成稿；产物 gen_posts+gen_assets；详见 docs/workbench-moa/21-24） | **真外呼行情+LLM**，写 data/workbench/gen_* |

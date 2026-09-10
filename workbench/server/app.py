@@ -18,7 +18,7 @@ from fastapi import Body, FastAPI, Request
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
-from . import config, gcompose, omniroute_ctl, ondemand_translate, proxy, retrieve, stats, views, vstudio, xaccounts, x_profile_enricher, x_reply, x_surge, xsurge_ctl, yt_track
+from . import config, gcompose, omniroute_ctl, ondemand_translate, proxy, retrieve, stats, views, vstudio, x_track, xaccounts, x_profile_enricher, x_reply, x_surge, xsurge_ctl, yt_track
 
 WEB = Path(__file__).resolve().parent.parent / "web"
 
@@ -271,6 +271,87 @@ def create_app() -> FastAPI:
             return xaccounts.set_enabled(handle, on)
         except KeyError:
             return JSONResponse({"error": f"池内无此账号: {handle}"}, status_code=404)
+
+    # ── 账号追踪(图文页子页): 自选 X 账号粉丝/增粉/更新/流量日快照 ─────────────
+    # 端点零外呼(红线同 yt_track): 读缓存或 spawn CLI; 真抓网只在 refresh-x-track 进程。
+    @app.get("/wb-api/xt/overview")
+    def xt_overview():
+        return x_track.overview_payload()
+
+    @app.get("/wb-api/xt/accounts/{handle}")
+    def xt_account(handle: str, days: int = 30):
+        d = x_track.account_series(handle, days)
+        if not d:
+            return JSONResponse({"error": "追踪账号不存在"}, status_code=404)
+        return d
+
+    @app.post("/wb-api/xt/accounts")
+    async def xt_account_add(request: Request):
+        body = await request.json()
+        row, err = x_track.add_account(str(body.get("input") or ""),
+                                       str(body.get("note") or ""),
+                                       bool(body.get("enabled", True)))
+        if err:
+            dup = "已在追踪列表" in err["error"]
+            return JSONResponse(err, status_code=409 if dup else 400)
+        return {"added": row}
+
+    @app.delete("/wb-api/xt/accounts/{handle}")
+    def xt_account_del(handle: str):
+        n = x_track.remove_account(handle)
+        if not n:
+            return JSONResponse({"error": "追踪账号不存在"}, status_code=404)
+        return {"removed": n}    # 日快照随账号一并删除(用户明确增减语义)
+
+    @app.post("/wb-api/xt/accounts/{handle}/enabled")
+    async def xt_account_enabled(handle: str, request: Request):
+        body = await request.json()
+        if not x_track.set_enabled(handle, bool(body.get("on", True))):
+            return JSONResponse({"error": "追踪账号不存在"}, status_code=404)
+        return {"handle": handle, "enabled": bool(body.get("on", True))}
+
+    @app.post("/wb-api/xt/accounts/{handle}/note")
+    async def xt_account_note(handle: str, request: Request):
+        body = await request.json()
+        if not x_track.set_note(handle, str(body.get("note") or "")):
+            return JSONResponse({"error": "追踪账号不存在"}, status_code=404)
+        return {"handle": handle, "note": str(body.get("note") or "")[:200]}
+
+    @app.post("/wb-api/xt/import-followed")
+    def xt_import_followed():
+        return x_track.import_followed()
+
+    @app.post("/wb-api/xt/collect")
+    def xt_collect():
+        """立即采集: detached spawn CLI(一轮秒级~分钟级, 同步会卡浏览器请求);
+        进度经 GET /xt/overview 的 status 轮询(last_collect 落 x_track.json)。"""
+        import subprocess
+        if x_track.status_payload()["running"]:
+            return JSONResponse({"error": "采集进行中", "started_at":
+                                 x_track.load_store().get("last_collect", {}).get("started_at")},
+                                status_code=409)
+        cli = Path(__file__).resolve().parents[2] / "cli.py"
+        log_dir = Path(__file__).resolve().parents[2] / "data"
+        log_dir.mkdir(parents=True, exist_ok=True)
+        flags = subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP \
+            if hasattr(subprocess, "DETACHED_PROCESS") else 0
+        try:
+            log = open(log_dir / "xtrack_collect.log", "a", encoding="utf-8")
+            subprocess.Popen([*config.py_cmd(), str(cli), "workbench",
+                              "refresh-x-track", "--json"],
+                             cwd=str(Path(__file__).resolve().parents[2]),
+                             stdout=log, stderr=subprocess.STDOUT,
+                             stdin=subprocess.DEVNULL,
+                             creationflags=flags, close_fds=True)
+        except Exception as e:
+            return JSONResponse({"error": f"采集进程启动失败: {e}"}, status_code=500)
+        return {"started": True}
+
+    @app.post("/wb-api/xt/schedule")
+    async def xt_schedule(request: Request):
+        body = await request.json()
+        return x_track.schedule(bool(body.get("on", True)))
+
 
     # ── 内容生成·信息检索: 素材回查全文/同簇多源/同标的扩展(纯只读, 零 LLM) ────
     @app.post("/wb-api/retrieve")

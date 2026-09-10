@@ -505,6 +505,10 @@ def workbench_cmd(args) -> int:
         from server import yt_track
         _, code = yt_track.collect(force=args.force)   # 0 正常/跳过, 3 配额熔断, 4 无 key
         return code
+    if args.sub == "refresh-x-track":
+        sys.path.insert(0, str(WB))
+        from server import x_track
+        return x_track.run_cli(args)                   # 0 正常, 3 限流熔断
     if args.sub == "enrich-x-profiles":
         sys.path.insert(0, str(WB))
         from server import x_profile_enricher
@@ -773,6 +777,12 @@ def main() -> int:
     pw_y.add_argument("--force", action="store_true",
                       help="忽略5分钟采集冷却与重入锁全部重抓")
     pw_y.add_argument("--json", action="store_true", help="报告本就是单行 JSON, 此参数仅为习惯兼容")
+    pw_xt = wsub.add_parser("refresh-x-track",
+                            help="X账号追踪采集(FxTwitter档案+时间线 → data/workbench/x_track.json 日快照)")
+    pw_xt.add_argument("--force", action="store_true",
+                       help="忽略5分钟采集冷却与重入锁全部重抓")
+    pw_xt.add_argument("--handles", default="", help="只采指定账号(逗号分隔, 可带@)")
+    pw_xt.add_argument("--json", action="store_true", help="单行 JSON 报告")
     pw_va = wsub.add_parser("analyze-video", help="视频工坊分析任务(CLI 子进程入口)")
     pw_va.add_argument("--json", action="store_true", help="输出单行 JSON")
     pw_va.add_argument("--url", default=None, help="人工补跑时覆盖任务 URL")
