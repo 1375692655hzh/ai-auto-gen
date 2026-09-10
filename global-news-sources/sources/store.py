@@ -67,7 +67,16 @@ def _connect() -> sqlite3.Connection:
 
 
 def _migrate(conn: sqlite3.Connection) -> None:
-    """幂等迁移: 缺列补列, 缺表建表。schema_meta 记录版本。"""
+    """幂等迁移: 缺列补列, 缺表建表。schema_meta 记录版本。
+    2026-09-11: 版本一致时零写返回——旧版每个连接都跑 UPDATE+commit(即使全是
+    no-op 也占一次写事务), 读路径每请求与采集写者抢 SQLite 写锁。"""
+    try:
+        v = conn.execute(
+            "SELECT v FROM schema_meta WHERE k='schema_version'").fetchone()
+        if v and str(v[0]) == str(SCHEMA_VERSION):
+            return                                   # 已迁移到位: 零写快速路径
+    except sqlite3.OperationalError:
+        pass                                         # schema_meta 不存在(首跑) → 全量迁移
     conn.execute("CREATE TABLE IF NOT EXISTS schema_meta(k TEXT PRIMARY KEY, v TEXT)")
     base = """CREATE TABLE IF NOT EXISTS items(
         id TEXT PRIMARY KEY, source_id TEXT, source TEXT, time TEXT, text TEXT,

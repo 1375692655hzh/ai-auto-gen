@@ -19,10 +19,20 @@ _last: dict[str, float] = {}
 _guard = threading.Lock()
 
 
+# 二级公共后缀: 取注册域时须多留一段(2026-09-11 修复: finance.sina.com.cn 曾被
+# 切成 com.cn, HEAVY 的 sina.com.cn 5s 礼貌间隔从未命中, 所有 *.com.cn 挤一把锁)
+_MULTI_TLD = {"com.cn", "net.cn", "org.cn", "gov.cn", "edu.cn", "ac.cn",
+              "com.hk", "com.tw", "com.sg", "com.au", "com.br", "com.mx",
+              "co.uk", "co.jp", "co.kr", "co.in", "co.za", "or.jp", "ne.jp"}
+
+
 def _domain_of(url_or_host: str) -> str:
     host = urlparse(url_or_host).netloc or url_or_host
-    parts = host.lower().split(".")
-    return ".".join(parts[-2:]) if len(parts) >= 2 else host.lower()
+    host = host.split("@")[-1].split(":")[0].lower()   # 剥 userinfo/端口
+    parts = host.split(".")
+    if len(parts) >= 3 and ".".join(parts[-2:]) in _MULTI_TLD:
+        return ".".join(parts[-3:])                    # finance.sina.com.cn → sina.com.cn
+    return ".".join(parts[-2:]) if len(parts) >= 2 else host
 
 
 def gate(url_or_host: str) -> None:
