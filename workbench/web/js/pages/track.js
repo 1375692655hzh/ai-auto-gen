@@ -655,15 +655,22 @@ WB.pages.track = {
         <div v-if="!chs.length" class="muted" style="padding:8px 0">
           尚未添加频道 —— 粘贴 YouTube 频道主页链接或 @handle; 添加后由采集器自动解析出频道名与订阅数。</div>
         <table v-else class="tbl">
-          <thead><tr><th>频道</th><th>频道 ID</th><th>状态</th><th>订阅</th><th>备注</th><th>启用</th><th>操作</th></tr></thead>
+          <thead><tr><th>频道</th><th>订阅</th><th>今日增粉</th><th>今日更新</th>
+            <th>最新视频流量</th><th>近7日总流量</th><th>7日流量变化</th><th>状态</th><th>备注</th><th>启用</th><th>操作</th></tr></thead>
           <tbody>
             <tr v-for="c in chRows" :key="c.id" :style="{opacity: c.enabled !== false ? '' : .5}">
-              <td><b>{{ c.title || c.input }}</b></td>
-              <td class="mono muted" style="font-size:11px">{{ c.channel_id || '待解析' }}</td>
+              <td>
+                <b>{{ c.title || c.input }}</b>
+                <div class="muted mono" style="font-size:10.5px">{{ c.channel_id || '待解析' }}</div></td>
+              <td class="mono">{{ c.subs != null ? fmtN(c.subs) + '(≈)' : '—' }}</td>
+              <td class="mono" :style="{color: deltaCls((c.stats || {}).subs_delta_1d)}">{{ deltaText((c.stats || {}).subs_delta_1d) }}</td>
+              <td class="mono">{{ (c.stats || {}).updates_1d || '—' }}</td>
+              <td class="mono" :title="(c.stats || {}).latest_title">{{ (c.stats || {}).latest_views != null ? fmtN(c.stats.latest_views) : '—' }}</td>
+              <td class="mono">{{ (c.stats || {}).views_7d != null ? fmtN(c.stats.views_7d) : '—' }}</td>
+              <td class="mono" :style="{color: deltaCls((c.stats || {}).views_7d_delta)}">{{ deltaText((c.stats || {}).views_7d_delta) }}</td>
               <td><span class="pill" :class="chStatusClass(c)">{{ chStatusText(c) }}</span>
                 <span v-if="c.resolve_status === 'failed'" :title="c.resolve_error"
                       style="color:var(--red);font-size:11px"> {{ c.resolve_error }}</span></td>
-              <td class="mono">{{ c.subs != null ? fmtN(c.subs) + '(≈)' : '—' }}</td>
               <td class="muted" style="font-size:11px">{{ c.note || '—' }}</td>
               <td><span class="switch" :class="{on: c.enabled !== false, busy: chBusyId === c.id}"
                     role="switch" tabindex="0" :aria-checked="c.enabled === false ? 'false' : 'true'"
@@ -671,13 +678,15 @@ WB.pages.track = {
                     @click="toggleCh(c)" @keydown.enter="toggleCh(c)"></span></td>
               <td><span class="act" style="color:var(--red);cursor:pointer" @click="delCh(c)">删除</span></td>
             </tr>
-            <tr v-if="!chRows.length"><td colspan="7" class="muted">无匹配频道</td></tr>
+            <tr v-if="!chRows.length"><td colspan="11" class="muted">无匹配频道</td></tr>
           </tbody>
         </table>
         <p class="muted" style="margin-top:10px">
-          启停只影响采集范围(停用频道不外呼); 解析与首轮数据在下一轮采集完成
-          (计划任务每天一次, 或点上方「立即采集」)。删除不停用历史快照。
-          频道的热播榜/增减速看板在「视频页 · 热点追踪」。</p>
+          口径对齐 X 追踪: 订阅=API 取整值 · 今日增粉=较昨日订阅快照差分(订阅时序自 2026-09-10
+          起积累, 首日显示 —) · 今日更新=当日新发布视频数 · 最新视频流量=最新一条视频当前累计播放 ·
+          近7日总流量=近7天发布视频的当前累计播放合计 · 7日流量变化=上述视频今日增量合计。
+          启停只影响采集范围; 解析与首轮数据在下一轮采集完成(计划任务每天一次,
+          或点上方「立即采集」)。频道的热播榜/增减速看板在「视频页 · 热点追踪」。</p>
       </div>
     </div>
 

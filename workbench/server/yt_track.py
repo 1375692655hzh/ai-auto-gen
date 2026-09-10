@@ -327,6 +327,26 @@ def _merge_enabled(channels: list) -> list:
     return channels
 
 
+SUBS_SERIES_MAX = 90        # 频道订阅快照保留天数(与视频快照 28d 不同口径: 订阅变化慢, 留长些)
+
+
+def _snap_subs(c: dict, now: float, now_s: str) -> None:
+    """订阅数入时序(2026-09-10 用户定的 YTB 追踪标准: 粉丝/今日增粉要对齐 X)。
+    YouTube API 只给取整值且低频更新, 快照从本版本起积累, 首日增粉无数据显示 —。"""
+    v = c.get("subs")
+    if not isinstance(v, int) or v <= 0:
+        return
+    ser = c.get("subs_series")
+    if not isinstance(ser, list):
+        ser = []
+    if ser and now - ser[-1]["ts"] < 20 * 3600:      # 同日重复采集不重复记(计划任务/手点双跑)
+        ser[-1] = {"ts": int(now), "v": v}
+    else:
+        ser.append({"ts": int(now), "v": v})
+    c["subs_series"] = ser[-SUBS_SERIES_MAX:]
+    c["subs_at"] = now_s
+
+
 def collect(force: bool = False) -> tuple[dict, int]:
     """解析 pending 账号 → 刷频道元数据 → 发现新视频 → 批量刷新统计追加快照。
     返回 (report, exit_code): 0 正常/跳过, 3 配额熔断, 4 无 key。"""
@@ -472,6 +492,7 @@ def collect(force: bool = False) -> tuple[dict, int]:
                     it = got.get(c["channel_id"])
                     if it:
                         _fill_channel_row(c, it)
+                        _snap_subs(c, now, now_s)      # 订阅数入时序(今日增粉数据源)
                         c["last_ok_at"] = now_s
                         c["last_error"] = ""
                     else:
@@ -806,6 +827,60 @@ def status_payload() -> dict:
                          "pending": sum(1 for c in channels if c.get("resolve_status") == "pending"),
                          "failed": sum(1 for c in channels if c.get("resolve_status") == "failed")},
             "videos_tracked": len(store.get("videos") or {})}
+
+
+def channel_stats() -> dict:
+    """YTB 追踪标准六项/频道(2026-09-10 用户定标, 对齐 X 追踪列): 零外呼读缓存。
+
+    - subs / subs_delta_1d: 频道订阅数与今日增粉(subs_series 由采集轮逐日积累,
+      首日无锚点 → None 前端显示 —)
+    - updates_1d: 今日发布视频数(published 在 24h 内)
+    - latest_views / latest_title: 最新一条视频的当前累计播放
+    - views_7d: 近7天发布视频的当前累计播放合计
+    - views_7d_delta: 上述视频合计播放的今日变化(各视频 Δ24h 求和, 口径=较昨日同时刻)
+    """
+    now = time.time()
+    store = load_store()
+    videos = store.get("videos") or {}
+    by_ch: dict = {}
+    for v in videos.values():
+        cid = v.get("channel_id")
+        if cid:
+            by_ch.setdefault(cid, []).append(v)
+
+    out = {}
+    for cid, vs in by_ch.items():
+        vs7 = [v for v in vs if v.get("published") and now - v["published"] <= 7 * 86400]
+        latest = max(vs, key=lambda v: v.get("published") or 0) if vs else None
+        lser = (latest or {}).get("series") or []
+        updates_1d = sum(1 for v in vs if v.get("published") and now - v["published"] <= 86400)
+        views_7d = sum(((v.get("series") or [{}])[-1].get("v") or 0) for v in vs7)
+        d7 = 0
+        for v in vs7:
+            d, _ = _delta(sorted(v.get("series") or [], key=lambda p: p["ts"]),
+                          now, 24 * 3600, 8 * 3600)
+            if d:
+                d7 += d
+        out[cid] = {
+            "updates_1d": updates_1d or None,
+            "latest_views": (lser[-1].get("v") if lser else None),
+            "latest_title": (latest or {}).get("title") or "",
+            "views_7d": views_7d if vs7 else None,
+            "views_7d_delta": d7 if vs7 else None,
+        }
+
+    for c in config.load_yt_channels():
+        cid = c.get("channel_id")
+        if not cid:
+            continue
+        st = out.setdefault(cid, {"updates_1d": None, "latest_views": None,
+                                  "latest_title": "", "views_7d": None,
+                                  "views_7d_delta": None})
+        ser = sorted(c.get("subs_series") or [], key=lambda p: p["ts"])
+        st["subs"] = c.get("subs")
+        d, _ = _delta(ser, now, 24 * 3600, 8 * 3600)
+        st["subs_delta_1d"] = d
+    return out
 
 
 def add_channel(inp: str, note: str = "", enabled: bool = True) -> tuple[dict | None, dict | None]:
