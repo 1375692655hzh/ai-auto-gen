@@ -7,5 +7,5 @@ set PYTHONUNBUFFERED=1
 cd /d "%~dp0.."
 netstat -ano | findstr ":8786" | findstr LISTENING >nul && exit /b 0
 if not exist data mkdir data
-start "" /b cmd /c "py -3.11 -u cli.py sources console >> data\console_task.log 2>&1"
+start "" /min cmd /c "py -3.11 -u cli.py sources console >> data\console_task.log 2>&1"
 exit /b 0

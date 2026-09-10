@@ -153,7 +153,7 @@ def create_app() -> FastAPI:
         try:
             result = subprocess.run(
                 ["py", "-3.11", str(cli), "video", "remove", vid],
-                capture_output=True, text=True, encoding="utf-8", timeout=60)
+                capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=60)
         except subprocess.TimeoutExpired:
             return JSONResponse({"error": "remove_timeout"}, status_code=504)
         except OSError:
@@ -284,7 +284,7 @@ def create_app() -> FastAPI:
         try:
             p = subprocess.run(
                 ["py", "-3.11", str(cli), "workbench", "test-llm"],
-                capture_output=True, text=True, encoding="utf-8", timeout=40)
+                capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=40)
         except subprocess.TimeoutExpired:
             return JSONResponse({"ok": False, "model": "", "error": "cli_timeout"}, status_code=504)
         except OSError:
@@ -449,7 +449,7 @@ def create_app() -> FastAPI:
         try:
             p = subprocess.run(
                 ["py", "-3.11", str(cli), "sources", "enable", sid, "on" if on else "off", "--json"],
-                capture_output=True, text=True, encoding="utf-8", timeout=30)
+                capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=30)
         except subprocess.TimeoutExpired:
             return JSONResponse({"error": "cli 调用超时"}, status_code=504)
         try:
@@ -504,7 +504,7 @@ def create_app() -> FastAPI:
             p = subprocess.run(
                 ["py", "-3.11", str(cli), "workbench", "gen-reply",
                  "--status-id", sid] + (["--force"] if force else []),
-                capture_output=True, text=True, encoding="utf-8", timeout=90)
+                capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=90)
         except subprocess.TimeoutExpired:
             return JSONResponse({"error": "cli_timeout",
                                  "hint": "模型 90 秒未返回, 稍后再试"}, status_code=504)
@@ -910,7 +910,7 @@ def create_app() -> FastAPI:
                 tts_args += ["--text", str(body["text"])]
             proc = subprocess.run(tts_args,
                                   
-                                  capture_output=True, text=True, encoding="utf-8", timeout=120)
+                                  capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=120)
         except subprocess.TimeoutExpired:
             return JSONResponse({"ok": False, "error": "cli_timeout"}, status_code=504)
         except OSError:
@@ -1165,7 +1165,7 @@ def create_app() -> FastAPI:
         theme = theme if isinstance(theme, str) and theme in THEMES else LEGACY_PACK_MAP[sp][0]
         layout = layout if isinstance(layout, str) and layout in LAYOUTS else LEGACY_PACK_MAP[sp][1]
         tts_provider = str(body.get("tts_provider") or "edge")
-        if tts_provider not in ("edge", "dashscope", "custom"):
+        if tts_provider not in ("edge", "dashscope", "custom", "volc"):
             tts_provider = "edge"
         if theme == "vox-collage" and aspect != "16:9":
             return JSONResponse({"error": "aspect_unsupported",

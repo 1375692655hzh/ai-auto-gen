@@ -10,8 +10,8 @@ netstat -ano | findstr ":8787" | findstr LISTENING >nul && exit /b 0
 if not exist data mkdir data
 where py >nul 2>nul
 if errorlevel 1 (
-  start "" /b cmd /c "python -u cli.py sources serve >> data\serve_task.log 2>&1"
+  start "" /min cmd /c "python -u cli.py sources serve >> data\serve_task.log 2>&1"
 ) else (
-  start "" /b cmd /c "py -3.11 -u cli.py sources serve >> data\serve_task.log 2>&1"
+  start "" /min cmd /c "py -3.11 -u cli.py sources serve >> data\serve_task.log 2>&1"
 )
 exit /b 0

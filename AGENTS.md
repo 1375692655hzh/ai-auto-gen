@@ -59,8 +59,11 @@ bin/*_task.bat              24/7 运维: 幂等启动脚本(端口已听则零�
                             (aag-serve/aag-workbench/aag-omniroute/aag-console) + 每15min刷新(aag-sources-refresh/:00相位,
                             aag-xsurge-refresh/:07相位错开) + 每日yttrack(aag-yttrack-refresh 09:00)
                             + 常驻自愈(aag-resident-watchdog 每15min依次调四个常驻bat, 崩溃最长15min自愈)
-                            登记必须经 bin/silent_run.vbs 静默包装(/tr "wscript.exe ...\\silent_run.vbs ...\\xx_task.bat"), 直跑bat会弹黑窗打扰桌面;
-                            vbs 是同步等待+退出码透传(IgnoreNew/执行时限才生效); 笔记本任务已放开电池限制(拔电不停+错过补跑)
+                            [2026-09-10 改版] 四个常驻任务(aag-serve/aag-workbench/aag-console/aag-omniroute + watchdog)
+                            已改登记为直调 py/pyw, 不经 silent_run.vbs——实测 wscript 链退出会连带杀死刚拉起的孙进程;
+                            workbench/serve/console 走 bin/run_detached.py(DETACHED_PROCESS 拉起 cli.py, 端口幂等只认
+                            LISTENING 不认 TIME_WAIT), omniroute + watchdog 走 bin/resident_start_all.py(pyw 无窗,
+                            日志 data/resident_start_all.log); 笔记本任务已放开电池限制(拔电不停+错过补跑)
 ```
 
 **运维入口**：桌面快捷方式「数据站控制台」→ `bin/console.bat` 打开数据站自带控制台 `http://127.0.0.1:8786/`（`global-news-sources/sources/console.py` + `global-news-sources/web/console.html`，与数据站同机部署，未来上云随站部署、对外绑定用 Bearer key）；工作台是用户端，只填数据站地址+key 接入。
