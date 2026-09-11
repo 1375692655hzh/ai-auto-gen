@@ -9,6 +9,7 @@ shape 本期定型, 上云零改前端:
 data/ 目录已被 gitignore, 配置永不入库。
 """
 
+import hashlib
 import json
 import os
 import re
@@ -439,6 +440,77 @@ def seed_if_missing(name: str) -> bool:
         return True
     except OSError:
         return False
+
+
+def _seed_stamp_f(name: str) -> Path:
+    return DATA_DIR / f".seed-applied-{name}"
+
+
+def seed_tombstone(name: str, row: dict | None) -> None:
+    """用户删除种子播种的行时记墓碑: 后续种子升级合并不得复活该行。"""
+    if not isinstance(row, dict):
+        return
+    keys = {str(row.get(k) or "") for k in ("channel_id", "value", "handle")} - {""}
+    if not keys:
+        return
+    rem_f = DATA_DIR / f".seed-removed-{name}"
+    try:
+        gone = set(json.loads(rem_f.read_text(encoding="utf-8"))) if rem_f.exists() else set()
+        gone |= keys
+        rem_f.write_text(json.dumps(sorted(gone), ensure_ascii=False), encoding="utf-8")
+    except OSError:
+        pass
+
+
+def seed_merge_if_updated(name: str, key_fields: tuple = ("channel_id", "value")) -> dict:
+    """种子升级合并(2026-09-11, 解决「存量用户吃不到开发者清单更新」):
+    seed 内容哈希变化时, 把新增行并入已存在的本地库——
+    - 只新增本地没有的行(按 key_fields 判重), 绝不改/删本地已有行(启停状态安全);
+    - 墓碑(.seed-removed-<name>)里的行不复活(用户主动删过的);
+    - 哈希版本戳(.seed-applied-<name>)同版本只跑一次。
+    首跑播种仍归 seed_if_missing, 两者兼容(合并对全新用户是无操作)。"""
+    src, dst = SEED_DIR / name, DATA_DIR / name
+    if not src.is_file() or not dst.exists():
+        return {"skipped": "missing"}
+    try:
+        seed_bytes = src.read_bytes()
+        stamp_f = _seed_stamp_f(name)
+        digest = hashlib.sha1(seed_bytes).hexdigest()
+        if stamp_f.exists() and stamp_f.read_text(encoding="utf-8").strip() == digest:
+            return {"skipped": "same_version"}
+        seed_rows = json.loads(seed_bytes.decode("utf-8"))
+        local_rows = json.loads(dst.read_text(encoding="utf-8"))
+        if not isinstance(seed_rows, list) or not isinstance(local_rows, list):
+            return {"skipped": "not_list"}
+        removed = set()
+        rem_f = DATA_DIR / f".seed-removed-{name}"
+        if rem_f.exists():
+            try:
+                removed = set(json.loads(rem_f.read_text(encoding="utf-8")))
+            except Exception:
+                removed = set()
+
+        def row_keys(r: dict) -> set:
+            return {str(r.get(k) or "") for k in key_fields} - {""}
+
+        local_keys: set = set()
+        for r in local_rows:
+            local_keys |= row_keys(r)
+        added = 0
+        for row in seed_rows:
+            ks = row_keys(row)
+            if not ks or (ks & local_keys) or (ks & removed):
+                continue
+            local_rows.append(row)
+            local_keys |= ks
+            added += 1
+        if added:
+            save_rows(name, local_rows)
+        DATA_DIR.mkdir(parents=True, exist_ok=True)
+        stamp_f.write_text(digest, encoding="utf-8")
+        return {"added": added, "seed_n": len(seed_rows), "local_n": len(local_rows)}
+    except (OSError, ValueError) as e:
+        return {"error": type(e).__name__, "hint": str(e)[:120]}
 
 
 def load_rows(name: str) -> list:

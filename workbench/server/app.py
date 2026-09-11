@@ -73,6 +73,9 @@ def create_app(bind_host: str = "127.0.0.1") -> FastAPI:
     scrubbed = vstudio.scrub_voice_job_keys()      # 存量 _job.json 明文 key 一次性擦除
     if scrubbed:
         print(f"安全迁移: 已擦除 {scrubbed} 个历史语音任务文件里的明文 Key")
+    merged = config.seed_merge_if_updated("yt_channels.json")   # 种子升级: 存量用户并入新增频道
+    if merged.get("added"):
+        print(f"种子升级: 账号管理并入 {merged['added']} 个新频道(本地 {merged['local_n']} 个)")
 
     # ── 数据源代理(前端唯一取数口) ──────────────────────────────────────────
     @app.get("/wb-api/v1/{path:path}")
@@ -691,8 +694,12 @@ def create_app(bind_host: str = "127.0.0.1") -> FastAPI:
 
     @app.delete("/wb-api/yt/channels/{cid}")
     def yt_channel_del(cid: str):
-        rows = [r for r in config.load_yt_channels() if r.get("id") != cid]
-        return {"removed": 1, "channels": config.save_yt_channels(rows)}
+        rows = config.load_yt_channels()
+        gone = next((r for r in rows if r.get("id") == cid), None)
+        remaining = [r for r in rows if r.get("id") != cid]
+        config.save_yt_channels(remaining)
+        config.seed_tombstone("yt_channels.json", gone)   # 删过的频道种子升级不复活
+        return {"removed": 1, "channels": remaining}
         # 已采视频/快照保留为孤儿数据(防误删丢历史), 榜单按启用频道过滤自然隐去
 
     # ── YTB 自有频道(独立系统, 追踪用户自己的账号; 采集走 CLI 捎带, 端点零外呼) ──
