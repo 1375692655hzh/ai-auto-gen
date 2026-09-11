@@ -25,7 +25,7 @@ WB.pages.settings = {
       yHasKey: false, yKeyTail: "",
       gHasKey: false, gKeyTail: "",
       cHasKey: false, cKeyTail: "", composeExtra: "",
-      composeRemoved: [], llmTests: {}, llmTesting: "",
+      composeRemoved: [], llmTests: {}, llmTesting: "", composeOrderTimer: 0,
       wbHasKey: false, wbKeyTail: "", wbLocalKey: "",
       fHasKey: false, fKeyTail: "",
       llmTest: false, llmTestResult: null,
@@ -331,6 +331,10 @@ WB.pages.settings = {
       if (i < 0 || j < 0 || j >= rows.length) return;
       rows.splice(i, 1); rows.splice(j, 0, m);
       this.s.compose.models = rows.slice();
+      // 调序即时落盘(2026-09-11 用户反馈): 优先级就是数据本体, 不该再要求点保存;
+      // 去抖 500ms 防连点上箭头时每步都发请求
+      clearTimeout(this.composeOrderTimer);
+      this.composeOrderTimer = setTimeout(() => { this.save("compose"); }, 500);
     },
     toggleComposeOpen(m) { m.open = m.open === true ? false : true; },
     async testCompose(m) {
@@ -696,9 +700,12 @@ WB.pages.settings = {
           <input type="text" v-model="m.model" placeholder="如 deepseek-v4-flash"
                  style="width:220px"></div>
         <div class="form-row"><label>思考模式</label>
-          <button class="btn" :class="m.thinkOff ? 'primary' : ''" @click="m.thinkOff = !m.thinkOff">
-            {{ m.thinkOff ? '🧠 已关闭' : '🧠 开启' }}</button>
-          <span class="muted">推理模型(GLM/Kimi/mimo 等)建议关闭——防思考吃光字数; 普通模型保持开启即可</span></div>
+          <span class="switch" :class="{ on: !m.thinkOff }" role="switch" tabindex="0"
+                :aria-checked="m.thinkOff ? 'false' : 'true'"
+                :title="m.thinkOff ? '已关闭: 注入 thinking disabled' : '开启: 跟随模型默认'"
+                @click="m.thinkOff = !m.thinkOff"
+                @keydown.enter="m.thinkOff = !m.thinkOff"></span>
+          <span class="muted">{{ m.thinkOff ? '已关闭 · 推理模型(GLM/Kimi/mimo)防思考吃光字数' : '开启 · 跟随模型默认' }}</span></div>
         <div class="form-row"><label>高级参数</label>
           <button class="btn" @click="m.advOpen = !m.advOpen">{{ m.advOpen ? '收起 ▲' : '自定义 JSON ▼' }}</button>
           <span class="muted">一般用不上; 思考开关已覆盖常见场景</span></div>
