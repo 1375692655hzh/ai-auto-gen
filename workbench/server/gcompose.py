@@ -810,7 +810,8 @@ def run_compose(request: dict) -> tuple[dict, int]:
     system, user = _compose_prompt(params, mats, contexts[:10],
                                    _tech_text(ta), opinions, tickers)
     limit = TIER_LIMIT[params["tier"]]
-    raw, used = _llm_chain(chain, system, user, 4000 if params["tier"] == "paid" else 1500)
+    raw, used = _llm_chain(chain, system, user,
+                           None if params["tier"] == "paid" else 1500)   # 付费档不传 max_tokens, 厂商默认上限
     if used and chain and used["id"] != chain[0]["id"]:
         notes.append(f"成稿模型链头未命中, 实际用「{used['name']}」({used['model']})")
     draft = _parse_json(raw or "")

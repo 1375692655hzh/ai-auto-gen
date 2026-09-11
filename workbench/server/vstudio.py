@@ -352,7 +352,9 @@ def chat_completions_ex(base: str, key: str, model: str, messages: list,
     import urllib.error
     import urllib.request
     payload = {"model": model, "temperature": temperature,
-               "max_tokens": max_tokens, "messages": messages}
+               "messages": messages}
+    if max_tokens:                                   # None/0 = 不传, 厂商默认上限(用户裁决:
+        payload["max_tokens"] = max_tokens           #   付费档成稿放宽, 2026-09-10)
     if isinstance(extra, dict):
         payload.update(extra)
     body = json.dumps(payload).encode("utf-8")
