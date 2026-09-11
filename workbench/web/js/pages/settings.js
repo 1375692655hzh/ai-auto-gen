@@ -279,8 +279,6 @@ WB.pages.settings = {
     },
     addComposeTemplate(kind) {
       const TPL = {
-        deepseek: { name: "DeepSeek", base_url: "https://api.deepseek.com/v1",
-                    model: "deepseek-v4-flash" },
         omniroute: { name: "OmniRoute 免费位(muse)", base_url: "http://127.0.0.1:20128/v1",
                      model: "oc/muse-spark-1.2-contributor-free" },
       };
@@ -704,7 +702,6 @@ WB.pages.settings = {
       <p v-if="!(s.compose.models || []).length" class="muted">
         尚未配置成稿模型 —— 点下方模板或空白模型添加; 未配置时「开始生成」报配置缺失, 不回落翻译链</p>
       <div class="form-row">
-        <button class="btn" @click="addComposeTemplate('deepseek')">＋ DeepSeek 模板</button>
         <button class="btn" @click="addComposeTemplate('omniroute')">＋ OmniRoute 免费位模板</button>
         <button class="btn" @click="addComposeModel">＋ 空白模型</button>
         <button class="btn primary" :disabled="saving" @click="save('compose')">{{ saving ? '保存中…' : '保存设置' }}</button>
