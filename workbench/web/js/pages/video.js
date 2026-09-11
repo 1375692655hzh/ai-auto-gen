@@ -1699,10 +1699,12 @@ WB.pages.video = {
           <div v-else-if="!curMake" class="card empty">正在准备制作单…</div>
           <template v-else>
             <div style="border:1px solid var(--border);border-radius:12px;padding:14px 16px">
-            <div class="form-row" style="margin-bottom:12px">
-              <label style="font-weight:600;white-space:nowrap">视频名称</label>
-              <input type="text" v-model="curMake.title" @input="saveMake()" :disabled="makeBusy" placeholder="给这条片子起个名字" style="flex:1;min-width:0;font-weight:600">
-              <span class="muted" style="white-space:nowrap">{{ {pending:'2 秒后自动保存',saving:'保存中…',saved:('已保存 ' + (savedAt[cur] || '')),error:'保存失败'}[saveState[cur]] || '' }}</span></div>
+            <div class="card">
+              <h3>视频名称</h3>
+              <div class="form-row">
+                <input type="text" v-model="curMake.title" @input="saveMake()" :disabled="makeBusy" placeholder="给这条片子起个名字" style="flex:1;min-width:0;font-weight:600">
+                <span class="muted" style="white-space:nowrap">{{ {pending:'2 秒后自动保存',saving:'保存中…',saved:('已保存 ' + (savedAt[cur] || '')),error:'保存失败'}[saveState[cur]] || '' }}</span></div>
+            </div>
             <div class="card">
               <h3>1 · 口播稿 <span class="badge" :class="segBadge(1).cls">{{ segBadge(1).text }}</span></h3>
               <fieldset :disabled="makeBusy" style="border:0;min-width:0;padding:0">
