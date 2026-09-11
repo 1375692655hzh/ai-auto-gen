@@ -1229,6 +1229,14 @@ WB.pages.video = {
   },
   template: `
   <div>
+    <!-- 制作任务进度横栏: 页面最顶(导航栏下方 sticky), 任务运行时全页签可见 -->
+    <div v-if="narBusy || storyBusy || voiceBusy || buildBusy"
+         class="notice" style="position:sticky;top:56px;z-index:60;display:flex;gap:22px;align-items:center;padding:7px 16px;margin-bottom:10px">
+      <div v-if="narBusy">口播稿生成中 · {{ narProgress && narProgress.message || '准备中…' }}</div>
+      <div v-if="storyBusy">分镜生成中 · {{ storyProgress && storyProgress.message || '准备中…' }}</div>
+      <div v-if="voiceBusy">语音生成中 · {{ voiceProgress && voiceProgress.message || '准备中…' }}</div>
+      <div v-if="buildBusy">视频制作中 · {{ buildProgress && buildProgress.message || '准备中…' }}</div>
+    </div>
     <!-- ═══ 子页1: 热点追踪 ═══ -->
     <div v-show="tab==='hot'">
       <div class="notice" v-if="hotMeta && !hotMeta.configured">
@@ -1676,12 +1684,6 @@ WB.pages.video = {
       </div>
       <div v-if="makeErr || error" class="err-box" style="padding:12px">{{ makeErr || makeError(error) }}
         <button class="btn" @click="cur && flushMake(cur).catch(()=>{})">重试保存</button></div>
-      <div v-if="narBusy || storyBusy || voiceBusy || buildBusy" class="notice" style="padding:10px">
-        <div v-if="narBusy">口播稿生成中 · {{ narProgress && narProgress.message || '准备中…' }}</div>
-        <div v-if="storyBusy">分镜生成中 · {{ storyProgress && storyProgress.message || '准备中…' }}</div>
-        <div v-if="voiceBusy">语音生成中 · {{ voiceProgress && voiceProgress.message || '准备中…' }}</div>
-        <div v-if="buildBusy">视频制作中 · {{ buildProgress && buildProgress.message || '准备中…' }}</div>
-      </div>
       <div class="two-col make-cols">
         <div style="min-width:0">
           <div v-if="makeRoute==='audio'" class="card" style="padding:48px 24px;text-align:center">

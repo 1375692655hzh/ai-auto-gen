@@ -680,7 +680,13 @@ def status_payload() -> dict:
         # running 标志永真 → 前端「生成中」横栏永远亮着。begin 侧有 stale 检查,
         # 读侧没有 —— 这里补齐同阈值: 超 JOB_STALE_S 判僵落盘, 标志自动解除。
         for kind, j in jobs.items():
-            if isinstance(j, dict) and j.get("running")                     and _age_seconds(j.get("started_at")) > JOB_STALE_S.get(kind, 20 * 60):
+            if not (isinstance(j, dict) and j.get("running")):
+                continue
+            age = _age_seconds(j.get("started_at"))
+            # 快速判僵: 真任务启动后几秒内必报第一格进度; stage 仍 idle 超 3 分钟
+            # = CLI 子进程根本没起来或秒死(并行会话测试构建反复出现此形态)。
+            idle_dead = (j.get("progress") or {}).get("stage") in ("idle", "", None) and age > 180
+            if idle_dead or age > JOB_STALE_S.get(kind, 20 * 60):
                 j.update({"running": False, "finished_at": _now(), "exit": 3,
                           "error": "任务超时判僵(进程失联), 已自动解锁",
                           "progress": {**(j.get("progress") or {}),
