@@ -1,28 +1,885 @@
 [
   {
-    "id": "y0905032357",
-    "input": "静姐财富经",
-    "kind": "name",
-    "value": "静姐财富经",
-    "handle": "@jingjiecaifujing",
-    "channel_id": "UCPOPbIgJnPyO1kwiycyi5Xw",
-    "title": "静姐财富经Jing Finance",
-    "note": "美股频道",
+    "id": "y091100393000",
+    "input": "UC26hLZoe-haxcuLYxzWAiNg",
+    "kind": "channel_id",
+    "value": "UC26hLZoe-haxcuLYxzWAiNg",
+    "channel_id": "UC26hLZoe-haxcuLYxzWAiNg",
+    "title": "脑总MrBrain",
+    "note": "",
     "enabled": true,
     "resolve_status": "resolved",
     "resolve_error": "",
-    "subs": 11600,
-    "uploads_pid": "UUPOPbIgJnPyO1kwiycyi5Xw",
-    "added_at": "2026-09-05 03:23:57",
-    "resolved_via": "name_search",
-    "last_ok_at": "2026-09-10 20:55:21",
+    "subs": 92500,
+    "uploads_pid": "UU26hLZoe-haxcuLYxzWAiNg",
+    "added_at": "2026-09-11 00:39:30",
+    "resolved_via": "recovery_from_yt_videos",
+    "last_ok_at": "2026-09-11 10:57:28",
     "last_error": "",
+    "handle": "@脑总mrbrain",
     "subs_series": [
       {
-        "ts": 1789044921,
-        "v": 11600
+        "ts": 1789095448,
+        "v": 92500
       }
     ],
-    "subs_at": "2026-09-10 20:55:21"
+    "subs_at": "2026-09-11 10:57:28"
+  },
+  {
+    "id": "y091100393001",
+    "input": "UC70ctfuYBZLMymSZpEMo0xQ",
+    "kind": "channel_id",
+    "value": "UC70ctfuYBZLMymSZpEMo0xQ",
+    "channel_id": "UC70ctfuYBZLMymSZpEMo0xQ",
+    "title": "Sam谈美股",
+    "note": "",
+    "enabled": true,
+    "resolve_status": "resolved",
+    "resolve_error": "",
+    "subs": 40800,
+    "uploads_pid": "UU70ctfuYBZLMymSZpEMo0xQ",
+    "added_at": "2026-09-11 00:39:30",
+    "resolved_via": "recovery_from_yt_videos",
+    "last_ok_at": "2026-09-11 10:57:28",
+    "last_error": "",
+    "handle": "@sam_tan_mei_gu",
+    "subs_series": [
+      {
+        "ts": 1789095448,
+        "v": 40800
+      }
+    ],
+    "subs_at": "2026-09-11 10:57:28"
+  },
+  {
+    "id": "y091100393002",
+    "input": "UC9cfcOuTT9rYkyUimMjLxuw",
+    "kind": "channel_id",
+    "value": "UC9cfcOuTT9rYkyUimMjLxuw",
+    "channel_id": "UC9cfcOuTT9rYkyUimMjLxuw",
+    "title": "Money or Life 美股频道",
+    "note": "",
+    "enabled": true,
+    "resolve_status": "resolved",
+    "resolve_error": "",
+    "subs": 84800,
+    "uploads_pid": "UU9cfcOuTT9rYkyUimMjLxuw",
+    "added_at": "2026-09-11 00:39:30",
+    "resolved_via": "recovery_from_yt_videos",
+    "last_ok_at": "2026-09-11 10:57:28",
+    "last_error": "",
+    "handle": "@money_or_life",
+    "subs_series": [
+      {
+        "ts": 1789095448,
+        "v": 84800
+      }
+    ],
+    "subs_at": "2026-09-11 10:57:28"
+  },
+  {
+    "id": "y091100393003",
+    "input": "UCCerg0895HYBJauluk-vWwA",
+    "kind": "channel_id",
+    "value": "UCCerg0895HYBJauluk-vWwA",
+    "channel_id": "UCCerg0895HYBJauluk-vWwA",
+    "title": "猴哥财经 | HG Finance",
+    "note": "",
+    "enabled": true,
+    "resolve_status": "resolved",
+    "resolve_error": "",
+    "subs": 130000,
+    "uploads_pid": "UUCerg0895HYBJauluk-vWwA",
+    "added_at": "2026-09-11 00:39:30",
+    "resolved_via": "recovery_from_yt_videos",
+    "last_ok_at": "2026-09-11 10:57:28",
+    "last_error": "",
+    "handle": "@猴哥财经",
+    "subs_series": [
+      {
+        "ts": 1789095448,
+        "v": 130000
+      }
+    ],
+    "subs_at": "2026-09-11 10:57:28"
+  },
+  {
+    "id": "y091100393004",
+    "input": "UCCl8tAFXFe2IgJU6cjSd62Q",
+    "kind": "channel_id",
+    "value": "UCCl8tAFXFe2IgJU6cjSd62Q",
+    "channel_id": "UCCl8tAFXFe2IgJU6cjSd62Q",
+    "title": "华尔街美股猫叔",
+    "note": "",
+    "enabled": true,
+    "resolve_status": "resolved",
+    "resolve_error": "",
+    "subs": 12400,
+    "uploads_pid": "UUCl8tAFXFe2IgJU6cjSd62Q",
+    "added_at": "2026-09-11 00:39:30",
+    "resolved_via": "recovery_from_yt_videos",
+    "last_ok_at": "2026-09-11 10:57:28",
+    "last_error": "",
+    "handle": "@hrjmaoshu",
+    "subs_series": [
+      {
+        "ts": 1789095448,
+        "v": 12400
+      }
+    ],
+    "subs_at": "2026-09-11 10:57:28"
+  },
+  {
+    "id": "y091100393005",
+    "input": "UCFhJ8ZFg9W4kLwFTBBNIjOw",
+    "kind": "channel_id",
+    "value": "UCFhJ8ZFg9W4kLwFTBBNIjOw",
+    "channel_id": "UCFhJ8ZFg9W4kLwFTBBNIjOw",
+    "title": "NaNa说美股",
+    "note": "",
+    "enabled": true,
+    "resolve_status": "resolved",
+    "resolve_error": "",
+    "subs": 318000,
+    "uploads_pid": "UUFhJ8ZFg9W4kLwFTBBNIjOw",
+    "added_at": "2026-09-11 00:39:30",
+    "resolved_via": "recovery_from_yt_videos",
+    "last_ok_at": "2026-09-11 10:57:28",
+    "last_error": "",
+    "handle": "@nanashuomeigu",
+    "subs_series": [
+      {
+        "ts": 1789095448,
+        "v": 318000
+      }
+    ],
+    "subs_at": "2026-09-11 10:57:28"
+  },
+  {
+    "id": "y091100393006",
+    "input": "UCPHCkq07H2gMBM015Nu9jxA",
+    "kind": "channel_id",
+    "value": "UCPHCkq07H2gMBM015Nu9jxA",
+    "channel_id": "UCPHCkq07H2gMBM015Nu9jxA",
+    "title": "阿东聊美股",
+    "note": "",
+    "enabled": true,
+    "resolve_status": "resolved",
+    "resolve_error": "",
+    "subs": 18600,
+    "uploads_pid": "UUPHCkq07H2gMBM015Nu9jxA",
+    "added_at": "2026-09-11 00:39:30",
+    "resolved_via": "recovery_from_yt_videos",
+    "last_ok_at": "2026-09-11 10:57:28",
+    "last_error": "",
+    "handle": "@阿东聊美股-b2w",
+    "subs_series": [
+      {
+        "ts": 1789095448,
+        "v": 18600
+      }
+    ],
+    "subs_at": "2026-09-11 10:57:28"
+  },
+  {
+    "id": "y091100393007",
+    "input": "UCQB4EC3veH8RuCZXA6CimbA",
+    "kind": "channel_id",
+    "value": "UCQB4EC3veH8RuCZXA6CimbA",
+    "channel_id": "UCQB4EC3veH8RuCZXA6CimbA",
+    "title": "Caven 投資成長家",
+    "note": "",
+    "enabled": true,
+    "resolve_status": "resolved",
+    "resolve_error": "",
+    "subs": 99600,
+    "uploads_pid": "UUQB4EC3veH8RuCZXA6CimbA",
+    "added_at": "2026-09-11 00:39:30",
+    "resolved_via": "recovery_from_yt_videos",
+    "last_ok_at": "2026-09-11 10:57:28",
+    "last_error": "",
+    "handle": "@cavengrowthteam",
+    "subs_series": [
+      {
+        "ts": 1789095448,
+        "v": 99600
+      }
+    ],
+    "subs_at": "2026-09-11 10:57:28"
+  },
+  {
+    "id": "y091100393008",
+    "input": "UCSPepbsTkzpvCOWE8s8RS0g",
+    "kind": "channel_id",
+    "value": "UCSPepbsTkzpvCOWE8s8RS0g",
+    "channel_id": "UCSPepbsTkzpvCOWE8s8RS0g",
+    "title": "A Nomad Life自由旅居",
+    "note": "",
+    "enabled": true,
+    "resolve_status": "resolved",
+    "resolve_error": "",
+    "subs": 142000,
+    "uploads_pid": "UUSPepbsTkzpvCOWE8s8RS0g",
+    "added_at": "2026-09-11 00:39:30",
+    "resolved_via": "recovery_from_yt_videos",
+    "last_ok_at": "2026-09-11 10:57:28",
+    "last_error": "",
+    "handle": "@a-nomad-life",
+    "subs_series": [
+      {
+        "ts": 1789095448,
+        "v": 142000
+      }
+    ],
+    "subs_at": "2026-09-11 10:57:28"
+  },
+  {
+    "id": "y091100393009",
+    "input": "UCTBbK6HfI_hxObNsujrf12A",
+    "kind": "channel_id",
+    "value": "UCTBbK6HfI_hxObNsujrf12A",
+    "channel_id": "UCTBbK6HfI_hxObNsujrf12A",
+    "title": "有錢邏輯",
+    "note": "",
+    "enabled": true,
+    "resolve_status": "resolved",
+    "resolve_error": "",
+    "subs": 43800,
+    "uploads_pid": "UUTBbK6HfI_hxObNsujrf12A",
+    "added_at": "2026-09-11 00:39:30",
+    "resolved_via": "recovery_from_yt_videos",
+    "last_ok_at": "2026-09-11 10:57:28",
+    "last_error": "",
+    "handle": "@有錢邏輯",
+    "subs_series": [
+      {
+        "ts": 1789095448,
+        "v": 43800
+      }
+    ],
+    "subs_at": "2026-09-11 10:57:28"
+  },
+  {
+    "id": "y091100393010",
+    "input": "UCVGYz_TsbJRiDykog88EFQg",
+    "kind": "channel_id",
+    "value": "UCVGYz_TsbJRiDykog88EFQg",
+    "channel_id": "UCVGYz_TsbJRiDykog88EFQg",
+    "title": "D的財富鏈",
+    "note": "",
+    "enabled": true,
+    "resolve_status": "resolved",
+    "resolve_error": "",
+    "subs": 141000,
+    "uploads_pid": "UUVGYz_TsbJRiDykog88EFQg",
+    "added_at": "2026-09-11 00:39:30",
+    "resolved_via": "recovery_from_yt_videos",
+    "last_ok_at": "2026-09-11 10:57:28",
+    "last_error": "",
+    "handle": "@dwealthchain",
+    "subs_series": [
+      {
+        "ts": 1789095448,
+        "v": 141000
+      }
+    ],
+    "subs_at": "2026-09-11 10:57:28"
+  },
+  {
+    "id": "y091100393011",
+    "input": "UCWgWYZjNo42YLvx6Arb6mcg",
+    "kind": "channel_id",
+    "value": "UCWgWYZjNo42YLvx6Arb6mcg",
+    "channel_id": "UCWgWYZjNo42YLvx6Arb6mcg",
+    "title": "美股Alpha姐 | Trade with Alpha",
+    "note": "",
+    "enabled": true,
+    "resolve_status": "resolved",
+    "resolve_error": "",
+    "subs": 22200,
+    "uploads_pid": "UUWgWYZjNo42YLvx6Arb6mcg",
+    "added_at": "2026-09-11 00:39:30",
+    "resolved_via": "recovery_from_yt_videos",
+    "last_ok_at": "2026-09-11 10:57:28",
+    "last_error": "",
+    "handle": "@美股alpha姐",
+    "subs_series": [
+      {
+        "ts": 1789095448,
+        "v": 22200
+      }
+    ],
+    "subs_at": "2026-09-11 10:57:28"
+  },
+  {
+    "id": "y091100393012",
+    "input": "UCZ8uQ1mAm-ixl3zzFePcelQ",
+    "kind": "channel_id",
+    "value": "UCZ8uQ1mAm-ixl3zzFePcelQ",
+    "channel_id": "UCZ8uQ1mAm-ixl3zzFePcelQ",
+    "title": "JohnLu谈股",
+    "note": "",
+    "enabled": true,
+    "resolve_status": "resolved",
+    "resolve_error": "",
+    "subs": 111000,
+    "uploads_pid": "UUZ8uQ1mAm-ixl3zzFePcelQ",
+    "added_at": "2026-09-11 00:39:30",
+    "resolved_via": "recovery_from_yt_videos",
+    "last_ok_at": "2026-09-11 10:57:28",
+    "last_error": "",
+    "handle": "@johnlutalkstock",
+    "subs_series": [
+      {
+        "ts": 1789095448,
+        "v": 111000
+      }
+    ],
+    "subs_at": "2026-09-11 10:57:28"
+  },
+  {
+    "id": "y091100393013",
+    "input": "UCawshLsWXrFnYhAlnmn0h2A",
+    "kind": "channel_id",
+    "value": "UCawshLsWXrFnYhAlnmn0h2A",
+    "channel_id": "UCawshLsWXrFnYhAlnmn0h2A",
+    "title": "Zac美股笔记",
+    "note": "",
+    "enabled": true,
+    "resolve_status": "resolved",
+    "resolve_error": "",
+    "subs": 11900,
+    "uploads_pid": "UUawshLsWXrFnYhAlnmn0h2A",
+    "added_at": "2026-09-11 00:39:30",
+    "resolved_via": "recovery_from_yt_videos",
+    "last_ok_at": "2026-09-11 10:57:28",
+    "last_error": "",
+    "handle": "@zac-stock-journal",
+    "subs_series": [
+      {
+        "ts": 1789095448,
+        "v": 11900
+      }
+    ],
+    "subs_at": "2026-09-11 10:57:28"
+  },
+  {
+    "id": "y091100393014",
+    "input": "UCdyJicllXSiJnE_NScLDsSg",
+    "kind": "channel_id",
+    "value": "UCdyJicllXSiJnE_NScLDsSg",
+    "channel_id": "UCdyJicllXSiJnE_NScLDsSg",
+    "title": "宝哥职业股民",
+    "note": "",
+    "enabled": true,
+    "resolve_status": "resolved",
+    "resolve_error": "",
+    "subs": 29500,
+    "uploads_pid": "UUdyJicllXSiJnE_NScLDsSg",
+    "added_at": "2026-09-11 00:39:30",
+    "resolved_via": "recovery_from_yt_videos",
+    "last_ok_at": "2026-09-11 10:57:28",
+    "last_error": "",
+    "handle": "@super_trader",
+    "subs_series": [
+      {
+        "ts": 1789095448,
+        "v": 29500
+      }
+    ],
+    "subs_at": "2026-09-11 10:57:28"
+  },
+  {
+    "id": "y091100393015",
+    "input": "UCeTEWFsNC3eeUsn9hvsDALQ",
+    "kind": "channel_id",
+    "value": "UCeTEWFsNC3eeUsn9hvsDALQ",
+    "channel_id": "UCeTEWFsNC3eeUsn9hvsDALQ",
+    "title": "老汤美股财经",
+    "note": "",
+    "enabled": true,
+    "resolve_status": "resolved",
+    "resolve_error": "",
+    "subs": 153000,
+    "uploads_pid": "UUeTEWFsNC3eeUsn9hvsDALQ",
+    "added_at": "2026-09-11 00:39:30",
+    "resolved_via": "recovery_from_yt_videos",
+    "last_ok_at": "2026-09-11 10:57:28",
+    "last_error": "",
+    "handle": "@laotangmeigu",
+    "subs_series": [
+      {
+        "ts": 1789095448,
+        "v": 153000
+      }
+    ],
+    "subs_at": "2026-09-11 10:57:28"
+  },
+  {
+    "id": "y091100393016",
+    "input": "UCjuvy7VvwUGPtTnbpfYY1QQ",
+    "kind": "channel_id",
+    "value": "UCjuvy7VvwUGPtTnbpfYY1QQ",
+    "channel_id": "UCjuvy7VvwUGPtTnbpfYY1QQ",
+    "title": "XTrader猫姐美股",
+    "note": "",
+    "enabled": true,
+    "resolve_status": "resolved",
+    "resolve_error": "",
+    "subs": 68300,
+    "uploads_pid": "UUjuvy7VvwUGPtTnbpfYY1QQ",
+    "added_at": "2026-09-11 00:39:30",
+    "resolved_via": "recovery_from_yt_videos",
+    "last_ok_at": "2026-09-11 10:57:28",
+    "last_error": "",
+    "handle": "@catstocktrading",
+    "subs_series": [
+      {
+        "ts": 1789095448,
+        "v": 68300
+      }
+    ],
+    "subs_at": "2026-09-11 10:57:28"
+  },
+  {
+    "id": "y091100393017",
+    "input": "UClzA2Ebxj7P_x4cgaqFj-Hw",
+    "kind": "channel_id",
+    "value": "UClzA2Ebxj7P_x4cgaqFj-Hw",
+    "channel_id": "UClzA2Ebxj7P_x4cgaqFj-Hw",
+    "title": "Victor美股投资",
+    "note": "",
+    "enabled": true,
+    "resolve_status": "resolved",
+    "resolve_error": "",
+    "subs": 44700,
+    "uploads_pid": "UUlzA2Ebxj7P_x4cgaqFj-Hw",
+    "added_at": "2026-09-11 00:39:30",
+    "resolved_via": "recovery_from_yt_videos",
+    "last_ok_at": "2026-09-11 10:57:28",
+    "last_error": "",
+    "handle": "@victormeigu",
+    "subs_series": [
+      {
+        "ts": 1789095448,
+        "v": 44700
+      }
+    ],
+    "subs_at": "2026-09-11 10:57:28"
+  },
+  {
+    "id": "y091100393018",
+    "input": "UCnDmiGf2-5y07pi3HUm9YtA",
+    "kind": "channel_id",
+    "value": "UCnDmiGf2-5y07pi3HUm9YtA",
+    "channel_id": "UCnDmiGf2-5y07pi3HUm9YtA",
+    "title": "Finance Lang",
+    "note": "",
+    "enabled": true,
+    "resolve_status": "resolved",
+    "resolve_error": "",
+    "subs": 51300,
+    "uploads_pid": "UUnDmiGf2-5y07pi3HUm9YtA",
+    "added_at": "2026-09-11 00:39:30",
+    "resolved_via": "recovery_from_yt_videos",
+    "last_ok_at": "2026-09-11 10:57:28",
+    "last_error": "",
+    "handle": "@finance.lang88",
+    "subs_series": [
+      {
+        "ts": 1789095448,
+        "v": 51300
+      }
+    ],
+    "subs_at": "2026-09-11 10:57:28"
+  },
+  {
+    "id": "y091100393019",
+    "input": "UCrJ6Hj2P2KdAIID5qqFjE7g",
+    "kind": "channel_id",
+    "value": "UCrJ6Hj2P2KdAIID5qqFjE7g",
+    "channel_id": "UCrJ6Hj2P2KdAIID5qqFjE7g",
+    "title": "财经观察站",
+    "note": "",
+    "enabled": true,
+    "resolve_status": "resolved",
+    "resolve_error": "",
+    "subs": 30900,
+    "uploads_pid": "UUrJ6Hj2P2KdAIID5qqFjE7g",
+    "added_at": "2026-09-11 00:39:30",
+    "resolved_via": "recovery_from_yt_videos",
+    "last_ok_at": "2026-09-11 10:57:28",
+    "last_error": "",
+    "handle": "@财经观察站",
+    "subs_series": [
+      {
+        "ts": 1789095448,
+        "v": 30900
+      }
+    ],
+    "subs_at": "2026-09-11 10:57:28"
+  },
+  {
+    "id": "y091100393020",
+    "input": "UCvf_c9B7iL0x7aqdhxI4zRg",
+    "kind": "channel_id",
+    "value": "UCvf_c9B7iL0x7aqdhxI4zRg",
+    "channel_id": "UCvf_c9B7iL0x7aqdhxI4zRg",
+    "title": "Ethan的美股笔记",
+    "note": "",
+    "enabled": true,
+    "resolve_status": "resolved",
+    "resolve_error": "",
+    "subs": 21200,
+    "uploads_pid": "UUvf_c9B7iL0x7aqdhxI4zRg",
+    "added_at": "2026-09-11 00:39:30",
+    "resolved_via": "recovery_from_yt_videos",
+    "last_ok_at": "2026-09-11 10:57:28",
+    "last_error": "",
+    "handle": "@ethanfinancenote",
+    "subs_series": [
+      {
+        "ts": 1789095448,
+        "v": 21200
+      }
+    ],
+    "subs_at": "2026-09-11 10:57:28"
+  },
+  {
+    "id": "y0911105719",
+    "input": "JM美股技术分析",
+    "kind": "name",
+    "value": "JM美股技术分析",
+    "handle": "@jm美股技术分析",
+    "channel_id": "UCQZtEgDDZ0OK-a0fUOk6z1g",
+    "title": "JM美股技术分析",
+    "note": "",
+    "enabled": true,
+    "resolve_status": "resolved",
+    "resolve_error": "",
+    "subs": 3750,
+    "uploads_pid": "UUQZtEgDDZ0OK-a0fUOk6z1g",
+    "added_at": "2026-09-11 10:57:19",
+    "resolved_via": "name_search",
+    "subs_series": [
+      {
+        "ts": 1789095448,
+        "v": 3750
+      }
+    ],
+    "subs_at": "2026-09-11 10:57:28",
+    "last_ok_at": "2026-09-11 10:57:28",
+    "last_error": ""
+  },
+  {
+    "id": "y0911105719",
+    "input": "FX168美国股市",
+    "kind": "name",
+    "value": "FX168美国股市",
+    "handle": "@fx168",
+    "channel_id": "UC1Dw5G1L2K8GcUFl94sjCMw",
+    "title": "FX168美国股市",
+    "note": "",
+    "enabled": true,
+    "resolve_status": "resolved",
+    "resolve_error": "",
+    "subs": 50400,
+    "uploads_pid": "UU1Dw5G1L2K8GcUFl94sjCMw",
+    "added_at": "2026-09-11 10:57:19",
+    "resolved_via": "name_search",
+    "subs_series": [
+      {
+        "ts": 1789095448,
+        "v": 50400
+      }
+    ],
+    "subs_at": "2026-09-11 10:57:28",
+    "last_ok_at": "2026-09-11 10:57:28",
+    "last_error": ""
+  },
+  {
+    "id": "y0911105719",
+    "input": "卓聊美股",
+    "kind": "name",
+    "value": "卓聊美股",
+    "handle": "@joey-smc",
+    "channel_id": "UCqK8Ddg4g_n3UTVVIPIGzkA",
+    "title": "卓野聊美股",
+    "note": "",
+    "enabled": true,
+    "resolve_status": "resolved",
+    "resolve_error": "",
+    "subs": 2870,
+    "uploads_pid": "UUqK8Ddg4g_n3UTVVIPIGzkA",
+    "added_at": "2026-09-11 10:57:19",
+    "resolved_via": "name_search",
+    "subs_series": [
+      {
+        "ts": 1789095448,
+        "v": 2870
+      }
+    ],
+    "subs_at": "2026-09-11 10:57:28",
+    "last_ok_at": "2026-09-11 10:57:28",
+    "last_error": ""
+  },
+  {
+    "id": "y0911105719",
+    "input": "老魏突击美股",
+    "kind": "name",
+    "value": "老魏突击美股",
+    "handle": "@laowtujimeigu",
+    "channel_id": "UCg4-H4n8s0C7IWnLh7TFsbg",
+    "title": "老魏突击美股",
+    "note": "",
+    "enabled": true,
+    "resolve_status": "resolved",
+    "resolve_error": "",
+    "subs": 29000,
+    "uploads_pid": "UUg4-H4n8s0C7IWnLh7TFsbg",
+    "added_at": "2026-09-11 10:57:19",
+    "resolved_via": "name_search",
+    "subs_series": [
+      {
+        "ts": 1789095448,
+        "v": 29000
+      }
+    ],
+    "subs_at": "2026-09-11 10:57:28",
+    "last_ok_at": "2026-09-11 10:57:28",
+    "last_error": ""
+  },
+  {
+    "id": "y0911105719",
+    "input": "视野环环财经",
+    "kind": "name",
+    "value": "视野环环财经",
+    "handle": "@rhinofinance",
+    "channel_id": "UCFQsi7WaF5X41tcuOryDk8w",
+    "title": "视野环球财经",
+    "note": "",
+    "enabled": true,
+    "resolve_status": "resolved",
+    "resolve_error": "",
+    "subs": 315000,
+    "uploads_pid": "UUFQsi7WaF5X41tcuOryDk8w",
+    "added_at": "2026-09-11 10:57:19",
+    "resolved_via": "name_search",
+    "subs_series": [
+      {
+        "ts": 1789095448,
+        "v": 315000
+      }
+    ],
+    "subs_at": "2026-09-11 10:57:28",
+    "last_ok_at": "2026-09-11 10:57:28",
+    "last_error": ""
+  },
+  {
+    "id": "y0911105719",
+    "input": "Owen",
+    "kind": "handle",
+    "value": "@Owen",
+    "handle": "@owen",
+    "channel_id": "UCZ_4wr9R1iJBS26gJ0cj6fQ",
+    "title": "Owen",
+    "note": "",
+    "enabled": true,
+    "resolve_status": "resolved",
+    "resolve_error": "",
+    "subs": 376,
+    "uploads_pid": "UUZ_4wr9R1iJBS26gJ0cj6fQ",
+    "added_at": "2026-09-11 10:57:19",
+    "subs_series": [
+      {
+        "ts": 1789095448,
+        "v": 376
+      }
+    ],
+    "subs_at": "2026-09-11 10:57:28",
+    "last_ok_at": "2026-09-11 10:57:28",
+    "last_error": ""
+  },
+  {
+    "id": "y0911105719",
+    "input": "侃侃有余",
+    "kind": "name",
+    "value": "侃侃有余",
+    "handle": "@kkyy",
+    "channel_id": "UCA7a7WlEY9sH7h4qoWZzEGQ",
+    "title": "侃侃有余",
+    "note": "",
+    "enabled": true,
+    "resolve_status": "resolved",
+    "resolve_error": "",
+    "subs": 39400,
+    "uploads_pid": "UUA7a7WlEY9sH7h4qoWZzEGQ",
+    "added_at": "2026-09-11 10:57:19",
+    "resolved_via": "name_search",
+    "subs_series": [
+      {
+        "ts": 1789095448,
+        "v": 39400
+      }
+    ],
+    "subs_at": "2026-09-11 10:57:28",
+    "last_ok_at": "2026-09-11 10:57:28",
+    "last_error": ""
+  },
+  {
+    "id": "y0911105719",
+    "input": "Selina聊美股",
+    "kind": "name",
+    "value": "Selina聊美股",
+    "handle": "@selina聊美股",
+    "channel_id": "UCPiSlh2-zATwjj-cixqPi8Q",
+    "title": "Selina聊美股",
+    "note": "",
+    "enabled": true,
+    "resolve_status": "resolved",
+    "resolve_error": "",
+    "subs": 26400,
+    "uploads_pid": "UUPiSlh2-zATwjj-cixqPi8Q",
+    "added_at": "2026-09-11 10:57:19",
+    "resolved_via": "name_search",
+    "subs_series": [
+      {
+        "ts": 1789095448,
+        "v": 26400
+      }
+    ],
+    "subs_at": "2026-09-11 10:57:28",
+    "last_ok_at": "2026-09-11 10:57:28",
+    "last_error": ""
+  },
+  {
+    "id": "y0911105719",
+    "input": "阳光财经",
+    "kind": "name",
+    "value": "阳光财经",
+    "handle": "@sunnyfinance",
+    "channel_id": "UC2I5em6UyBpQiO-8ZW0nV3w",
+    "title": "阳光财经",
+    "note": "",
+    "enabled": true,
+    "resolve_status": "resolved",
+    "resolve_error": "",
+    "subs": 308000,
+    "uploads_pid": "UU2I5em6UyBpQiO-8ZW0nV3w",
+    "added_at": "2026-09-11 10:57:19",
+    "resolved_via": "name_search",
+    "subs_series": [
+      {
+        "ts": 1789095448,
+        "v": 308000
+      }
+    ],
+    "subs_at": "2026-09-11 10:57:28",
+    "last_ok_at": "2026-09-11 10:57:28",
+    "last_error": ""
+  },
+  {
+    "id": "y0911105719",
+    "input": "莉姐聊财经",
+    "kind": "name",
+    "value": "莉姐聊财经",
+    "handle": "@莉姐聊财经",
+    "channel_id": "UCYLlwYQHnoOKNLiAq6FnYFA",
+    "title": "莉姐聊财经",
+    "note": "",
+    "enabled": true,
+    "resolve_status": "resolved",
+    "resolve_error": "",
+    "subs": 46,
+    "uploads_pid": "UUYLlwYQHnoOKNLiAq6FnYFA",
+    "added_at": "2026-09-11 10:57:19",
+    "resolved_via": "name_search",
+    "subs_series": [
+      {
+        "ts": 1789095448,
+        "v": 46
+      }
+    ],
+    "subs_at": "2026-09-11 10:57:28",
+    "last_ok_at": "2026-09-11 10:57:28",
+    "last_error": ""
+  },
+  {
+    "id": "y0911105719",
+    "input": "美股 炸裂股手",
+    "kind": "name",
+    "value": "美股 炸裂股手",
+    "handle": "@zlgskris",
+    "channel_id": "UCAbeiBGf40vpO6_QShFazKA",
+    "title": "美股 炸裂股手",
+    "note": "",
+    "enabled": true,
+    "resolve_status": "resolved",
+    "resolve_error": "",
+    "subs": 41000,
+    "uploads_pid": "UUAbeiBGf40vpO6_QShFazKA",
+    "added_at": "2026-09-11 10:57:19",
+    "resolved_via": "name_search",
+    "subs_series": [
+      {
+        "ts": 1789095448,
+        "v": 41000
+      }
+    ],
+    "subs_at": "2026-09-11 10:57:28",
+    "last_ok_at": "2026-09-11 10:57:28",
+    "last_error": ""
+  },
+  {
+    "id": "y0911105719",
+    "input": "Max美股视角",
+    "kind": "name",
+    "value": "Max美股视角",
+    "handle": "@sam港美日记",
+    "channel_id": "UCcy1_IYLf7O4Xq3UILWdx6Q",
+    "title": "Max美股视角",
+    "note": "",
+    "enabled": true,
+    "resolve_status": "resolved",
+    "resolve_error": "",
+    "subs": 1,
+    "uploads_pid": "UUcy1_IYLf7O4Xq3UILWdx6Q",
+    "added_at": "2026-09-11 10:57:19",
+    "resolved_via": "name_search",
+    "subs_series": [
+      {
+        "ts": 1789095448,
+        "v": 1
+      }
+    ],
+    "subs_at": "2026-09-11 10:57:28",
+    "last_ok_at": "2026-09-11 10:57:28",
+    "last_error": ""
+  },
+  {
+    "id": "y0911105719",
+    "input": "Della美股",
+    "kind": "name",
+    "value": "Della美股",
+    "handle": "@usstocks168",
+    "channel_id": "UCKSqLTTQMHc4rQZxJoaUx1Q",
+    "title": "Della美股",
+    "note": "",
+    "enabled": true,
+    "resolve_status": "resolved",
+    "resolve_error": "",
+    "subs": 12000,
+    "uploads_pid": "UUKSqLTTQMHc4rQZxJoaUx1Q",
+    "added_at": "2026-09-11 10:57:19",
+    "resolved_via": "name_search",
+    "subs_series": [
+      {
+        "ts": 1789095448,
+        "v": 12000
+      }
+    ],
+    "subs_at": "2026-09-11 10:57:28",
+    "last_ok_at": "2026-09-11 10:57:28",
+    "last_error": ""
   }
 ]
