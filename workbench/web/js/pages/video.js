@@ -1951,7 +1951,7 @@ WB.pages.video = {
                style="padding:7px 10px;cursor:pointer" @click="openProj(v)">
             <div class="t" style="display:flex;align-items:center;gap:6px">
               <span :title="v.title" style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ v.title }}</span>
-              <span class="badge" :class="gateClass(v.status)" style="flex-shrink:0">{{ gateText(v.status) }}</span></div>
+              <span v-if="v.status !== 'built'" class="badge" :class="gateClass(v.status)" style="flex-shrink:0">{{ gateText(v.status) }}</span></div>
             <div style="display:flex;align-items:center;gap:5px;margin-top:5px">
               <span class="muted" style="font-size:11px;flex:1;min-width:0;overflow:hidden;white-space:nowrap">{{ v.date || v.id }}<span v-if="v.scenes"> · {{ v.scenes }} 幕</span><span v-if="v.verify_duration_s"> · {{ fmtDur(v.verify_duration_s) }}</span></span>
               <button class="btn" style="padding:2px 9px;font-size:12px;flex-shrink:0" @click.stop="openProj(v)">打开</button>
