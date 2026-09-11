@@ -1911,31 +1911,34 @@ WB.pages.video = {
           <div class="card"><h3>草稿箱（{{ makes.length }}）</h3>
             <div v-if="!makes.length" class="muted">尚无制作草稿</div>
             <div v-for="m in makes" :key="m.id" class="list-item" :class="{sel:cur===m.id}"
-                 style="padding:5px 10px;cursor:pointer" title="点击载入该草稿" @click="selectMake(m.id)">
-              <div class="t"><span :title="m.title">{{ cut(m.title,17) }}</span>
-                <span style="display:inline-flex;gap:4px;float:right;align-items:center">
-                  <span v-for="stage in [1,2,3,4]" :key="stage" :title="['口播','脚本','语音','视频'][stage-1]+'：'+segBadge(stage,m).text" :style="{backgroundColor:segColor(stage,m)}" style="display:inline-block;width:7px;height:7px;border-radius:50%"></span>
-                  <span class="act" style="margin-left:4px" title="重命名" @click.stop="startRenameDraft(m)">✎</span>
-                  <span class="act" style="color:var(--red)" title="删除"
-                        @click.stop="deleteMake(m)"><span v-if="Object.values(makeJobIds).includes(m.id)" title="任务进行中不可删" style="opacity:.4;cursor:not-allowed">✕</span><template v-else>✕</template></span>
-                </span></div>
-              <div class="s" style="margin-top:1px">{{ (m.updated_at || '').slice(5) }}</div>
-              <div v-if="renameDraft===m.id" class="form-row" style="gap:6px;margin:4px 0 0" @click.stop>
+                 style="padding:7px 10px;cursor:pointer" title="点击载入该草稿" @click="selectMake(m.id)">
+              <div class="t" style="display:flex;align-items:center;gap:6px">
+                <span :title="m.title" style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ m.title }}</span>
+                <span style="display:inline-flex;gap:3px;flex-shrink:0">
+                  <span v-for="stage in [1,2,3,4]" :key="stage" :title="['口播','脚本','语音','视频'][stage-1]+'：'+segBadge(stage,m).text" :style="{backgroundColor:segColor(stage,m)}" style="display:inline-block;width:7px;height:7px;border-radius:50%"></span></span></div>
+              <div style="display:flex;align-items:center;gap:5px;margin-top:5px">
+                <span class="muted" style="font-size:11px;flex:1;min-width:0;overflow:hidden;white-space:nowrap">{{ (m.updated_at || '').slice(5) }}</span>
+                <button class="btn" style="padding:2px 9px;font-size:12px;flex-shrink:0" :disabled="makeActionBusy" @click.stop="selectMake(m.id)">载入</button>
+                <button class="btn" style="padding:2px 9px;font-size:12px;flex-shrink:0" :disabled="makeActionBusy" @click.stop="startRenameDraft(m)">重命名</button>
+                <button class="btn" style="padding:2px 9px;font-size:12px;flex-shrink:0" :disabled="makeActionBusy || Object.values(makeJobIds).includes(m.id)" @click.stop="deleteMake(m)">删除</button></div>
+              <div v-if="renameDraft===m.id" class="form-row" style="gap:5px;margin:5px 0 0" @click.stop>
                 <input v-model="renameDraftTitle" :disabled="makeActionBusy" style="min-width:0;flex:1"
                        placeholder="新标题" @keyup.enter="saveRenameDraft(m)" @keyup.esc="renameDraft=null">
-                <button class="btn primary" @click="saveRenameDraft(m)">存</button>
-                <button class="btn" @click="renameDraft=null">取消</button></div>
+                <button class="btn primary" style="padding:2px 9px;font-size:12px" @click="saveRenameDraft(m)">存</button>
+                <button class="btn" style="padding:2px 9px;font-size:12px" @click="renameDraft=null">取消</button></div>
             </div>
           </div>
           <div class="card"><h3>视频项目（{{ videos.length }}）<button class="btn" @click="loadVideos">刷新</button></h3>
             <div v-if="!videos.length" class="muted">暂无视频项目</div>
           <div v-for="v in videos" :key="v.id" class="list-item" :class="{sel: sel === v}"
-               style="padding:5px 10px;cursor:pointer" @click="openProj(v)">
-            <div class="t"><span :title="v.title">{{ cut(v.title, 17) }}</span>
-              <span style="display:inline-flex;gap:4px;float:right;align-items:center">
-                <span class="badge" :class="gateClass(v.status)">{{ gateText(v.status) }}</span>
-                <span class="act" style="color:var(--red)" title="删除" @click.stop.prevent="delVideo(v)">✕</span></span></div>
-            <div class="s" style="margin-top:1px">{{ v.id }}<span v-if="v.scenes"> · {{ v.scenes }} 幕</span><span v-if="v.verify_duration_s"> · {{ fmtDur(v.verify_duration_s) }}</span></div>
+               style="padding:7px 10px;cursor:pointer" @click="openProj(v)">
+            <div class="t" style="display:flex;align-items:center;gap:6px">
+              <span :title="v.title" style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ v.title }}</span>
+              <span class="badge" :class="gateClass(v.status)" style="flex-shrink:0">{{ gateText(v.status) }}</span></div>
+            <div style="display:flex;align-items:center;gap:5px;margin-top:5px">
+              <span class="muted" style="font-size:11px;flex:1;min-width:0;overflow:hidden;white-space:nowrap">{{ v.date || v.id }}<span v-if="v.scenes"> · {{ v.scenes }} 幕</span><span v-if="v.verify_duration_s"> · {{ fmtDur(v.verify_duration_s) }}</span></span>
+              <button class="btn" style="padding:2px 9px;font-size:12px;flex-shrink:0" @click.stop="openProj(v)">打开</button>
+              <button class="btn" style="padding:2px 9px;font-size:12px;flex-shrink:0" @click.stop.prevent="delVideo(v)">删除</button></div>
           </div>
           </div>
         </div>
