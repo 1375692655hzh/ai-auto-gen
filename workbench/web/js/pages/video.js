@@ -30,6 +30,7 @@ WB.pages.video = {
       videos: [], sel: null, error: null,
       /* 四段制作：草稿持久化，任务槽独立恢复。 */
       makes: [], cur: null, presets: null, narTab: 'a', narBrief: '', narDraftId: '', importId: '',
+      makeRoute: 'script',   /* 制作路线: script=文案路线(四段) audio=音频路线(建设中) */
       narBusy: false, narProgress: null, storyBusy: false, storyProgress: null,
       voiceBusy: false, voiceProgress: null, makeErr: '', narErr: '', scriptErr: '', voiceErr: '',
       buildBusy: false, buildProgress: null, buildErr: '', buildPid: '', buildMakeId: '',
@@ -146,7 +147,7 @@ WB.pages.video = {
           onPick: () => { this.tab = "analysis"; } },
         { id: "make", title: "视频制作", cnt: this.videos.length || "",
           icon: I('<rect x="2" y="2" width="20" height="20" rx="2.18"/><line x1="7" y1="2" x2="7" y2="22"/><line x1="17" y1="2" x2="17" y2="22"/><line x1="2" y1="12" x2="22" y2="12"/><line x1="2" y1="7" x2="7" y2="7"/><line x1="2" y1="17" x2="7" y2="17"/><line x1="17" y1="17" x2="22" y2="17"/><line x1="17" y1="7" x2="22" y2="7"/>'),
-          onPick: () => { this.tab = "make"; this.loadMakePresets().then(() => { if (this.curMake) this.setMakeDefaults(this.curMake); }); } },
+          onPick: () => { this.tab = "make"; this.loadMakePresets().then(() => { if (this.curMake) this.setMakeDefaults(this.curMake); }); this.ensureActiveMake(); } },
         { id: "templates", title: "模板仓库",
           icon: I('<rect x="3" y="3" width="18" height="18" rx="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="9" y1="21" x2="9" y2="9"/>'),
           onPick: () => { this.tab = "templates"; this.loadTemplates(); } },
@@ -837,6 +838,12 @@ WB.pages.video = {
       }
       if (changed) this.saveMake(m);
     },
+    async ensureActiveMake() {
+      /* 制作页常态显示(2026-09-11): 进页必有一个激活制作单——有草稿载最近, 没有则自动建 */
+      if (this.cur && this.makes.some((m) => m.id === this.cur)) return;
+      if (this.makes.length) { await this.selectMake(this.makes[0].id); return; }
+      if (!this.makeActionBusy) await this.newMake();
+    },
     async newMake() {
       if (this.makeActionBusy) return;
       this.makeActionBusy = true;
@@ -1189,6 +1196,7 @@ WB.pages.video = {
       this.loadVideos(), this.loadMakePresets(), this.loadMakes(), this.loadLibAssets(), this.loadTemplates(),
     ]);
     this.loadChannels(); this.loadAnPaths(); this.loadAnHistory();
+    this.ensureActiveMake();
     this.loadHot();
     try {                            // 已有采集在跑(如计划任务刚触发)则同步按钮态
       const st = await WB.api.get("/yt/status");
@@ -1653,6 +1661,19 @@ WB.pages.video = {
 
     <!-- 四段视频制作 -->
     <div v-show="tab==='make'">
+      <div class="card" style="padding:10px 16px">
+        <div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap">
+          <span class="radio-group" role="radiogroup" aria-label="制作路线">
+            <label :class="{on: makeRoute==='script'}"><input type="radio" value="script" v-model="makeRoute">✍️ 文案路线</label>
+            <label :class="{on: makeRoute==='audio'}"><input type="radio" value="audio" v-model="makeRoute">🎙️ 音频路线</label>
+          </span>
+          <span class="muted" style="font-size:12.5px">
+            {{ makeRoute==='script'
+              ? '口播稿 → 视频脚本 → 语音配音 → 视频生成 —— 从文案出发，AI 写口播并机器配音'
+              : '上传音频 + 提取文案 → 视频脚本 → 视频生成 —— 从成品音频出发，提取文案后直接进脚本分镜（建设中）' }}
+          </span>
+        </div>
+      </div>
       <div v-if="makeErr || error" class="err-box" style="padding:12px">{{ makeErr || makeError(error) }}
         <button class="btn" @click="cur && flushMake(cur).catch(()=>{})">重试保存</button></div>
       <div v-if="narBusy || storyBusy || voiceBusy || buildBusy" class="notice" style="padding:10px">
@@ -1663,7 +1684,14 @@ WB.pages.video = {
       </div>
       <div class="two-col make-cols">
         <div style="min-width:0">
-          <div v-if="!curMake" class="card empty">从草稿箱载入，或点击「＋ 新建制作」开始</div>
+          <div v-if="makeRoute==='audio'" class="card" style="padding:48px 24px;text-align:center">
+            <div style="font-size:40px">🎙️</div>
+            <h3>音频路线 · 建设中</h3>
+            <p class="muted" style="margin:10px 0 4px"><b>上传音频 + 提取文案 → 视频脚本 → 视频生成</b></p>
+            <p class="muted">从已成片的音频出发：上传配音/播客音频，自动转写提取文案，
+              校对后进入脚本分镜与出片流程（跳过 TTS 配音环节）。该路线正在开发中。</p>
+          </div>
+          <div v-else-if="!curMake" class="card empty">正在准备制作单…</div>
           <template v-else>
             <div class="form-row"><input type="text" v-model="curMake.title" @input="saveMake()" :disabled="makeBusy" placeholder="制作标题" style="flex:1;min-width:0">
               <span class="muted">{{ {pending:'2 秒后自动保存',saving:'保存中…',saved:('已保存 ' + (savedAt[cur] || '')),error:'保存失败'}[saveState[cur]] || '' }}</span></div>
@@ -1869,32 +1897,34 @@ WB.pages.video = {
           </template>
         </div>
         <div style="position:sticky;top:64px;align-self:start;max-height:calc(100vh - 76px);overflow-y:auto;min-width:0">
-          <div class="card"><h3>草稿箱（{{ makes.length }}）<button class="btn primary" :disabled="makeActionBusy" @click="newMake">＋ 新建制作</button></h3>
+          <div class="card"><h3>草稿箱（{{ makes.length }}）</h3>
             <div v-if="!makes.length" class="muted">尚无制作草稿</div>
-            <div v-for="m in makes" :key="m.id" class="list-item" :class="{sel:cur===m.id}">
-              <div class="t"><span :title="m.title">{{ cut(m.title,18) }}</span><span style="display:inline-flex;gap:5px">
-                <span v-for="stage in [1,2,3,4]" :key="stage" :title="['口播','脚本','语音','视频'][stage-1]+'：'+segBadge(stage,m).text" :aria-label="['口播','脚本','语音','视频'][stage-1]+'：'+segBadge(stage,m).text" :style="{backgroundColor:segColor(stage,m)}" style="display:inline-block;width:8px;height:8px;border-radius:50%"></span></span></div>
-              <div class="s">保存于 {{ m.updated_at }}</div>
-              <div v-if="renameDraft===m.id" class="form-row" style="gap:6px;margin:6px 0 0">
+            <div v-for="m in makes" :key="m.id" class="list-item" :class="{sel:cur===m.id}"
+                 style="padding:5px 10px;cursor:pointer" title="点击载入该草稿" @click="selectMake(m.id)">
+              <div class="t"><span :title="m.title">{{ cut(m.title,17) }}</span>
+                <span style="display:inline-flex;gap:4px;float:right;align-items:center">
+                  <span v-for="stage in [1,2,3,4]" :key="stage" :title="['口播','脚本','语音','视频'][stage-1]+'：'+segBadge(stage,m).text" :style="{backgroundColor:segColor(stage,m)}" style="display:inline-block;width:7px;height:7px;border-radius:50%"></span>
+                  <span class="act" style="margin-left:4px" title="重命名" @click.stop="startRenameDraft(m)">✎</span>
+                  <span class="act" style="color:var(--red)" title="删除"
+                        @click.stop="deleteMake(m)"><span v-if="Object.values(makeJobIds).includes(m.id)" title="任务进行中不可删" style="opacity:.4;cursor:not-allowed">✕</span><template v-else>✕</template></span>
+                </span></div>
+              <div class="s" style="margin-top:1px">{{ (m.updated_at || '').slice(5) }}</div>
+              <div v-if="renameDraft===m.id" class="form-row" style="gap:6px;margin:4px 0 0" @click.stop>
                 <input v-model="renameDraftTitle" :disabled="makeActionBusy" style="min-width:0;flex:1"
                        placeholder="新标题" @keyup.enter="saveRenameDraft(m)" @keyup.esc="renameDraft=null">
                 <button class="btn primary" @click="saveRenameDraft(m)">存</button>
                 <button class="btn" @click="renameDraft=null">取消</button></div>
-              <div v-else class="form-row" style="gap:6px;margin:6px 0 0">
-                <button class="btn" :disabled="makeActionBusy" @click="selectMake(m.id)">载入</button>
-                <button class="btn" @click="startRenameDraft(m)">重命名</button>
-                <button class="btn" :disabled="makeActionBusy || Object.values(makeJobIds).includes(m.id)" @click="duplicateMake(m)">另存副本</button>
-                <button class="btn" :disabled="makeActionBusy || Object.values(makeJobIds).includes(m.id)" @click="deleteMake(m)">删除</button></div></div>
+            </div>
           </div>
           <div class="card"><h3>视频项目（{{ videos.length }}）<button class="btn" @click="loadVideos">刷新</button></h3>
             <div v-if="!videos.length" class="muted">暂无视频项目</div>
-          <div v-for="v in videos" :key="v.id" class="list-item" :class="{sel: sel === v}" @click="openProj(v)">
-            <div class="t">{{ v.title }}
-              <span class="badge" :class="gateClass(v.status)" style="float:right">{{ gateText(v.status) }}</span></div>
-            <div class="s">{{ v.id }}<span v-if="v.scenes"> · {{ v.scenes }} 幕</span>
-              <span v-if="v.mp4.length"> · {{ v.mp4.length }} 个 mp4</span>
-              <a style="font-size:12px;float:right" @click.stop.prevent="delVideo(v)">删除</a></div>
-            <div class="s muted" v-if="v.date || v.verify_duration_s">{{ v.date }}<span v-if="v.verify_duration_s"> · 成片 {{ fmtDur(v.verify_duration_s) }}</span></div>
+          <div v-for="v in videos" :key="v.id" class="list-item" :class="{sel: sel === v}"
+               style="padding:5px 10px;cursor:pointer" @click="openProj(v)">
+            <div class="t"><span :title="v.title">{{ cut(v.title, 17) }}</span>
+              <span style="display:inline-flex;gap:4px;float:right;align-items:center">
+                <span class="badge" :class="gateClass(v.status)">{{ gateText(v.status) }}</span>
+                <span class="act" style="color:var(--red)" title="删除" @click.stop.prevent="delVideo(v)">✕</span></span></div>
+            <div class="s" style="margin-top:1px">{{ v.id }}<span v-if="v.scenes"> · {{ v.scenes }} 幕</span><span v-if="v.verify_duration_s"> · {{ fmtDur(v.verify_duration_s) }}</span></div>
           </div>
           </div>
         </div>
