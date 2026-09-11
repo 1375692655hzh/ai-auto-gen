@@ -884,7 +884,8 @@ WB.pages.video = {
       if (!confirm('删除制作草稿「' + m.title + '」及其语音和素材？删除后不可恢复')) return;
       try {
         await this.flushMake(m.id); await WB.api.del('/video-makes/' + m.id);
-        this.makes = this.makes.filter((r) => r.id !== m.id); if (this.cur === m.id) this.cur = null;
+        this.makes = this.makes.filter((r) => r.id !== m.id);
+        if (this.cur === m.id) { this.cur = null; await this.ensureActiveMake(); }
       } catch (e) { this.makeErr = this.makeError(e); }
     },
     makePayload(m) {
@@ -1925,7 +1926,7 @@ WB.pages.video = {
           </template>
         </div>
         <div style="position:sticky;top:64px;align-self:start;max-height:calc(100vh - 76px);overflow-y:auto;min-width:0">
-          <div class="card"><h3>草稿箱（{{ makes.length }}）</h3>
+          <div class="card"><h3>草稿箱（{{ makes.length }}）<button class="btn" style="padding:1px 8px;font-size:12px" :disabled="makeActionBusy" title="新建空白制作单并载入(当前草稿自动保存留在草稿箱)" @click="newMake">＋ 新稿</button></h3>
             <div v-if="!makes.length" class="muted">尚无制作草稿</div>
             <div v-for="m in makes" :key="m.id" class="list-item" :class="{sel:cur===m.id}"
                  style="padding:7px 10px;cursor:pointer" title="点击载入该草稿" @click="selectMake(m.id)">
