@@ -143,55 +143,89 @@ WB.pages.settings = {
         this.omni.busy = false;
       }
     },
-    async save() {
-      let composePayload;
-      try { composePayload = this.composePayload(); } catch (e) { WB.toast(e.message); return; }
-      const ids = [];
-      for (const p of this.s.tts.providers || []) {
-        if (!this.ttsIdOk(p.id)) { WB.toast("供应商 id 只能是字母数字下划线或短横线: " + (p.id || "(空)")); return; }
-        if (ids.includes(p.id)) { WB.toast("供应商 id 重复: " + p.id); return; }
-        ids.push(p.id);
-        if ((p.voices || []).some((v) => v.id && !this.ttsIdOk(v.id))) {
-          WB.toast(p.name + " 有非法音色 id"); return;
+    async save(scope) {
+      /* 分区独立保存(2026-09-11 用户反馈修复): 点哪个卡的保存就只提交哪个分区,
+         其它分区没填完/校验不过不再牵连——此前 TTS 有疑点会挡掉成稿模型的保存。
+         scope: source|ui|translate|compose|finnhub|market|gen_defaults|youtube|gemini|tts|analysis_paths|workbench */
+      const S = this.s;
+      const payload = {};
+      const labels = { source: "信息源连接", ui: "界面偏好", translate: "翻译模型",
+                       compose: "成稿模型", finnhub: "Finnhub", market: "行情源",
+                       gen_defaults: "生成默认参数", youtube: "YouTube", gemini: "视频分析",
+                       tts: "语音合成", analysis_paths: "视频分析路径", workbench: "访问鉴权" };
+      const scope2 = labels[scope] ? scope : "source";
+      switch (scope2) {
+        case "source":
+          payload.source = { mode: S.source.mode, base_url: S.source.base_url,
+                             api_key: S.source.api_key, timeout_s: S.source.timeout_s };
+          break;
+        case "ui": payload.ui = { ...S.ui }; break;
+        case "translate":
+          payload.translate = { base_url: S.translate.base_url,
+                                api_key: S.translate.api_key, model: S.translate.model };
+          break;
+        case "compose":
+          try { payload.compose = this.composePayload(); }
+          catch (e) { WB.toast(e.message); return; }
+          break;
+        case "finnhub": payload.finnhub = { api_key: (S.finnhub || {}).api_key || "" }; break;
+        case "market": payload.market = { ...S.market }; break;
+        case "gen_defaults": payload.gen_defaults = { ...S.gen_defaults }; break;
+        case "youtube": payload.youtube = { api_key: (S.youtube || {}).api_key || "" }; break;
+        case "gemini":
+          payload.gemini = { api_key: (S.gemini || {}).api_key || '',
+                             model: (S.gemini || {}).model || 'gemini-3.6-flash' };
+          break;
+        case "tts": {
+          const ids = [];
+          for (const p of S.tts.providers || []) {
+            if (!this.ttsIdOk(p.id)) { WB.toast("供应商 id 只能是字母数字下划线或短横线: " + (p.id || "(空)")); return; }
+            if (ids.includes(p.id)) { WB.toast("供应商 id 重复: " + p.id); return; }
+            ids.push(p.id);
+            if ((p.voices || []).some((v) => v.id && !this.ttsIdOk(v.id))) {
+              WB.toast(p.name + " 有非法音色 id"); return;
+            }
+          }
+          payload.tts = this.ttsPayload();
+          break;
         }
+        case "analysis_paths":
+          payload.analysis_paths = { paths: (S.analysis_paths || {}).paths || ["", "", "", ""] };
+          break;
+        case "workbench": payload.workbench = { api_key: (S.workbench || {}).api_key || "" }; break;
       }
       this.saving = true;
       try {
-        const d = await WB.api.put("/settings", {
-          source: { mode: this.s.source.mode, base_url: this.s.source.base_url,
-                    api_key: this.s.source.api_key, timeout_s: this.s.source.timeout_s },
-          ui: this.s.ui,
-          translate: { base_url: this.s.translate.base_url,
-                       api_key: this.s.translate.api_key, model: this.s.translate.model },
-          youtube: { api_key: (this.s.youtube || {}).api_key || "" },
-          gemini: { api_key: (this.s.gemini || {}).api_key || '',
-                    model: (this.s.gemini || {}).model || 'gemini-3.6-flash' },
-          analysis_paths: { paths: (this.s.analysis_paths || {}).paths || ["", "", "", ""] },
-          compose: composePayload,
-          finnhub: { api_key: (this.s.finnhub || {}).api_key || "" },
-          workbench: { api_key: (this.s.workbench || {}).api_key || "" },
-          market: { ...this.s.market },
-          gen_defaults: { ...this.s.gen_defaults },
-          tts: this.ttsPayload(),
-        });
-        this.s.source.api_key = "";                 // 不保留明文
-        this.hasKey = d.source.has_key; this.keyTail = d.source.key_tail;
-        this.s.translate.api_key = "";
-        this.tHasKey = d.translate.has_key; this.tKeyTail = d.translate.key_tail;
-        if (this.s.youtube) this.s.youtube.api_key = "";
-        this.yHasKey = (d.youtube || {}).has_key; this.yKeyTail = (d.youtube || {}).key_tail;
-        if (this.s.gemini) this.s.gemini.api_key = '';
-        this.gHasKey = (d.gemini || {}).has_key; this.gKeyTail = (d.gemini || {}).key_tail;
-        this.applyComposePublic(d.compose);
-        if (this.s.finnhub) this.s.finnhub.api_key = "";
-        this.fHasKey = (d.finnhub || {}).has_key; this.fKeyTail = (d.finnhub || {}).key_tail;
-        if (this.s.workbench) this.s.workbench.api_key = "";
-        this.wbHasKey = (d.workbench || {}).has_key; this.wbKeyTail = (d.workbench || {}).key_tail;
-        this.applyTtsPublic(d.tts);
-        this.applyTheme();
-        WB.toast("设置已保存");
+        const d = await WB.api.put("/settings", payload);
+        // 回显永远是全量 public view: 只刷新本分区相关打码状态, 不动别的分区
+        if (scope2 === "source") {
+          S.source.api_key = "";
+          this.hasKey = d.source.has_key; this.keyTail = d.source.key_tail;
+        } else if (scope2 === "translate") {
+          S.translate.api_key = "";
+          this.tHasKey = d.translate.has_key; this.tKeyTail = d.translate.key_tail;
+        } else if (scope2 === "youtube") {
+          if (S.youtube) S.youtube.api_key = "";
+          this.yHasKey = (d.youtube || {}).has_key; this.yKeyTail = (d.youtube || {}).key_tail;
+        } else if (scope2 === "gemini") {
+          if (S.gemini) S.gemini.api_key = '';
+          this.gHasKey = (d.gemini || {}).has_key; this.gKeyTail = (d.gemini || {}).key_tail;
+        } else if (scope2 === "compose") {
+          this.applyComposePublic(d.compose);
+        } else if (scope2 === "finnhub") {
+          if (S.finnhub) S.finnhub.api_key = "";
+          this.fHasKey = (d.finnhub || {}).has_key; this.fKeyTail = (d.finnhub || {}).key_tail;
+        } else if (scope2 === "workbench") {
+          if (S.workbench) S.workbench.api_key = "";
+          this.wbHasKey = (d.workbench || {}).has_key; this.wbKeyTail = (d.workbench || {}).key_tail;
+        } else if (scope2 === "tts") {
+          this.applyTtsPublic(d.tts);
+        } else if (scope2 === "ui") {
+          this.applyTheme();
+        }
+        WB.toast((labels[scope2] || "设置") + "已保存");
         this.$root.refreshHealth && this.$root.refreshHealth();
-      } catch (e) { WB.toast("保存失败: " + e.error); }
+      } catch (e) { WB.toast("保存失败: " + (e.error || e.message)); }
       this.saving = false;
     },
     async testConn() {
@@ -308,7 +342,11 @@ WB.pages.settings = {
       }
       this.llmTesting = "";
     },
-    ttsIdOk(v) { return /^[\w-]+$/.test(String(v || "")); },
+    ttsIdOk(v) {
+      /* Unicode 感知(2026-09-11 修复): 后端 Python 的 \w 认中文, mimo 音色就是
+         冰糖/茉莉等中文名; 前端 JS 的 \w 只认 ASCII 曾把它们误判非法、挡掉整页保存 */
+      return /^[\p{L}\p{N}_-]+$/u.test(String(v || ""));
+    },
     engineVoices(engine) {
       if (engine === "volc") return [
         {id: "zh_male_liufei_uranus_bigtts", name: "刘飞2.0·新闻口播"},
@@ -512,7 +550,7 @@ WB.pages.settings = {
         <input type="text" v-model.number="s.source.timeout_s" style="width:80px"></div>
       <div class="form-row">
         <button class="btn" :disabled="testing" @click="testConn">{{ testing ? '测试中…' : '测试连接' }}</button>
-        <button class="btn primary" :disabled="saving" @click="save">{{ saving ? '保存中…' : '保存设置' }}</button>
+        <button class="btn primary" :disabled="saving" @click="save('source')">{{ saving ? '保存中…' : '保存设置' }}</button>
       </div>
       <div v-if="testResult" class="test-result" :class="testResult.ok ? 'ok' : 'fail'">
         {{ testResult.ok ? '✓ ' : '✗ ' }}{{ testResult.text }}</div>
@@ -533,7 +571,7 @@ WB.pages.settings = {
         <span class="muted">资讯页 limit(≤1000)</span></div>
       <div class="form-row"><label>筛选记忆</label>
         <label><input type="checkbox" v-model="s.ui.remember_filters"> 记住上次筛选条件</label></div>
-      <button class="btn primary" :disabled="saving" @click="save">保存设置</button>
+      <button class="btn primary" :disabled="saving" @click="save('ui')">保存设置</button>
     </div>
 
     <!-- 3. 翻译模型(蹭蹭流量推文翻译, OpenAI 兼容 /chat/completions) -->
@@ -602,7 +640,7 @@ WB.pages.settings = {
       <div class="form-row"><label>模型</label>
         <input type="text" v-model="s.translate.model" placeholder="deepseek-v4-flash"
                style="width:220px"></div>
-      <button class="btn primary" :disabled="saving" @click="save">保存设置</button>
+      <button class="btn primary" :disabled="saving" @click="save('translate')">保存设置</button>
     </div>
 
     <!-- 4. 成稿模型链(内容生成专用 LLM, 多条按优先级兜底, 独立于翻译链) -->
@@ -669,7 +707,7 @@ WB.pages.settings = {
         <button class="btn" @click="addComposeTemplate('deepseek')">＋ DeepSeek 模板</button>
         <button class="btn" @click="addComposeTemplate('omniroute')">＋ OmniRoute 免费位模板</button>
         <button class="btn" @click="addComposeModel">＋ 空白模型</button>
-        <button class="btn primary" :disabled="saving" @click="save">{{ saving ? '保存中…' : '保存设置' }}</button>
+        <button class="btn primary" :disabled="saving" @click="save('compose')">{{ saving ? '保存中…' : '保存设置' }}</button>
       </div>
     </div>
 
@@ -688,7 +726,7 @@ WB.pages.settings = {
                :placeholder="fHasKey ? '已配置(尾号 ' + fKeyTail + '), 留空保持不变' : 'finnhub.io 免费注册即得(60 次/分)'"
                style="width:360px">
         <span class="muted">仅存本机服务端, 不回显明文; 留空则聚合分析跳过投行数据</span></div>
-      <button class="btn primary" :disabled="saving" @click="save">保存设置</button>
+      <button class="btn primary" :disabled="saving" @click="save('finnhub')">保存设置</button>
     </div>
 
     <div class="card" v-show="sec==='gen'">
@@ -700,7 +738,7 @@ WB.pages.settings = {
           <option value="yf_only">仅用 yfinance</option>
         </select></div>
       <p class="muted">快照抓取/技术分析的行情数据源, 换网络环境时切换</p>
-      <button class="btn primary" :disabled="saving" @click="save">保存设置</button>
+      <button class="btn primary" :disabled="saving" @click="save('market')">保存设置</button>
     </div>
 
     <div class="card" v-show="sec==='gen'">
@@ -718,7 +756,7 @@ WB.pages.settings = {
         <select v-model="s.gen_defaults.template">
           <option v-for="t in genTpls" :key="t.v" :value="t.v">{{ t.t }}</option>
         </select></div>
-      <button class="btn primary" :disabled="saving" @click="save">保存设置</button>
+      <button class="btn primary" :disabled="saving" @click="save('gen_defaults')">保存设置</button>
     </div>
 
     <!-- 4. YouTube 热点追踪(视频页【热点追踪/追踪账号】数据源, Data API v3) -->
@@ -736,7 +774,7 @@ WB.pages.settings = {
                :placeholder="yHasKey ? '已配置(尾号 ' + yKeyTail + '), 留空保持不变' : 'Google Cloud Console → 启用 YouTube Data API v3'"
                style="width:360px">
         <span class="muted">仅存本机服务端, 不回显明文</span></div>
-      <button class="btn primary" :disabled="saving" @click="save">保存设置</button>
+      <button class="btn primary" :disabled="saving" @click="save('youtube')">保存设置</button>
       <p class="muted" style="margin-top:8px">免费配额 1 万单位/天; 采集由任务计划每天一次执行
         (bin/yttrack_task.bat), 也可在视频页【热点追踪】手动「立即采集」</p>
     </div>
@@ -759,7 +797,7 @@ WB.pages.settings = {
       <div class="form-row"><label>模型</label>
         <input type="text" v-model="s.gemini.model" placeholder="gemini-3.6-flash" style="width:260px"></div>
       <p class="muted">仅存服务端打码回显</p>
-      <button class="btn primary" :disabled="saving" @click="save">保存设置</button>
+      <button class="btn primary" :disabled="saving" @click="save('gemini')">保存设置</button>
     </div>
 
     <!-- 语音合成(视频制作配音, Edge 免费 / DashScope 可选, 可增删供应商) -->
@@ -857,7 +895,7 @@ WB.pages.settings = {
         <button class="btn" @click="addTtsTemplate('mimo')">＋ mimo(小米) 模板</button>
         <button class="btn" @click="addTtsTemplate('minimax')">＋ MiniMax 模板</button>
         <button class="btn" @click="addTtsProvider">＋ 空白供应商</button>
-        <button class="btn primary" :disabled="saving" @click="save">保存设置</button>
+        <button class="btn primary" :disabled="saving" @click="save('tts')">保存设置</button>
       </div>
     </div>
 
@@ -878,7 +916,7 @@ WB.pages.settings = {
         视频文件(mp4/mov/mkv/webm/avi 等, 最多 200 个); 只允许分析这些目录内的文件,
         目录外路径会被拒绝。留空 = 禁用该槽位。
       </div>
-      <button class="btn primary" :disabled="saving" @click="save">保存设置</button>
+      <button class="btn primary" :disabled="saving" @click="save('analysis_paths')">保存设置</button>
     </div>
 
     <!-- 6. 环境自检 -->
@@ -894,7 +932,7 @@ WB.pages.settings = {
                :placeholder="wbHasKey ? '已配置(尾号 ' + wbKeyTail + '), 留空保持不变' : '留空 = 对外绑定拒绝写'"
                style="width:320px">
         <span class="muted">仅存本机服务端, 不回显明文</span></div>
-      <button class="btn primary" :disabled="saving" @click="save">保存设置</button>
+      <button class="btn primary" :disabled="saving" @click="save('workbench')">保存设置</button>
       <div class="form-row" style="margin-top:10px"><label>本浏览器的 Key</label>
         <input type="password" v-model="wbLocalKey" placeholder="远程访问时填与服务端相同的 Key"
                style="width:320px">
