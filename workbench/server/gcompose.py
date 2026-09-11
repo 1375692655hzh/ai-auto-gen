@@ -491,7 +491,8 @@ def _fmt_rows(rows: list, n: int) -> str:
     return "\n".join(out) or "(无)"
 
 
-def _llm(cfg3, system: str, user: str, max_tokens: int = 2000, timeout: int = 120) -> str | None:
+def _llm(cfg3, system: str, user: str, max_tokens: int | None = None,
+         timeout: int = 120) -> str | None:
     base, key, model = cfg3[:3]
     extra = cfg3[3] if len(cfg3) > 3 else None     # 厂商私有参数(如推理模型关思考)
     return vstudio.chat_completions(base, key, model,
@@ -500,9 +501,12 @@ def _llm(cfg3, system: str, user: str, max_tokens: int = 2000, timeout: int = 12
                                     0.4, max_tokens, timeout, extra=extra)
 
 
-def _llm_chain(chain: list, system: str, user: str, max_tokens: int = 2000,
+def _llm_chain(chain: list, system: str, user: str, max_tokens: int | None = None,
                timeout: int = 120) -> tuple[str | None, dict | None]:
     """成稿模型链调用(2026-09-10 多元化): 按优先级依次尝试, 前一失败自动落下一。
+    max_tokens 默认 None=请求体不带该字段, 走各厂商自己的输出上限(2026-09-11 全档放宽:
+    推理模型 reasoning 计入 max_tokens, 显式小额会被思考烧光返回空; 写死大数又会撞
+    低上限厂商的 400, 唯有"不传"天然适配所有厂商)。超长输出由 TIER_LIMIT 压缩修复兜底。
     → (内容|None, 实际命中的链位|None)。"""
     for m in chain:
         raw = _llm((m["base_url"], m["api_key"], m["model"], m.get("extra_body")),
@@ -811,7 +815,7 @@ def run_compose(request: dict) -> tuple[dict, int]:
                                    _tech_text(ta), opinions, tickers)
     limit = TIER_LIMIT[params["tier"]]
     raw, used = _llm_chain(chain, system, user,
-                           None if params["tier"] == "paid" else 1500)   # 付费档不传 max_tokens, 厂商默认上限
+                           None)   # 全档不传 max_tokens, 厂商默认上限(2026-09-11)
     if used and chain and used["id"] != chain[0]["id"]:
         notes.append(f"成稿模型链头未命中, 实际用「{used['name']}」({used['model']})")
     draft = _parse_json(raw or "")
@@ -844,7 +848,7 @@ def run_compose(request: dict) -> tuple[dict, int]:
             fix, _ = _llm_chain(chain, _X_STYLE,
                                 f"把下面的帖子压缩到 X 计权 {limit} 以内(CJK 每字计 2), 保留核心事实与观点, "
                                 f"保留内联 $cashtag, 语言与风格不变, 不带任何链接, 只输出压缩后的正文:\n\n{text}",
-                                1200, 60)
+                                None, 60)
             fix = _strip_urls((fix or "").strip().strip('"'))
             if fix and weighted_len(fix) <= limit:
                 text = fix
