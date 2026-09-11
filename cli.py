@@ -468,6 +468,7 @@ def workbench_cmd(args) -> int:
                         for m in (config.load().get("compose") or {}).get("models") or []:
                             if isinstance(m, dict) and m.get("id") == want:
                                 chain = [{"id": want, "name": str(m.get("name") or want),
+                                          "engine": str(m.get("engine") or "openai"),
                                           "base_url": str(m.get("base_url") or "").strip(),
                                           "api_key": str(m.get("api_key") or "").strip(),
                                           "model": str(m.get("model") or "").strip(),
@@ -478,7 +479,18 @@ def workbench_cmd(args) -> int:
                 else:
                     last_err = ""
                     for m in chain:
-                        model = f"{m['name']} · {m['model']}" if m.get("name") else m["model"]
+                        model = f"{m['name']} · {m['model'] or 'CLI默认'}" if m.get("name") else m["model"]
+                        if m.get("engine") == "grok-cli":
+                            # grok CLI 位做探测式自检(exe+登录态), 不真跑会话——
+                            # 单次 agent 调用 20s+/有费用, ping 不划算
+                            from server import gcompose
+                            ok, note = gcompose.grok_cli_ready()
+                            if ok:
+                                model = f"{m['name']} · grok CLI 就绪({m['model'] or '默认模型'})"
+                                code, error = 0, ""
+                                break
+                            last_err = f"grok_cli_not_ready: {note}"
+                            continue
                         if not all((m["base_url"], m["api_key"], m["model"])):
                             last_err = "no_llm_config"
                             continue

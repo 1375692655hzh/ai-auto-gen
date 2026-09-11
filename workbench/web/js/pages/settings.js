@@ -85,7 +85,8 @@ WB.pages.settings = {
       this.composeExtra = ebl && Object.keys(ebl).length ? JSON.stringify(ebl) : "";
       // 成稿模型链(2026-09-10 多元化): 列表序=优先级; 已保存的默认折叠(locked+open=false)
       const cms = ((d.compose || {}).models || []).map((m) => ({
-        id: m.id, name: m.name || "成稿模型", base_url: m.base_url || "", api_key: "",
+        id: m.id, name: m.name || "成稿模型", engine: m.engine || "openai",
+        base_url: m.base_url || "", api_key: "",
         model: m.model || "", enabled: m.enabled !== false,
         thinkOff: !!(m.extra_body && m.extra_body.thinking
                      && m.extra_body.thinking.type === "disabled"),
@@ -98,7 +99,7 @@ WB.pages.settings = {
       }));
       if (!cms.length && ((d.compose || {}).base_url || (d.compose || {}).model)) {
         cms.push({                                   // 旧单配置 → 预填成一条待保存的链位
-          id: "default", name: "成稿模型", base_url: d.compose.base_url || "",
+          id: "default", name: "成稿模型", engine: "openai", base_url: d.compose.base_url || "",
           api_key: "", model: d.compose.model || "", enabled: true,
           thinkOff: !!(ebl && ebl.thinking && ebl.thinking.type === "disabled"),
           extraText: this.composeExtra, advOpen: false,
@@ -270,6 +271,7 @@ WB.pages.settings = {
         if (m.thinkOff) eb.thinking = { type: "disabled" };   // 思考开关唯一管理 thinking 键
         else delete eb.thinking;
         models.push({ id: m.id, name: (m.name || "").trim() || "成稿模型",
+                      engine: m.engine || "openai",
                       base_url: (m.base_url || "").trim(), api_key: m.api_key || "",
                       model: (m.model || "").trim(), enabled: !!m.enabled, extra_body: eb });
       }
@@ -313,11 +315,21 @@ WB.pages.settings = {
       const ids = new Set(rows.map((m) => m.id));
       let n = 1, id = "model";
       while (ids.has(id)) { n += 1; id = "model-" + n; }
-      rows.push({ id, name: "成稿模型", base_url: "", api_key: "", model: "",
+      rows.push({ id, name: "成稿模型", engine: "openai", base_url: "", api_key: "", model: "",
                   enabled: true, thinkOff: false, extraText: "", advOpen: false,
                   has_key: false, key_tail: "", locked: false, open: true });
       this.s.compose.models = rows;
       this.composeRemoved = this.composeRemoved.filter((x) => x !== id);
+    },
+    addComposeGrokCli() {                // grok CLI 位: 免 url/key, 模型选填
+      const rows = (this.s.compose || {}).models || [];
+      const ids = new Set(rows.map((m) => m.id));
+      let n = 1, id = "grok-cli";
+      while (ids.has(id)) { n += 1; id = "grok-cli-" + n; }
+      rows.push({ id, name: "成稿模型", engine: "grok-cli", base_url: "", api_key: "",
+                  model: "", enabled: true, thinkOff: false, extraText: "", advOpen: false,
+                  has_key: false, key_tail: "", locked: false, open: true });
+      this.s.compose.models = rows;
     },
     removeComposeModel(m) {
       if (!confirm("删除成稿模型「" + (m.name || m.id) + "」？已保存的 Key 会一并丢掉。")) return;
@@ -672,7 +684,8 @@ WB.pages.settings = {
              @click="toggleComposeOpen(m)">
           <span class="badge">P{{ mi + 1 }}</span>
           <span style="font-weight:600">{{ m.name || m.id }}</span>
-          <span class="badge">{{ m.model || '未填模型' }}</span>
+          <span class="badge" v-if="m.engine === 'grok-cli'">grok CLI</span>
+          <span class="badge">{{ m.model || (m.engine === 'grok-cli' ? 'CLI 默认模型' : '未填模型') }}</span>
           <span class="badge" :class="m.enabled ? 'green' : ''">{{ m.enabled ? '启用' : '停用' }}</span>
           <span style="margin-left:auto;display:flex;gap:4px" @click.stop>
             <button class="btn" style="padding:2px 8px" :disabled="mi===0" @click="moveCompose(m, -1)" title="上移=提高优先级">↑</button>
@@ -685,31 +698,48 @@ WB.pages.settings = {
           <input type="text" v-model="m.id" :readonly="m.locked" placeholder="字母数字下划线或短横线"
                  style="width:180px">
           <span class="muted">{{ m.locked ? '已保存的标识不可改' : '保存后锁定' }}</span></div>
+        <div class="form-row"><label>引擎</label>
+          <select v-model="m.engine">
+            <option value="openai">OpenAI 兼容 API(通用)</option>
+            <option value="grok-cli">grok CLI(本机订阅额度)</option>
+          </select></div>
+        <div v-if="m.engine === 'grok-cli'" class="key-guide" style="margin:6px 0">
+          <b>grok CLI 位说明:</b> 走本机已登录的 <code>grok</code> CLI(xAI 订阅额度), 免接口地址与 Key。<br>
+          <b>接入步骤:</b> ① 本机安装 grok CLI(默认 ~/.grok/bin, 加入 PATH); ② 跑一次 <code>grok</code> 按提示完成
+          OAuth 登录——<b>授权 URL 可复制到指纹浏览器里完成</b>(账号在指纹浏览器里登着的话, 回调只认本机端口,
+          哪个浏览器完成都行), 登录态存 ~/.grok/auth.json 一次永久; ③ 点本卡「测试连接」做就绪自检。<br>
+          <b>特性与建议:</b> 单次调用 20 秒起步(agent 会话), <b>建议排在 API 位之后当兜底</b>;
+          已自动加 --disable-web-search + 禁工具护栏, 防止它联网搜索污染素材数字; 模型留空用 CLI 默认(grok-4.6-build)。
+        </div>
+        <div class="form-row" v-if="m.engine === 'grok-cli'"><label>模型(选填)</label>
+          <input type="text" v-model="m.model" placeholder="留空 = CLI 默认 grok-4.6-build; 填则透传 -m"
+                 style="width:260px">
+          <span class="muted">测试连接会做就绪自检(不真跑会话)</span></div>
         <div class="form-row"><label>备注名称</label>
           <input type="text" v-model="m.name" placeholder="选填备注, 不填默认「成稿模型」" style="width:220px">
           <label><input type="checkbox" v-model="m.enabled"> 启用</label></div>
-        <div class="form-row"><label>接口地址</label>
+        <div class="form-row" v-if="m.engine !== 'grok-cli'"><label>接口地址</label>
           <input type="text" v-model="m.base_url" placeholder="OpenAI 兼容接口, 如 https://api.deepseek.com/v1"
                  style="width:320px"></div>
-        <div class="form-row"><label>API Key</label>
+        <div class="form-row" v-if="m.engine !== 'grok-cli'"><label>API Key</label>
           <input type="password" v-model="m.api_key"
                  :placeholder="m.has_key ? '已配置(尾号 ' + m.key_tail + '), 留空保持不变' : 'sk-...'"
                  style="width:320px">
           <span class="muted">仅存本机服务端, 不回显明文</span></div>
-        <div class="form-row"><label>模型</label>
+        <div class="form-row" v-if="m.engine !== 'grok-cli'"><label>模型</label>
           <input type="text" v-model="m.model" placeholder="如 deepseek-v4-flash"
                  style="width:220px"></div>
-        <div class="form-row"><label>思考模式</label>
+        <div class="form-row" v-if="m.engine !== 'grok-cli'"><label>思考模式</label>
           <span class="switch" :class="{ on: !m.thinkOff }" role="switch" tabindex="0"
                 :aria-checked="m.thinkOff ? 'false' : 'true'"
                 :title="m.thinkOff ? '已关闭: 注入 thinking disabled' : '开启: 跟随模型默认'"
                 @click="m.thinkOff = !m.thinkOff"
                 @keydown.enter="m.thinkOff = !m.thinkOff"></span>
           <span class="muted">{{ m.thinkOff ? '已关闭 · 推理模型(GLM/Kimi/mimo)防思考吃光字数' : '开启 · 跟随模型默认' }}</span></div>
-        <div class="form-row"><label>高级参数</label>
+        <div class="form-row" v-if="m.engine !== 'grok-cli'"><label>高级参数</label>
           <button class="btn" @click="m.advOpen = !m.advOpen">{{ m.advOpen ? '收起 ▲' : '自定义 JSON ▼' }}</button>
           <span class="muted">一般用不上; 思考开关已覆盖常见场景</span></div>
-        <div class="form-row" v-show="m.advOpen"><label>私有 JSON</label>
+        <div class="form-row" v-if="m.engine !== 'grok-cli'" v-show="m.advOpen"><label>私有 JSON</label>
           <input type="text" v-model="m.extraText" style="width:420px"
                  placeholder='其它厂商私有参数 JSON 对象; thinking 由思考开关管理, 勿手写'>
           <span class="muted">原样并入请求体</span></div>
@@ -728,6 +758,7 @@ WB.pages.settings = {
       <div class="form-row">
         <button class="btn" @click="addComposeTemplate('omniroute')">＋ OmniRoute 免费位模板</button>
         <button class="btn" @click="addComposeModel">＋ 空白模型</button>
+        <button class="btn" @click="addComposeGrokCli">＋ grok CLI 模型位</button>
         <button class="btn primary" :disabled="saving" @click="save('compose')">{{ saving ? '保存中…' : '保存设置' }}</button>
       </div>
     </div>

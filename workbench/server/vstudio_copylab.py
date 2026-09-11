@@ -17,7 +17,7 @@ import tempfile
 import time
 from pathlib import Path
 
-from . import config, vstudio
+from . import config, gcompose, vstudio
 
 PROMPT_FILE = Path(__file__).resolve().parent / "prompts" / "copylab_analyze.md"
 SUB_LANGS = "zh-Hans,zh-Hant,zh-CN,zh-TW,zh,zh-HK,en"
@@ -313,9 +313,13 @@ def run(target: dict, key: str, request: dict) -> tuple[dict, int]:
                  .replace("{{TRANSCRIPT}}", transcript_txt))
     raw, used = None, None
     for m in chain:                                 # 成稿模型链: 前一失败自动落下一
-        raw = vstudio.chat_completions(m["base_url"], m["api_key"], m["model"],
-                                       [{"role": "user", "content": prompt}],
-                                       0.1, 8000, 300, extra=m.get("extra_body") or None)
+        if m.get("engine") == "grok-cli":
+            raw = gcompose._grok_cli_call("你是视频内容拆解引擎, 按提示词框架逐字稿拆解。",
+                                          prompt, model=m.get("model") or "", timeout=600)
+        else:
+            raw = vstudio.chat_completions(m["base_url"], m["api_key"], m["model"],
+                                           [{"role": "user", "content": prompt}],
+                                           0.1, 8000, 300, extra=m.get("extra_body") or None)
         if raw:
             used = m
             break

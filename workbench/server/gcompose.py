@@ -10,6 +10,7 @@
 """
 
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -511,6 +512,73 @@ def _llm(cfg3, system: str, user: str, max_tokens: int | None = None,
                                     0.4, max_tokens, timeout, extra=extra)
 
 
+# ── grok CLI 引擎(2026-09-11 用户拍板: 成稿链接入本机 grok build, 走订阅额度) ──
+_GROK_GUARD = ("【运行约束】禁止联网搜索与一切工具调用; 只依据用户消息提供的素材作答; "
+               "引用的数字必须逐字来自素材原文, 不得引入外部信息; 直接输出要求的内容, 不加解释。")
+
+
+def grok_cli_path():
+    """定位 grok CLI: PATH 优先, 退默认安装位 ~/.grok/bin/grok(.exe)。"""
+    import shutil
+    exe = shutil.which("grok")
+    if exe:
+        return exe
+    home = Path.home() / ".grok" / "bin"
+    for name in (("grok.exe", "grok") if os.name == "nt" else ("grok",)):
+        p = home / name
+        if p.is_file():
+            return str(p)
+    return None
+
+
+def grok_cli_ready() -> tuple[bool, str]:
+    """接入自检: CLI 可执行 + 登录态(~/.grok/auth.json) → (就绪, 说明)。"""
+    exe = grok_cli_path()
+    if not exe:
+        return False, "未找到 grok CLI(需安装并加入 PATH, 默认装在 ~/.grok/bin)"
+    auth = Path.home() / ".grok" / "auth.json"
+    if not auth.is_file():
+        return False, f"grok CLI 已装({exe})但未登录——跑一次 `grok` 按提示完成 OAuth"
+    return True, exe
+
+
+def _grok_cli_call(system: str, user: str, model: str = "",
+                   timeout: int = 300) -> str | None:
+    """单轮无头调用 grok CLI → 正文文本。信封取 .text(实测 2026-09-11)。
+    --disable-web-search + --no-subagents + 提示词护栏三重压制工具行为(防搜索污染素材数字)。"""
+    exe = grok_cli_path()
+    if not exe:
+        print("[grok-cli] 未安装 grok CLI, 本链位跳过", flush=True)
+        return None
+    cmd = [exe, "-p", user, "--output-format", "json",
+           "--disable-web-search", "--no-subagents", "--max-turns", "2",
+           "--system-prompt-override", (system or "") + "\n\n" + _GROK_GUARD]
+    if model:
+        cmd += ["-m", model]
+    try:
+        r = subprocess.run(cmd, capture_output=True, text=True,
+                           encoding="utf-8", errors="replace", timeout=timeout,
+                           creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+    except subprocess.TimeoutExpired:               # subprocess.run 超时已杀子进程
+        print(f"[grok-cli] 超时(>{timeout}s), 本链位跳过", flush=True)
+        return None
+    except OSError as e:
+        print(f"[grok-cli] 启动失败: {e}", flush=True)
+        return None
+    out = (r.stdout or "").strip()
+    try:
+        d = json.loads(out)
+        text = str(d.get("text") or "").strip()
+        if text:
+            return text
+    except ValueError:
+        pass
+    if r.returncode == 0 and out:                   # 信封解析失败但退出码 0 → 当纯文本兜底
+        return out
+    print(f"[grok-cli] 无有效输出(exit {r.returncode}): {(r.stderr or out)[:160]}", flush=True)
+    return None
+
+
 def _llm_chain(chain: list, system: str, user: str, max_tokens: int | None = None,
                timeout: int = 120) -> tuple[str | None, dict | None]:
     """成稿模型链调用(2026-09-10 多元化): 按优先级依次尝试, 前一失败自动落下一。
@@ -519,8 +587,12 @@ def _llm_chain(chain: list, system: str, user: str, max_tokens: int | None = Non
     低上限厂商的 400, 唯有"不传"天然适配所有厂商)。超长输出由 TIER_LIMIT 压缩修复兜底。
     → (内容|None, 实际命中的链位|None)。"""
     for m in chain:
-        raw = _llm((m["base_url"], m["api_key"], m["model"], m.get("extra_body")),
-                   system, user, max_tokens, timeout)
+        if m.get("engine") == "grok-cli":
+            raw = _grok_cli_call(system, user, model=m.get("model") or "",
+                                 timeout=max(timeout, 300))   # CLI 会话慢, 钳到至少 300s
+        else:
+            raw = _llm((m["base_url"], m["api_key"], m["model"], m.get("extra_body")),
+                       system, user, max_tokens, timeout)
         if raw:
             return raw, m
     return None, None

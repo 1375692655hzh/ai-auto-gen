@@ -175,12 +175,18 @@ def compose_chain(cfg: dict | None = None) -> list:
     for m in c.get("models") or []:
         if not isinstance(m, dict) or not m.get("enabled", True):
             continue
+        engine = str(m.get("engine") or "openai").strip() or "openai"
+        if engine not in ("openai", "grok-cli"):
+            engine = "openai"
         base, key, model = (str(m.get(k) or "").strip() for k in ("base_url", "api_key", "model"))
-        if not all((base, key, model)):
-            continue                                    # 三项不全的链位视为未配好, 跳过
+        if engine == "openai" and not all((base, key, model)):
+            continue                                    # API 位三项不全视为未配好, 跳过
+        if engine == "grok-cli" and not model:
+            model = ""                                  # grok CLI 位: url/key 免填, 模型可空=CLI 默认
         eb = m.get("extra_body")
         out.append({"id": str(m.get("id") or ""),
                     "name": str(m.get("name") or "").strip() or "成稿模型",
+                    "engine": engine,
                     "base_url": base, "api_key": key, "model": model,
                     "extra_body": dict(eb) if isinstance(eb, dict) else {}})
     if not out and "models" not in c:
@@ -318,8 +324,11 @@ def _compose_model(prev, incoming: dict) -> dict | None:
     api_key = prev.get("api_key") or ""
     if incoming.get("api_key"):
         api_key = str(incoming["api_key"])
+    engine = str(incoming.get("engine") or prev.get("engine") or "openai").strip()
+    if engine not in ("openai", "grok-cli"):
+        engine = "openai"
     return {"id": mid, "name": str(name or "").strip()[:40] or "成稿模型",
-            "enabled": bool(enabled), "base_url": str(base_url or ""),
+            "engine": engine, "enabled": bool(enabled), "base_url": str(base_url or ""),
             "api_key": api_key, "model": str(model or ""),
             "extra_body": dict(eb) if isinstance(eb, dict) else {}}
 
