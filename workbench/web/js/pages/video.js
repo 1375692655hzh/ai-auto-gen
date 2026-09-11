@@ -29,7 +29,8 @@ WB.pages.video = {
       /* ── 视频制作(原视频页内容) ── */
       videos: [], sel: null, error: null,
       /* 四段制作：草稿持久化，任务槽独立恢复。 */
-      makes: [], cur: null, presets: null, narTab: 'a', narBrief: '', narDraftId: '', importId: '',
+      makes: [], cur: null, blank: null,   /* blank=内存态空白新稿(不落库, 首次编辑才建行) */
+      presets: null, narTab: 'a', narBrief: '', narDraftId: '', importId: '',
       makeRoute: 'script',   /* 制作路线: script=文案路线(四段) audio=音频路线(建设中) */
       narBusy: false, narProgress: null, storyBusy: false, storyProgress: null,
       voiceBusy: false, voiceProgress: null, makeErr: '', narErr: '', scriptErr: '', voiceErr: '',
@@ -95,7 +96,7 @@ WB.pages.video = {
       const q = this.templateSearch.toLowerCase();
       return this.templatesCards.filter((c) => (this.templateFilter === 'all' || c.kind === this.templateFilter) && ((c.name || '') + ' ' + (c.blurb || '')).toLowerCase().includes(q));
     },
-    curMake() { return this.makes.find((m) => m.id === this.cur) || null; },
+    curMake() { return this.cur ? (this.makes.find((m) => m.id === this.cur) || null) : this.blank; },
     makeBeats() { return (this.curMake && this.curMake.script && this.curMake.script.beats) || []; },
     /* claims 事实账本：四级分级摘要（写稿期 LLM 产出，随脚本存档锁定） */
     makeClaims() {
@@ -687,8 +688,8 @@ WB.pages.video = {
       try {
         this.tab = 'make'; this.registerSubs();
         // newMake 自带忙碌保护，须在导入置忙前调用。
-        if (!this.curMake) await this.newMake();
-        if (!this.curMake) throw { error: this.makeErr || '新建制作失败' };
+        if (!this.cur) await this.materializeBlank();
+        if (!this.cur) throw { error: this.makeErr || '新建制作失败' };
         this.makeActionBusy = true;
         const id = this.cur, script = JSON.parse(JSON.stringify(r.script));
         await this.flushMake(id);
@@ -823,12 +824,58 @@ WB.pages.video = {
       } catch (e) { this.makeErr = this.makeError(e); }
     },
     async fetchMake(id) { return this.putMake((await WB.api.get('/video-makes/' + encodeURIComponent(id))).make); },
+    newBlank() {
+      /* 内存态空白新稿(2026-09-12 用户模型: 编辑区=永远在写的新稿; 不进草稿箱不落库,
+         首次真实编辑才 materialize 建行。默认值须对齐配置的默认模板, 否则落库时
+         terminal-dark 硬编码会静默覆盖用户在模板页设的默认主题/编排/生成方式) */
+      const td = this.templateDefaults || {};
+      const m = this.normalizeMake({ id: '', title: '' });
+      if (td.default_theme) m.video.theme = td.default_theme;
+      if (td.default_layout) m.video.layout = td.default_layout;
+      if (td.default_generation_method) m.video.generation_method = td.default_generation_method;
+      m._blank = true;
+      this.blank = m;
+      this.narTab = 'a'; this.narBrief = ''; this.narDraftId = ''; this.importId = '';
+      this.beatCursors = {};
+      this.narErr = ''; this.scriptErr = ''; this.voiceErr = '';
+      this.setMakeDefaults(m);
+    },
+    materializeBlank() {
+      /* 空白新稿首次落库: 建行→把 blank 内容并入新行→收养真 id。竞态: 连续打字只建一次。 */
+      if (this.cur) return Promise.resolve(this.cur);
+      if (this._materializing) return this._materializing;
+      const blank = this.blank;
+      if (!blank) return Promise.resolve(null);
+      this._materializing = (async () => {
+        try {
+          const row = this.putMake((await WB.api.post('/video-makes', {})).make);
+          row.title = blank.title;
+          row.narration = { ...row.narration, ...JSON.parse(JSON.stringify(blank.narration)) };
+          row.voice = { ...row.voice, ...JSON.parse(JSON.stringify(blank.voice)) };
+          row.video = { ...row.video, ...JSON.parse(JSON.stringify(blank.video)) };
+          if (blank.script) row.script = blank.script;
+          if (!this.cur) this.cur = row.id;         // 期间用户已点选别的草稿则不抢焦点
+          if (this.blank === blank) this.blank = null;
+          this.saveMake(row); await this.flushMake(row.id);
+          return row.id;
+        } catch (e) { this.makeErr = this.makeError(e); return null; }
+        finally { this._materializing = null; }
+      })();
+      return this._materializing;
+    },
+    async unloadMake() {
+      /* 再点已选中的草稿行 = 卸载回空白新稿(当前草稿自动保存留箱) */
+      try { if (this.cur) await this.flushMake(this.cur); } catch (e) {}
+      this.cur = null;
+      this.newBlank();
+    },
     async selectMake(id) {
       if (this.makeActionBusy) return;
+      if (this.cur === id) { await this.unloadMake(); return; }
       try {
         if (this.cur) await this.flushMake(this.cur);
         const m = await this.fetchMake(id);
-        this.cur = m.id; this.narTab = m.narration.source === 'manual' ? 'b' : 'a';
+        this.cur = m.id; this.blank = null; this.narTab = m.narration.source === 'manual' ? 'b' : 'a';
         this.narBrief = ''; this.narDraftId = ''; this.importId = ''; this.beatCursors = {};
         this.narErr = ''; this.scriptErr = ''; this.voiceErr = ''; this.setMakeDefaults(m);
       } catch (e) { this.makeErr = this.makeError(e); }
@@ -853,13 +900,13 @@ WB.pages.video = {
           changed = true;
         }
       }
-      if (changed) this.saveMake(m);
+      if (changed && !m._blank) this.saveMake(m);
     },
     async ensureActiveMake() {
-      /* 制作页常态显示(2026-09-11): 进页必有一个激活制作单——有草稿载最近, 没有则自动建 */
-      if (this.cur && this.makes.some((m) => m.id === this.cur)) return;
-      if (this.makes.length) { await this.selectMake(this.makes[0].id); return; }
-      if (!this.makeActionBusy) await this.newMake();
+      /* 2026-09-12 纠偏: 进页/刷新默认空白新稿(不落库), 不再自动载入最近草稿——
+         否则编辑区永远被旧稿占用, 到不了新稿状态 */
+      if (this.cur) return;
+      if (!this.blank) this.newBlank();
     },
     async newMake() {
       if (this.makeActionBusy) return;
@@ -895,7 +942,9 @@ WB.pages.video = {
       return JSON.parse(JSON.stringify(p));
     },
     saveMake(m = this.curMake) {
-      if (!m || !m.id) return;
+      if (!m) return;
+      if (m._blank) { this.materializeBlank(); return; }
+      if (!m.id) return;
       this.saveVersions[m.id] = (this.saveVersions[m.id] || 0) + 1;
       this.savePending[m.id] = { body: this.makePayload(m), version: this.saveVersions[m.id] };
       this.saveState[m.id] = 'pending'; clearTimeout(this.saveTimers[m.id]);
@@ -972,13 +1021,15 @@ WB.pages.video = {
       if (file.size > 200 * 1024 || !/\.(txt|md)$/i.test(file.name)) { WB.toast('仅支持 .txt/.md，文件不能超过 200KB'); return; }
       const reader = new FileReader();
       reader.onload = () => {
-        const m = this.makes.find((m) => m.id === id);
+        const m = this.makes.find((m) => m.id === id) || (id ? null : this.blank);
         if (m && !m.narration.locked && !Object.values(this.makeJobIds).includes(id)) { m.narration.ref_text = String(reader.result || ''); this.saveMake(m); }
       };
       reader.onerror = () => WB.toast('文稿文件读取失败'); reader.readAsText(file);
     },
     async makeLock(stage, unlock = false) {
       if (!this.curMake || this.makeBusy) return;
+      if (!this.cur) await this.materializeBlank();
+      if (!this.cur) return;
       if (unlock && stage === 'narration' && !confirm('解锁重定稿后，下游脚本/语音将标记待刷新')) return;
       this.makeActionBusy = true;
       const key = stage === 'narration' ? 'narErr' : 'scriptErr', id = this.cur; this[key] = '';
@@ -1057,7 +1108,7 @@ WB.pages.video = {
     },
     async runMakeJob(task, scope = 'all') {
       if (this.makeBusy) return;
-      if (!this.curMake) await this.newMake(); if (!this.curMake) return;
+      if (!this.cur) await this.materializeBlank(); if (!this.cur) return;
       const id = this.cur, kind = task === 'voice' ? 'voice' : task === 'build' ? 'build' : 'generate';
       const errKey = { voice: 'voiceErr', build: 'buildErr', narration: 'narErr', storyboard: 'scriptErr' }[task];
       this[errKey] = ''; this.makeActionBusy = true;
@@ -1936,7 +1987,7 @@ WB.pages.video = {
                   <span v-for="stage in [1,2,3,4]" :key="stage" :title="['口播','脚本','语音','视频'][stage-1]+'：'+segBadge(stage,m).text" :style="{backgroundColor:segColor(stage,m)}" style="display:inline-block;width:7px;height:7px;border-radius:50%"></span></span></div>
               <div style="display:flex;align-items:center;gap:5px;margin-top:5px">
                 <span class="muted" style="font-size:11px;flex:1;min-width:0;overflow:hidden;white-space:nowrap">{{ (m.updated_at || '').slice(5) }}</span>
-                <button class="btn" style="padding:2px 9px;font-size:12px;flex-shrink:0" :disabled="makeActionBusy" @click.stop="selectMake(m.id)">载入</button>
+                <button class="btn" style="padding:2px 9px;font-size:12px;flex-shrink:0" :disabled="makeActionBusy" @click.stop="selectMake(m.id)">{{ cur===m.id ? '退回' : '载入' }}</button>
                 <button class="btn" style="padding:2px 9px;font-size:12px;flex-shrink:0" :disabled="makeActionBusy" @click.stop="startRenameDraft(m)">重命名</button>
                 <button class="btn" style="padding:2px 9px;font-size:12px;flex-shrink:0" :disabled="makeActionBusy || Object.values(makeJobIds).includes(m.id)" @click.stop="deleteMake(m)">删除</button></div>
               <div v-if="renameDraft===m.id" class="form-row" style="gap:5px;margin:5px 0 0" @click.stop>
