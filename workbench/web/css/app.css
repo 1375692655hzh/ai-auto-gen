@@ -123,6 +123,10 @@ a:hover { color: var(--text); }
 .make-stage { background: var(--bg-card); border: 1px solid var(--border);
   border-radius: var(--r-panel); padding: var(--s4); margin-bottom: var(--s3); }
 .make-stage > .card { background: var(--bg); }
+/* 再往里一层: 卡内表单控件抬回升面(容器浅→卡深→控件浅, 三级明暗读出层级) */
+.make-stage > .card input[type=text], .make-stage > .card input[type=password],
+.make-stage > .card input[type=number], .make-stage > .card select,
+.make-stage > .card textarea { background: var(--bg-card); }
 .btn { display: inline-flex; align-items: center; gap: 6px; padding: 6px 13px;
   border-radius: var(--r-ctl); border: 1px solid var(--border); background: var(--bg-hover);
   color: var(--text); font-size: 13px; font-family: var(--font); cursor: pointer;
