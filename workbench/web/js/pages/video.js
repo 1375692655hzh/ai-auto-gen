@@ -1669,23 +1669,26 @@ WB.pages.video = {
 
     <!-- 四段视频制作 -->
     <div v-show="tab==='make'">
-      <div class="card" style="padding:10px 16px">
-        <div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap">
-          <span class="radio-group" role="radiogroup" aria-label="制作路线">
-            <label :class="{on: makeRoute==='script'}"><input type="radio" value="script" v-model="makeRoute">✍️ 文案路线</label>
-            <label :class="{on: makeRoute==='audio'}"><input type="radio" value="audio" v-model="makeRoute">🎙️ 音频路线</label>
-          </span>
-          <span class="muted" style="font-size:12.5px">
-            {{ makeRoute==='script'
-              ? '口播稿 → 视频脚本 → 语音配音 → 视频生成 —— 从文案出发，AI 写口播并机器配音'
-              : '上传音频 + 提取文案 → 视频脚本 → 视频生成 —— 从成品音频出发，提取文案后直接进脚本分镜（建设中）' }}
-          </span>
-        </div>
-      </div>
       <div v-if="makeErr || error" class="err-box" style="padding:12px">{{ makeErr || makeError(error) }}
         <button class="btn" @click="cur && flushMake(cur).catch(()=>{})">重试保存</button></div>
       <div class="two-col make-cols">
         <div style="min-width:0">
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px" role="radiogroup" aria-label="制作路线">
+            <div class="route-card" role="button" tabindex="0" :class="{sel: makeRoute==='script'}"
+                 :style="{border: makeRoute==='script' ? '2px solid var(--accent)' : '1px solid var(--border)', background: makeRoute==='script' ? 'var(--accent-weak)' : ''}"
+                 style="border-radius:10px;padding:12px 14px;cursor:pointer"
+                 @click="makeRoute='script'" @keydown.enter="makeRoute='script'">
+              <div style="display:flex;align-items:center;gap:8px;font-weight:600">✍️ 文案路线</div>
+              <div class="muted" style="font-size:12px;margin-top:4px">口播稿 → 视频脚本 → 语音配音 → 视频生成<br>从文案出发，AI 写口播并机器配音</div>
+            </div>
+            <div class="route-card" role="button" tabindex="0" :class="{sel: makeRoute==='audio'}"
+                 :style="{border: makeRoute==='audio' ? '2px solid var(--accent)' : '1px solid var(--border)', background: makeRoute==='audio' ? 'var(--accent-weak)' : ''}"
+                 style="border-radius:10px;padding:12px 14px;cursor:pointer"
+                 @click="makeRoute='audio'" @keydown.enter="makeRoute='audio'">
+              <div style="display:flex;align-items:center;gap:8px;font-weight:600">🎙️ 音频路线 <span class="badge yellow" style="font-size:10px">建设中</span></div>
+              <div class="muted" style="font-size:12px;margin-top:4px">上传音频 + 提取文案 → 视频脚本 → 视频生成<br>从成品音频出发，转写后直进脚本分镜</div>
+            </div>
+          </div>
           <div v-if="makeRoute==='audio'" class="card" style="padding:48px 24px;text-align:center">
             <div style="font-size:40px">🎙️</div>
             <h3>音频路线 · 建设中</h3>
@@ -1695,8 +1698,11 @@ WB.pages.video = {
           </div>
           <div v-else-if="!curMake" class="card empty">正在准备制作单…</div>
           <template v-else>
-            <div class="form-row"><input type="text" v-model="curMake.title" @input="saveMake()" :disabled="makeBusy" placeholder="制作标题" style="flex:1;min-width:0">
-              <span class="muted">{{ {pending:'2 秒后自动保存',saving:'保存中…',saved:('已保存 ' + (savedAt[cur] || '')),error:'保存失败'}[saveState[cur]] || '' }}</span></div>
+            <div style="border:1px solid var(--border);border-radius:12px;padding:14px 16px">
+            <div class="form-row" style="margin-bottom:12px">
+              <label style="font-weight:600;white-space:nowrap">视频名称</label>
+              <input type="text" v-model="curMake.title" @input="saveMake()" :disabled="makeBusy" placeholder="给这条片子起个名字" style="flex:1;min-width:0;font-weight:600">
+              <span class="muted" style="white-space:nowrap">{{ {pending:'2 秒后自动保存',saving:'保存中…',saved:('已保存 ' + (savedAt[cur] || '')),error:'保存失败'}[saveState[cur]] || '' }}</span></div>
             <div class="card">
               <h3>1 · 口播稿 <span class="badge" :class="segBadge(1).cls">{{ segBadge(1).text }}</span></h3>
               <fieldset :disabled="makeBusy" style="border:0;min-width:0;padding:0">
@@ -1895,6 +1901,7 @@ WB.pages.video = {
                 </div>
               </template>
               <div v-else class="muted">本项目尚未出片 —— 第四段点「开始制作」后，成片会出现在这里。</div>
+            </div>
             </div>
           </template>
         </div>
