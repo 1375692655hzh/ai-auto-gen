@@ -1779,8 +1779,8 @@ WB.pages.video = {
               <fieldset :disabled="makeBusy" style="border:0;min-width:0;padding:0">
                 <template v-if="!curMake.narration.locked">
                   <div class="form-row radio-group">
-                    <label><input type="radio" value="b" v-model="narTab">B 直接输入</label>
-                    <label><input type="radio" value="a" v-model="narTab">A 智能生成（次要）</label></div>
+                    <label><input type="radio" value="b" v-model="narTab">直接输入</label>
+                    <label><input type="radio" value="a" v-model="narTab">智能生成</label></div>
                   <template v-if="narTab==='a'">
                     <textarea v-model="curMake.narration.ref_text" @input="saveMake()" rows="5" style="width:100%" placeholder="粘贴参考文，或上传 .txt/.md（≤200KB）"></textarea>
 
