@@ -117,6 +117,10 @@ WB.pages.video = {
     makeTheme() { return ((this.presets && this.presets.themes) || []).find((t) => this.curMake && t.id === this.curMake.video.theme); },
     makeBusy() { return this.makeActionBusy || Object.values(this.makeJobIds).includes(this.cur) || Object.keys(this.assetUploadBusy).some((k) => k.startsWith(this.cur + ':') && this.assetUploadBusy[k]); },
     makeVoiceReady() { return this.segBadge(3).cls === 'green'; },
+    /* 划分铁律(2026-09-12 用户定): 视频项目列表只摆出了片的成品(built/警告);
+       没出片的 project(draft/reviewed/qa_failed 残留)不是成品, 归并到草稿概念, 从列表隐藏。 */
+    productVideos() { return (this.videos || []).filter((v) => v.status === "built" || v.status === "built_with_warnings"); },
+    orphanVideos() { return (this.videos || []).filter((v) => !(v.status === "built" || v.status === "built_with_warnings")); },
     /* 本项目产出（第四段出片）：在视频项目列表中定位当前制作单的成片 */
     makeProject() {
       const pid = this.curMake && this.curMake.project_id;
@@ -735,6 +739,17 @@ WB.pages.video = {
         if (this.sel && this.sel.id === v.id) this.sel = null;
         await this.loadVideos();
       } catch (e) { WB.toast(e.error); }
+    },
+    async cleanOrphanVideos() {
+      const rows = this.orphanVideos;
+      if (!rows.length) return;
+      const preview = rows.map((v) => '· ' + (v.title || v.id)).slice(0, 8).join(' / ');
+      if (!confirm('清理 ' + rows.length + ' 个未出片的残留项目？' + preview + (rows.length > 8 ? ' …' : '') + ' —— 这些项目没有成片，删除后不可恢复')) return;
+      for (const v of rows) {
+        try { await WB.api.del('/videos/' + v.id); } catch (e) {}
+      }
+      WB.toast('已清理 ' + rows.length + ' 个残留项目');
+      await this.loadVideos();
     },
     copyPubCmd() { WB.copyText(this.pubCmd); },
     makeError(e) { return String(e.error || e.message || e || '请求失败') + (e.hint ? ' — ' + e.hint : ''); },
@@ -1930,9 +1945,9 @@ WB.pages.video = {
                 <button class="btn" style="padding:2px 9px;font-size:12px" @click="renameDraft=null">取消</button></div>
             </div>
           </div>
-          <div class="card"><h3>视频项目（{{ videos.length }}）<button class="btn" @click="loadVideos">刷新</button></h3>
-            <div v-if="!videos.length" class="muted">暂无视频项目</div>
-          <div v-for="v in videos" :key="v.id" class="list-item" :class="{sel: sel === v}"
+          <div class="card"><h3>视频项目（{{ productVideos.length }}）<button class="btn" @click="loadVideos">刷新</button></h3>
+            <div v-if="!productVideos.length" class="muted">暂无已出片项目 —— 出了片的成品才会出现在这里</div>
+          <div v-for="v in productVideos" :key="v.id" class="list-item" :class="{sel: sel === v}"
                style="padding:7px 10px;cursor:pointer" @click="openProj(v)">
             <div class="t" style="display:flex;align-items:center;gap:6px">
               <span :title="v.title" style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ v.title }}</span>
@@ -1942,6 +1957,9 @@ WB.pages.video = {
               <button class="btn" style="padding:2px 9px;font-size:12px;flex-shrink:0" @click.stop="openProj(v)">打开</button>
               <button class="btn" style="padding:2px 9px;font-size:12px;flex-shrink:0" @click.stop.prevent="delVideo(v)">删除</button></div>
           </div>
+            <div v-if="orphanVideos.length" class="muted" style="font-size:11px;margin-top:6px;border-top:1px dashed var(--border);padding-top:6px">
+              另有 {{ orphanVideos.length }} 个未出片残留(草稿类, 已隐藏)
+              <a style="cursor:pointer;color:var(--red)" title="逐个确认后删除全部残留" @click.stop="cleanOrphanVideos">一键清理</a></div>
           </div>
         </div>
       </div>
