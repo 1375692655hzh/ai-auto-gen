@@ -835,7 +835,7 @@ WB.pages.video = {
       if (td.default_generation_method) m.video.generation_method = td.default_generation_method;
       m._blank = true;
       this.blank = m;
-      this.narTab = 'a'; this.narBrief = ''; this.narDraftId = ''; this.importId = '';
+      this.narTab = 'b'; this.narBrief = ''; this.narDraftId = ''; this.importId = '';
       this.beatCursors = {};
       this.narErr = ''; this.scriptErr = ''; this.voiceErr = '';
       this.setMakeDefaults(m);
@@ -914,7 +914,7 @@ WB.pages.video = {
       try {
         if (this.cur) await this.flushMake(this.cur);
         const m = this.putMake((await WB.api.post('/video-makes', {})).make);
-        this.cur = m.id; this.narTab = 'a'; this.narBrief = ''; this.narDraftId = ''; this.importId = '';
+        this.cur = m.id; this.narTab = 'b'; this.narBrief = ''; this.narDraftId = ''; this.importId = '';
         this.narErr = ''; this.scriptErr = ''; this.voiceErr = ''; this.setMakeDefaults(m);
       } catch (e) { this.makeErr = this.makeError(e); }
       finally { this.makeActionBusy = false; }
@@ -1779,17 +1779,14 @@ WB.pages.video = {
               <fieldset :disabled="makeBusy" style="border:0;min-width:0;padding:0">
                 <template v-if="!curMake.narration.locked">
                   <div class="form-row radio-group">
-                    <label><input type="radio" value="a" v-model="narTab">A 智能生成</label>
-                    <label><input type="radio" value="b" v-model="narTab">B 直接输入</label></div>
+                    <label><input type="radio" value="b" v-model="narTab">B 直接输入</label>
+                    <label><input type="radio" value="a" v-model="narTab">A 智能生成（次要）</label></div>
                   <template v-if="narTab==='a'">
                     <textarea v-model="curMake.narration.ref_text" @input="saveMake()" rows="5" style="width:100%" placeholder="粘贴参考文，或上传 .txt/.md（≤200KB）"></textarea>
-                    <div class="form-row" style="margin-top:8px">
-                      <label class="btn" style="width:auto">上传参考文<input type="file" accept=".txt,.md" style="display:none" @change="readNarrationFile"></label>
-                      <select v-model="narDraftId" @change="pickNarrationDraft" style="max-width:100%"><option value="">从图文草稿选取</option>
-                        <option v-for="d in drafts" :key="d.id" :value="d.id">{{ d.title }}</option></select></div>
+
                     <div class="form-row"><label>一句话简报</label><input type="text" v-model="narBrief" placeholder="这期视频讲什么" style="flex:1;min-width:0"></div>
                     <div class="form-row"><label>风格</label><select v-model="curMake.narration.style_id" @change="saveMake()" style="max-width:100%">
-                      <option value="" disabled>请选择风格</option><option v-for="s in styles" :key="s.id" :value="s.id">{{ s.name }} · {{ s.wc ? s.wc.join('–') : '默认' }} 字</option></select></div>
+                      <option value="" disabled>请选择风格</option><option v-for="s in styles" :key="s.id" :value="s.id">{{ s.name }}</option></select></div>
                     <button class="btn primary" :disabled="narBusy || storyBusy || !curMake.narration.style_id || !(narBrief.trim() || curMake.narration.ref_text.trim())" @click="runMakeJob('narration')">{{ narBusy ? '生成中…' : '生成口播稿' }}</button>
                   </template>
                 </template>
