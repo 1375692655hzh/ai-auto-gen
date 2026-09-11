@@ -133,7 +133,7 @@ def load() -> dict:
             base, key, model = (str(mc.get(k) or "").strip()
                                 for k in ("base_url", "api_key", "model"))
             if all((base, key, model)):
-                mc["models"] = [{"id": "default", "name": "默认成稿模型", "enabled": True,
+                mc["models"] = [{"id": "default", "name": "成稿模型", "enabled": True,
                                  "base_url": base, "api_key": key, "model": model,
                                  "extra_body": mc.get("extra_body")
                                  if isinstance(mc.get("extra_body"), dict) else {}}]
@@ -179,14 +179,15 @@ def compose_chain(cfg: dict | None = None) -> list:
         if not all((base, key, model)):
             continue                                    # 三项不全的链位视为未配好, 跳过
         eb = m.get("extra_body")
-        out.append({"id": str(m.get("id") or ""), "name": str(m.get("name") or m.get("id") or ""),
+        out.append({"id": str(m.get("id") or ""),
+                    "name": str(m.get("name") or "").strip() or "成稿模型",
                     "base_url": base, "api_key": key, "model": model,
                     "extra_body": dict(eb) if isinstance(eb, dict) else {}})
     if not out and "models" not in c:
         base, key, model = (str(c.get(k) or "").strip() for k in ("base_url", "api_key", "model"))
         if all((base, key, model)):
             eb = c.get("extra_body")
-            out.append({"id": "default", "name": "默认成稿模型", "base_url": base,
+            out.append({"id": "default", "name": "成稿模型", "base_url": base,
                         "api_key": key, "model": model,
                         "extra_body": dict(eb) if isinstance(eb, dict) else {}})
     return out
@@ -317,7 +318,7 @@ def _compose_model(prev, incoming: dict) -> dict | None:
     api_key = prev.get("api_key") or ""
     if incoming.get("api_key"):
         api_key = str(incoming["api_key"])
-    return {"id": mid, "name": str(name or mid).strip()[:40] or mid,
+    return {"id": mid, "name": str(name or "").strip()[:40] or "成稿模型",
             "enabled": bool(enabled), "base_url": str(base_url or ""),
             "api_key": api_key, "model": str(model or ""),
             "extra_body": dict(eb) if isinstance(eb, dict) else {}}

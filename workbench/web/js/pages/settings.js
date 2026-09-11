@@ -85,14 +85,14 @@ WB.pages.settings = {
       this.composeExtra = ebl && Object.keys(ebl).length ? JSON.stringify(ebl) : "";
       // 成稿模型链(2026-09-10 多元化): 列表序=优先级; 已保存的默认折叠(locked+open=false)
       const cms = ((d.compose || {}).models || []).map((m) => ({
-        id: m.id, name: m.name || m.id, base_url: m.base_url || "", api_key: "",
+        id: m.id, name: m.name || "成稿模型", base_url: m.base_url || "", api_key: "",
         model: m.model || "", enabled: m.enabled !== false,
         extraText: m.extra_body && Object.keys(m.extra_body).length ? JSON.stringify(m.extra_body) : "",
         has_key: !!m.has_key, key_tail: m.key_tail || "", locked: true, open: false,
       }));
       if (!cms.length && ((d.compose || {}).base_url || (d.compose || {}).model)) {
         cms.push({                                   // 旧单配置 → 预填成一条待保存的链位
-          id: "default", name: "默认成稿模型", base_url: d.compose.base_url || "",
+          id: "default", name: "成稿模型", base_url: d.compose.base_url || "",
           api_key: "", model: d.compose.model || "", enabled: true,
           extraText: this.composeExtra, has_key: this.cHasKey, key_tail: this.cKeyTail,
           locked: false, open: true,
@@ -259,7 +259,7 @@ WB.pages.settings = {
           if (!eb || typeof eb !== "object" || Array.isArray(eb))
             throw new Error("「" + (m.name || m.id) + "」的私有参数必须是 JSON 对象");
         }
-        models.push({ id: m.id, name: (m.name || "").trim() || m.id,
+        models.push({ id: m.id, name: (m.name || "").trim() || "成稿模型",
                       base_url: (m.base_url || "").trim(), api_key: m.api_key || "",
                       model: (m.model || "").trim(), enabled: !!m.enabled, extra_body: eb });
       }
@@ -303,7 +303,7 @@ WB.pages.settings = {
       const ids = new Set(rows.map((m) => m.id));
       let n = 1, id = "model";
       while (ids.has(id)) { n += 1; id = "model-" + n; }
-      rows.push({ id, name: "自定义模型", base_url: "", api_key: "", model: "",
+      rows.push({ id, name: "成稿模型", base_url: "", api_key: "", model: "",
                   enabled: true, extraText: "", has_key: false, key_tail: "",
                   locked: false, open: true });
       this.s.compose.models = rows;
@@ -671,8 +671,8 @@ WB.pages.settings = {
           <input type="text" v-model="m.id" :readonly="m.locked" placeholder="字母数字下划线或短横线"
                  style="width:180px">
           <span class="muted">{{ m.locked ? '已保存的标识不可改' : '保存后锁定' }}</span></div>
-        <div class="form-row"><label>显示名</label>
-          <input type="text" v-model="m.name" placeholder="自己认得的名字, 如 DS主力 / GLM兜底" style="width:220px">
+        <div class="form-row"><label>备注名称</label>
+          <input type="text" v-model="m.name" placeholder="选填备注, 不填默认「成稿模型」" style="width:220px">
           <label><input type="checkbox" v-model="m.enabled"> 启用</label></div>
         <div class="form-row"><label>接口地址</label>
           <input type="text" v-model="m.base_url" placeholder="OpenAI 兼容接口, 如 https://api.deepseek.com/v1"
