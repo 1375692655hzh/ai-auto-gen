@@ -851,7 +851,9 @@ def create_app(bind_host: str = "127.0.0.1") -> FastAPI:
         body = await request.json()
         if vstudio.job_running("generate"):
             return JSONResponse({"error": "任务进行中"}, status_code=409)
-        if body.get("style_id") not in vstudio._STYLES:
+        # style_id 可缺省(后端 _style_of 回落自然口播); 给了就须是已知 id
+        sid = body.get("style_id")
+        if sid and sid not in vstudio._STYLES:
             return JSONResponse({"error": "bad_style"}, status_code=400)
         return start_video_job("generate", {**body, "task": "narration"}, "gen-narration")
 
@@ -1234,8 +1236,15 @@ def create_app(bind_host: str = "127.0.0.1") -> FastAPI:
 
     @app.get("/wb-api/video-script/styles")
     def video_script_styles():
-        return {"styles": [{k: style[k] for k in ("id", "name", "format", "target_s", "wc", "prompt")}
-                           for style in vstudio.STYLE_PRESETS]}
+        # ui:hidden(如 from-analysis)不进前端; default 标记供前端认默认档; length_tiers 供「片长」下拉
+        rows = []
+        for s in vstudio.STYLE_PRESETS:
+            if s.get("ui") == "hidden":
+                continue
+            row = {k: s[k] for k in ("id", "name", "format", "target_s", "wc", "prompt")}
+            row["default"] = bool(s.get("default"))
+            rows.append(row)
+        return {"styles": rows, "length_tiers": vstudio.LENGTH_TIERS}
 
     @app.post("/wb-api/video-script/generate")
     async def video_script_generate(request: Request):
@@ -1455,30 +1464,93 @@ def create_app(bind_host: str = "127.0.0.1") -> FastAPI:
         rows = [r for r in config.load_drafts() if r.get("id") != did]
         return {"drafts": config.save_drafts(rows)}
 
-    # ── 图文页: 自动化任务真实 CRUD(data/workbench/automation.json, 调度留桩) ──
+    # ── 图文页: 自动化任务 CRUD(data/workbench/automation.json)+调度与执行(2026-09-11 收尾) ──
     @app.get("/wb-api/automation")
     def automation_list():
-        return {"tasks": config.load_automation()}
+        from . import autoops
+        tasks = config.load_automation()
+        for t in tasks:
+            t["next_run"] = autoops.task_next_run(t["id"]) if t.get("enabled") else ""
+        return {"tasks": tasks}
 
     @app.post("/wb-api/automation")
     async def automation_add(request: Request):
+        from . import autoops
         body = await request.json()
         rows = config.load_automation()
-        rows.append({"id": "a" + time.strftime("%m%d%H%M%S"),
-                     "name": body.get("name") or "未命名任务",
-                     "note": body.get("note", ""),
-                     "template": body.get("template", ""),
-                     "modules": body.get("modules") or [],
-                     "schedule": body.get("schedule") or {"kind": "daily", "time": "08:00"},
-                     "publish": body.get("publish") or {"target": "draft"},
-                     "enabled": bool(body.get("enabled", True)),
-                     "created_at": time.strftime("%Y-%m-%d %H:%M:%S")})
-        return {"tasks": config.save_automation(rows)}
+        task = {"id": "a" + time.strftime("%m%d%H%M%S"),
+                "name": body.get("name") or "未命名任务",
+                "note": body.get("note", ""),
+                "template": body.get("template", ""),
+                "modules": body.get("modules") or [],
+                "schedule": body.get("schedule") or {"kind": "daily", "time": "08:00"},
+                "publish": body.get("publish") or {"target": "draft"},
+                "enabled": bool(body.get("enabled", True)),
+                "created_at": time.strftime("%Y-%m-%d %H:%M:%S")}
+        rows.append(task)
+        rows = config.save_automation(rows)
+        reg = autoops.register_task(task)          # 同步登记 schtasks(免 wscript 直调)
+        return {"tasks": rows, "schedule": reg}
 
     @app.delete("/wb-api/automation/{tid}")
     def automation_del(tid: str):
+        from . import autoops
+        autoops.unregister_task(tid)
         rows = [r for r in config.load_automation() if r.get("id") != tid]
         return {"tasks": config.save_automation(rows)}
+
+    @app.put("/wb-api/automation/{tid}/enabled")
+    async def automation_enabled(tid: str, request: Request):
+        from . import autoops
+        body = await request.json()
+        on = bool(body.get("on"))
+        rows = config.load_automation()
+        for r in rows:
+            if r.get("id") == tid:
+                r["enabled"] = on
+        rows = config.save_automation(rows)
+        return {"tasks": rows, "schedule": autoops.set_task_enabled(tid, on)}
+
+    @app.post("/wb-api/automation/{tid}/run")
+    def automation_run(tid: str):
+        """立即执行一轮: detached 拉起 CLI(编排在子进程跑 LLM, 端点零外呼)。"""
+        import subprocess
+        repo = Path(__file__).resolve().parents[2]
+        cli = repo / "cli.py"
+        try:
+            subprocess.Popen([*config.py_cmd(), str(cli), "workbench", "run-auto",
+                              "--id", tid],
+                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                             cwd=str(repo), creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+        except OSError as e:
+            return JSONResponse({"error": f"拉起失败: {e}"}, status_code=500)
+        return {"ok": True, "note": "已开始执行(成稿约 1-3 分钟), 完成后刷新任务列表看结果"}
+
+    # ── 图文页: 内容发布·推入待发队列(草稿→发布仓 articles/ md; 写发生在 CLI 子进程) ──
+    @app.post("/wb-api/publish-enqueue")
+    async def publish_enqueue(request: Request):
+        import subprocess
+        body = await request.json()
+        did = str(body.get("draft_id") or "")
+        if not did:
+            return JSONResponse({"error": "bad_draft_id"}, status_code=400)
+        cli = Path(__file__).resolve().parents[2] / "cli.py"
+        try:
+            p = subprocess.run([*config.py_cmd(), str(cli), "workbench", "enqueue",
+                                "--draft-id", did],
+                               capture_output=True, text=True, encoding="utf-8",
+                               errors="replace", timeout=30)
+        except subprocess.TimeoutExpired:
+            return JSONResponse({"error": "cli_timeout"}, status_code=504)
+        except OSError as e:
+            return JSONResponse({"error": f"进程启动失败: {e}"}, status_code=500)
+        try:
+            out = json.loads((p.stdout or "").strip().splitlines()[-1])
+        except (ValueError, IndexError):
+            return JSONResponse({"error": "invalid_cli_response"}, status_code=502)
+        if p.returncode != 0:
+            return JSONResponse(out, status_code=400 if p.returncode == 4 else 500)
+        return out
 
     # ── 云端同步预留桩(本期一律 501) ─────────────────────────────────────────
     @app.post("/wb-api/cloud/{action}")

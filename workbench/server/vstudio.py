@@ -64,7 +64,32 @@ STYLE_PRESETS = [
                "每句以句号结尾；结尾必须悬念收束(末句不超过12字)，给下集留钩。"
                "on_screen 用档案标签风格(全大写短词、地点/日期/人名)。"},
 ]
+STYLE_PRESETS.insert(0, {"id": "spoken-plain", "name": "自然口播", "format": "horizontal",
+                         "target_s": 120, "wc": (300, 1200), "default": True,
+                         "prompt": "保留原材料的事实与数据骨架，只把书面表达重写为真人说的口语；"
+                                   "不新增事实与观点。"})
+for _s in STYLE_PRESETS:
+    if _s["id"] == "from-analysis":
+        _s["ui"] = "hidden"      # 口播链路断链选项(只服务旧脚本路径), 前端不可见
+
 _STYLES = {s["id"]: s for s in STYLE_PRESETS}
+
+# 片长档(秒, 前端「片长」下拉; wc 由档位换算, 不再让用户选风格)
+LENGTH_TIERS = [60, 90, 100, 120, 210]
+DEFAULT_STYLE_ID = "spoken-plain"
+
+
+def _style_of(style_id: str | None) -> dict:
+    """风格解析: 空值/未知 id 一律回落自然口播(兼容存量与新模型)。"""
+    return _STYLES.get(style_id or "") or _STYLES[DEFAULT_STYLE_ID]
+
+
+def _wc_for_length(length_s: int, style: dict) -> tuple[int, int]:
+    """片长档 → 字数区间(4.2 字/秒, ±18% 弹性); 未给档用风格自带 wc。"""
+    if length_s and length_s > 0:
+        n = length_s * 4.2
+        return max(80, round(n * 0.82)), round(n * 1.18)
+    return style["wc"]
 
 ANALYZE_PROMPT = r"""你是财经视频内容与商业化分析师。请完整观看给定视频，输出两部分。
 
@@ -105,9 +130,12 @@ high_risk=涉法规、股价敏感、医疗健康等高危表述（优先删除�
 写不出核实方式的一律 pending；claims 逐条覆盖 narration 中的数字事实、点名与高危表述，宁多勿漏。"""
 
 
+AI_TONE_BANS = r"""写作前逐句扫描去AI味禁令（命中即改，绝不放过）：
+①二元对比壳（不是A而是B、不是X是Y 接连出现）；②命令模板开头（别急着、请记住、听好了）；③伪洞察标记（真正、其实、本质上、说白了、真相是）；④冒号讲义腔（遇事不决就冒号讲解）；⑤模糊指代（这一点、它、这个）；⑥时态错位（曾经…如今）；⑦没有参照物的空泛比较级（更、明显）；⑧抽象施压（很多人都没意识到、你可能不知道）；⑨隐喻口号收尾（起航、破浪、未来可期）；⑩匀速排比（三句以上同句式同长度连排）；⑪清单体收束（整段都靠“第一/第二/第三”或每条都配一句总结）；⑫感叹号与emoji堆叠；⑬精确到不真实的情绪细节（心头一颤、手心冒汗）。"""
+
+
 GEN_SYSTEM = r"""你是财经口播脚本主编。只输出一个 ```json 代码块，不要解释。
-写作前逐句扫描九类禁令：
-①二元对比壳（不是A而是B）；②命令模板开头（别急着）；③伪洞察标记（真正、其实、本质上、说白了）；④冒号讲义腔；⑤模糊指代（这一点、它）；⑥时态错位（曾经…如今）；⑦没有参照物的空泛比较级（更、明显）；⑧抽象施压（很多人都没意识到）；⑨隐喻口号收尾（起航、破浪）。
+""" + AI_TONE_BANS + r"""
 另禁：narration 中出现 Markdown、角色前缀、镜头/舞台指示（镜头切到、画面给出）、元话语（接下来我们看）。数字写成可念形式，例如“百分之十八”，代码和专名保留。on_screen 每条不超过 6 个词。全片只能有一个 CTA。
 输出 wb-video-script/v1：
 {"schema":"wb-video-script/v1","title":"不超过30字","format":"horizontal|vertical","style_id":"风格ID","duration_est_s":0,"word_count":0,"hook":{"type":"主钩子类型","variants":[{"type":"互异类型","text":"钩子"},{"type":"互异类型","text":"钩子"},{"type":"互异类型","text":"钩子"}]},"beats":[{"id":"b1","role":"hook|setup|move|gives|payoff|cta","duration_est_s":0,"narration":"纯口播","on_screen":[],"visual_hint":"画面建议","subtitle":"字幕"}],"cta":{"action":"动作","line":"唯一CTA原句"},"warnings":[]}
@@ -1512,14 +1540,23 @@ def scrub_voice_job_keys(root: Path | None = None) -> int:
     return n
 
 
-NARRATION_SYSTEM = r"""你是财经口播稿主编。输出且仅输出一个 ```json 代码块，不要解释。
+NARRATION_SYSTEM = r"""你是口播稿主编。输出且仅输出一个 ```json 代码块，不要解释。
 输出 wb-narration/v1：
 {"schema":"wb-narration/v1","title":"≤30字","format":"horizontal|vertical","paragraphs":[{"id":"p1","text":"..."}],"word_count":0,"warnings":[]}
-写作前逐句扫描九类禁令：
-①二元对比壳（不是A而是B）；②命令模板开头（别急着）；③伪洞察标记（真正、其实、本质上、说白了）；④冒号讲义腔；⑤模糊指代（这一点、它）；⑥时态错位（曾经…如今）；⑦没有参照物的空泛比较级（更、明显）；⑧抽象施压（很多人都没意识到）；⑨隐喻口号收尾（起航、破浪）。
+""" + AI_TONE_BANS + r"""
 数字写成可念形式，例如百分之十八。节拍短句，每5-8字一顿的口播节奏。
-首句必须是“谁+做了什么+带张力的结果”，结尾悬念收束。paragraphs 3-8 段。
-纯口播禁止 Markdown、角色前缀、镜头指示、元话语。""" + FINANCE_DISCIPLINE + CLAIMS_PROMPT
+开场钩子从三种里挑最贴材料的一种：事实recap（把最硬的事实放最前面）、替观众提问（说出观众心里正嘀咕的问题）、结论承诺（先告诉观众看完能得到什么）。段落结构跟着材料走，不硬套模板。paragraphs 2-8 段。
+长文改写纪律：输入为长文时，保留其事实、数据与论证骨架，只把书面表达重写为口语；不新增事实与观点，不做原文没有的评论，不拔高。
+纯口播禁止 Markdown、角色前缀、镜头指示、元话语。""" + CLAIMS_PROMPT
+
+# 财经关键词命中才挂合规纪律(2026-09-12 通用性改造: 泛内容不被强行合规化)
+_FINANCE_HINT_RE = re.compile(
+    r"股|基金|债券|央行|美联储|加息|降息|财报|市值|上市|IPO|港股|美股|A股|纳指|标普|"
+    r"道琼斯|黄金|原油|汇率|通胀|通缩|GDP|PMI|非农|关税|制裁|比特币|纳斯达克|牛市|熊市")
+
+
+def _is_finance_material(text: str) -> bool:
+    return bool(_FINANCE_HINT_RE.search(text or ""))
 
 STORYBOARD_SYSTEM = r"""你是口播分镜编辑。输入是已定稿口播稿全文，只输出一个 ```json 代码块。
 输出 wb-video-script/v1：
@@ -1530,11 +1567,66 @@ visual_hint/subtitle 必填。hook.variants 恰好3条，type互异，variant[0]
 只切分并设计画面，不改写、删减或新增口播。""" + FINANCE_DISCIPLINE + CLAIMS_PROMPT
 
 
+_AI_TONE_RULES = [
+    (re.compile(r"不是[^。！？，,]{1,12}而是|不是[\w一-龥]{1,8}是[他她它]"), "二元对比壳"),
+    (re.compile(r"别急着|请记住|听好了"), "命令模板开头"),
+    (re.compile(r"说白了|真相是|本质上|真正的"), "伪洞察标记"),
+    (re.compile(r"很多人都没意识到|你可能不知道|没人告诉你"), "抽象施压"),
+    (re.compile(r"起航|破浪|未来可期|星辰大海|不负韶华"), "隐喻口号"),
+    (re.compile(r"曾经[，,].{0,20}如今|过去[，,].{0,20}现在"), "时态错位"),
+    (re.compile(r"[！!]{2,}|[🌀-🫿]{2,}"), "感叹号/emoji堆叠"),
+    (re.compile(r"心头一颤|手心冒汗|后背发凉|眼眶一热"), "虚构情绪细节"),
+]
+
+
+def _ai_tone_hits(paragraph_texts: list) -> dict:
+    """确定性扫描: {段索引: [命中指纹标签]}。排比=连续3句同句式开头(前4字相同)。"""
+    hits = {}
+    for i, t in enumerate(paragraph_texts):
+        labels = [label for rx, label in _AI_TONE_RULES if rx.search(t)]
+        sents = [s.strip() for s in re.split(r"[。！？!?]", t) if s.strip()]
+        for a, b, c in zip(sents, sents[1:], sents[2:]):
+            if a[:4] and a[:4] == b[:4] == c[:4]:
+                labels.append("匀速排比")
+                break
+        if labels:
+            hits[i] = sorted(set(labels))
+    return hits
+
+
+def _ai_tone_repair(obj: dict, llm: tuple, hits: dict) -> None:
+    """命中段二次重写(只重写命中段, 不整篇重生成); 任何失败静默不阻断主流程。"""
+    paras = obj.get("paragraphs") or []
+    bad = [{"id": paras[i].get("id") or f"p{i+1}", "text": paras[i]["text"],
+            "issues": hits[i]} for i in sorted(hits) if i < len(paras)]
+    if not bad:
+        return
+    prompt = ("下面这些口播段落命中了去AI味禁令，逐条按 issues 改写：保持原意、事实与数字不变，"
+              "只重写表达为自然口语。输出且仅输出一个 ```json 代码块："
+              '{"paragraphs":[{"id":"原id","text":"改写后"}]}' + chr(10)
+              + json.dumps(bad, ensure_ascii=False))
+    raw = chat_completions(*llm, [{"role": "user", "content": prompt}], 0.4, 2000, 60)
+    fix, _ = _parse_json_reply(raw or "")
+    fixed = {p.get("id"): p.get("text") for p in (fix or {}).get("paragraphs", [])
+             if isinstance(p, dict) and isinstance(p.get("text"), str) and p["text"].strip()}
+    repaired = 0
+    for item in bad:
+        new_text = fixed.get(item["id"])
+        if new_text and new_text != item["text"]:
+            idx = next((i for i, p in enumerate(paras) if (p.get("id") or f"p{i+1}") == item["id"]), None)
+            if idx is not None:
+                paras[idx]["text"] = new_text
+                repaired += 1
+    labels = "、".join(sorted({l for v in hits.values() for l in v}))
+    if repaired:
+        obj.setdefault("warnings", []).append(f"去AI味自检: {repaired} 段命中禁令已重写（{labels}）")
+    else:
+        obj.setdefault("warnings", []).append(f"去AI味自检: {len(bad)} 段命中禁令（{labels}），自动重写未果，请人工审阅")
+
+
 def run_narration(request: dict) -> tuple[dict, int]:
-    style_id = request.get("style_id")
-    style = _STYLES.get(style_id)
-    if not style:
-        return {"error": "bad_style"}, 4
+    style_id = request.get("style_id") or ""
+    style = _style_of(style_id)                 # 空值/未知 id 回落自然口播(不再 bad_style)
     row = make_get(request.get("make_id")) if request.get("make_id") else None
     if request.get("make_id") and not row:
         return {"error": "make_not_found"}, 4
@@ -1546,30 +1638,59 @@ def run_narration(request: dict) -> tuple[dict, int]:
     llm = _translate_cfg(config.load())
     if not llm:
         return {"error": "no_llm_config", "hint": "到设置页配置翻译模型"}, 4
-    lo, hi = style["wc"]
-    user = f"风格：{style['name']}；{style['prompt']}\n写作引导字数区间：{lo}—{hi} 字\n输入材料：\n{material}"
+    brief = str(request.get("brief") or "").strip()
+    # 片长档(秒) → 字数区间; 未给档用风格自带 wc(高级用法兼容)
+    try:
+        length_s = int(request.get("length_s") or 0)
+    except (TypeError, ValueError):
+        length_s = 0
+    lo, hi = _wc_for_length(length_s, style)
+    fidelity = "rewrite" if request.get("fidelity") == "rewrite" else "faithful"
+    fidelity_line = ("改写幅度：忠于原文——按原文结构与信息顺序顺稿，只做口语化重写"
+                     if fidelity == "faithful" else
+                     "改写幅度：重写成片——允许重组段落、砍枝节、重排信息优先级")
+    user = (f"目标时长约 {length_s or style['target_s']} 秒（约 {lo}—{hi} 字）。" + chr(10)
+            + fidelity_line + chr(10))
+    if style_id and style_id != DEFAULT_STYLE_ID:
+        user += f"结构变体（高级）：{style['prompt']}" + chr(10)
+    if brief:
+        user += f"一句话简报：{brief}" + chr(10)
+    user += f"输入材料：" + chr(10) + material
+    # 财经纪律条件注入: 材料或简报命中财经关键词才挂, 泛内容不被强行合规化
+    system = NARRATION_SYSTEM + (FINANCE_DISCIPLINE if _is_finance_material(material + chr(10) + brief) else "")
     tick("generate", "llm", 15, "生成口播稿中…")
-    raw = chat_completions(*llm, [{"role": "system", "content": NARRATION_SYSTEM},
+    raw = chat_completions(*llm, [{"role": "system", "content": system},
                                   {"role": "user", "content": user}], 0.5, 3500, 90)
     obj, _ = _parse_json_reply(raw or "")
     paragraphs = obj.get("paragraphs") if isinstance(obj, dict) else None
     if not isinstance(paragraphs, list) or not paragraphs or not all(
             isinstance(p, dict) and isinstance(p.get("text"), str) for p in paragraphs):
         return {"error": "llm_failed", "hint": "模型未返回有效口播稿 JSON"}, 3
-    text = "\n\n".join(p["text"] for p in paragraphs)
+    # 去AI味后置自检(确定性扫描, 命中段二次重写; 失败静默)
+    try:
+        hits = _ai_tone_hits([p["text"] for p in paragraphs])
+        if hits:
+            tick("generate", "llm", 60, "去AI味自检重写命中段…")
+            _ai_tone_repair(obj, llm, hits)
+    except Exception:
+        pass
+    text = (chr(10) + chr(10)).join(p["text"] for p in paragraphs)
+    eff_style_id = style_id if style_id in _STYLES else DEFAULT_STYLE_ID
     if not isinstance(obj.get("disclaimer"), str) or not obj["disclaimer"].strip():
-        obj["disclaimer"] = disclaimer_for(text, style_id)
+        obj["disclaimer"] = disclaimer_for(text, eff_style_id)
     if not isinstance(obj.get("warnings"), list):
         obj["warnings"] = []
     _attach_claims(obj, obj["warnings"])
     obj.update(schema="wb-narration/v1", title=str(obj.get("title") or "未命名口播稿")[:30],
-               format=style["format"], text=text, word_count=_word_count(text))
+               format=style["format"], text=text, word_count=_word_count(text),
+               length_s=length_s or style["target_s"], fidelity=fidelity)
     if row:
         current = make_get(row["id"])
         if not current or current["narration"]["locked"]:
             return {"error": "make_changed", "hint": "生成期间口播稿已定稿或项目已删除"}, 4
-        current["narration"].update(source="llm", style_id=style_id,
-                                    ref_text=str(request.get("ref_text") or "")[:2000],
+        current["narration"].update(source="llm", style_id=eff_style_id,
+                                    ref_text=str(request.get("ref_text") or "")[:20000],
+                                    length_s=length_s, fidelity=fidelity,
                                     text=text, locked=False, locked_at=None, hash="",
                                     claims=obj.get("claims") or [])
         current["status"] = "editing_narration"

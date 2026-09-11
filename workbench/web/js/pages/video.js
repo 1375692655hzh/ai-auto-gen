@@ -20,7 +20,7 @@ WB.pages.video = {
       pool: [], poolMeta: null, poolIds: {}, poolSel: null,
       anUrl: '', anRec: null, anBusy: false, anErr: null, anProgress: null,
       jobPolls: { analyze: null, generate: null, voice: null, build: null },
-      styles: [], drafts: [],
+      styles: [], lengthTiers: [], drafts: [],
       scripts: [], scriptSel: null, scriptFilter: '', reusableOnly: false,
       /* ── 追踪账号 ── */
       chs: [], chMeta: null, chQ: "",
@@ -563,7 +563,7 @@ WB.pages.video = {
     },
     /* ── 脚本生成 / 仓库 ── */
     async loadStyles() {
-      try { this.styles = (await WB.api.get('/video-script/styles')).styles || []; }
+      try { const d = await WB.api.get('/video-script/styles'); this.styles = d.styles || []; this.lengthTiers = d.length_tiers || []; }
       catch (e) { WB.toast(e.error); }
     },
     async loadDrafts() {
@@ -798,7 +798,7 @@ WB.pages.video = {
       finally { this.coverForm.busy = false; }
     },
     normalizeMake(m) {
-      return { ...m, narration: { text: '', ref_text: '', style_id: '', source: '', locked: false, ...m.narration },
+      return { ...m, narration: { text: '', ref_text: '', style_id: '', source: '', locked: false, length_s: 0, fidelity: 'faithful', ...m.narration },
         script_meta: { locked: false, ...m.script_meta }, voice: { profile_id: '', voice: '', voice_key: '', items: {}, ...m.voice },
         assets: m.assets || [], voice_bad: m.voice_bad || [],
         video: { mode: 'unified', aspect: '16:9', fps: 30, theme: 'terminal-dark', layout: 'auto',
@@ -882,7 +882,10 @@ WB.pages.video = {
     },
     setMakeDefaults(m) {
       let changed = false;
-      if (!m.narration.style_id && this.styles.length) { m.narration.style_id = this.styles[0].id; changed = true; }
+      if (!m.narration.style_id && this.styles.length) {
+        const defStyle = this.styles.find((s) => s.default) || this.styles[0];
+        m.narration.style_id = defStyle.id; changed = true;
+      }
       const def = (this.presets && this.presets.tts && this.presets.tts.default) || {};
       const current = this.ttsProviders.find((p) => p.id === m.voice.profile_id);
       const p = current || this.ttsProviders.find((x) => x.id === def.provider_id) || this.ttsProviders[0];
@@ -945,6 +948,12 @@ WB.pages.video = {
       if (!m) return;
       if (m._blank) { this.materializeBlank(); return; }
       if (!m.id) return;
+      if (m.narration && !m.narration.length_s && this.lengthTiers.length
+          && (m.narration.ref_text || '').length > 40) {
+        const n = (m.narration.ref_text || '').replace(/\s+/g, '').length / 4.2;
+        m.narration.length_s = this.lengthTiers.reduce((a, b) =>
+          Math.abs(b - n) < Math.abs(a - n) ? b : a);   // 片长按参考文字数自动推荐(可改)
+      }
       this.saveVersions[m.id] = (this.saveVersions[m.id] || 0) + 1;
       this.savePending[m.id] = { body: this.makePayload(m), version: this.saveVersions[m.id] };
       this.saveState[m.id] = 'pending'; clearTimeout(this.saveTimers[m.id]);
@@ -1114,7 +1123,7 @@ WB.pages.video = {
       this[errKey] = ''; this.makeActionBusy = true;
       try {
         await this.flushMake(id); const m = this.curMake;
-        const payload = task === 'narration' ? { make_id: id, brief: this.narBrief, ref_text: m.narration.ref_text, style_id: m.narration.style_id }
+        const payload = task === 'narration' ? { make_id: id, brief: this.narBrief, ref_text: m.narration.ref_text, style_id: m.narration.style_id, length_s: m.narration.length_s || 0, fidelity: m.narration.fidelity || 'faithful' }
           : task === 'voice' ? { make_id: id, provider_id: m.voice.profile_id, voice: m.voice.voice, scope }
           : task === 'build' ? { make_id: id, mode: this.buildMode } : { make_id: id };
         const d = await WB.api.post(task === 'build' ? '/video-build' : '/video-' + task + '/generate', payload);
@@ -1782,12 +1791,20 @@ WB.pages.video = {
                     <label><input type="radio" value="b" v-model="narTab">直接输入</label>
                     <label><input type="radio" value="a" v-model="narTab">智能生成</label></div>
                   <template v-if="narTab==='a'">
-                    <textarea v-model="curMake.narration.ref_text" @input="saveMake()" rows="5" style="width:100%" placeholder="粘贴参考文，或上传 .txt/.md（≤200KB）"></textarea>
-
-                    <div class="form-row"><label>一句话简报</label><input type="text" v-model="narBrief" placeholder="这期视频讲什么" style="flex:1;min-width:0"></div>
-                    <div class="form-row"><label>风格</label><select v-model="curMake.narration.style_id" @change="saveMake()" style="max-width:100%">
-                      <option value="" disabled>请选择风格</option><option v-for="s in styles" :key="s.id" :value="s.id">{{ s.name }}</option></select></div>
-                    <button class="btn primary" :disabled="narBusy || storyBusy || !curMake.narration.style_id || !(narBrief.trim() || curMake.narration.ref_text.trim())" @click="runMakeJob('narration')">{{ narBusy ? '生成中…' : '生成口播稿' }}</button>
+                    <textarea v-model="curMake.narration.ref_text" @input="saveMake()" rows="5" style="width:100%" placeholder="粘贴参考文（长文直接粘，≤20000 字）"></textarea>
+                    <div class="form-row"><label>一句话简报</label><input type="text" v-model="narBrief" placeholder="这期视频讲什么（可空）" style="flex:1;min-width:0"></div>
+                    <div class="form-row"><label>片长</label>
+                      <select v-model="curMake.narration.length_s" @change="saveMake()">
+                        <option v-for="t in lengthTiers" :key="t" :value="t">{{ t }} 秒</option></select>
+                      <span class="muted" style="font-size:11px">按参考文字数自动推荐，可改</span></div>
+                    <div class="form-row"><label>改写幅度</label><span class="radio-group">
+                      <label><input type="radio" value="faithful" v-model="curMake.narration.fidelity" @change="saveMake()">忠于原文</label>
+                      <label><input type="radio" value="rewrite" v-model="curMake.narration.fidelity" @change="saveMake()">重写成片</label></span></div>
+                    <details style="margin:6px 0 8px"><summary class="muted" style="cursor:pointer;font-size:12px">高级：结构变体（一般不用动）</summary>
+                      <div class="form-row" style="margin-top:6px"><label>结构</label><select v-model="curMake.narration.style_id" @change="saveMake()" style="max-width:100%">
+                        <option v-for="s in styles" :key="s.id" :value="s.id">{{ s.name }}{{ s.default ? '（默认）' : '' }}</option></select></div>
+                    </details>
+                    <button class="btn primary" :disabled="narBusy || storyBusy || !(narBrief.trim() || curMake.narration.ref_text.trim())" @click="runMakeJob('narration')">{{ narBusy ? '生成中…' : '生成口播稿' }}</button>
                   </template>
                 </template>
                 <div class="muted" style="margin:10px 0 4px">正文</div>
