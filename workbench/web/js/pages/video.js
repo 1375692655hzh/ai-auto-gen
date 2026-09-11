@@ -130,8 +130,10 @@ WB.pages.video = {
 
   },
   methods: {
-    gateClass(s) { return s === "built" ? "green" : s === "reviewed" ? "yellow" : ""; },
-    gateText(s) { return { draft: "草稿", reviewed: "已审核", built: "已出片" }[s] || s; },
+    gateClass(s) { return s === "built" ? "green" : s === "built_with_warnings" ? "yellow" : s === "qa_failed" ? "red" : ""; },
+    /* 用户模型(2026-09-12): 出没出片是唯一分界线——没成片的一律「草稿」(含旧 draft/reviewed) */
+    gateText(s) { return { draft: "草稿", reviewed: "草稿", built: "已出片",
+                           built_with_warnings: "已出片·警告", qa_failed: "QA未过" }[s] || s; },
     /* ── 壳层子页注册(迟到的异步回调不得覆盖别的页面) ── */
     registerSubs() {
       if (!WB.shell) return;
