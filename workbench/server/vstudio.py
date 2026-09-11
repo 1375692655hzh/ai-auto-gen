@@ -357,40 +357,64 @@ def chat_completions_ex(base: str, key: str, model: str, messages: list,
         payload["max_tokens"] = max_tokens           #   付费档成稿放宽, 2026-09-10)
     if isinstance(extra, dict):
         payload.update(extra)
-    body = json.dumps(payload).encode("utf-8")
-    req = urllib.request.Request(
-        base.rstrip("/") + "/chat/completions", data=body,
-        headers={"Content-Type": "application/json", "Authorization": f"Bearer {key}"})
-    note = ""
-    try:
-        response = urllib.request.urlopen(req, timeout=timeout)   # 默认: 尊重系统代理/环境
-    except urllib.error.HTTPError as e:
-        return None, _classify_llm_err(e)       # 已到服务端, 无需重试
-    except Exception as e1:
-        try:                                     # 传输层失败 → 强制直连重试(绕过系统代理)
-            response = urllib.request.build_opener(
-                urllib.request.ProxyHandler({})).open(req, timeout=timeout)
-            note = "(经强制直连成功——你的系统代理在拦此域名, 建议代理规则把它设 DIRECT)"
+
+    def _post(pl):
+        """单次发送(代理双路径) → (data|None, err|None, http400_detail)。"""
+        body = json.dumps(pl).encode("utf-8")
+        req = urllib.request.Request(
+            base.rstrip("/") + "/chat/completions", data=body,
+            headers={"Content-Type": "application/json", "Authorization": f"Bearer {key}"})
+        note = ""
+        try:
+            response = urllib.request.urlopen(req, timeout=timeout)   # 默认: 尊重系统代理/环境
         except urllib.error.HTTPError as e:
-            return None, _classify_llm_err(e)
-        except Exception as e2:
-            return None, (_classify_llm_err(e2) +
-                          "; 默认/直连两路都不通——检查 base_url 与网络")
+            detail = ""
+            if e.code == 400:                        # 400 细节留给温度自愈判断
+                try:                                 # body 只能读一次: 先读再分类
+                    detail = (e.read().decode("utf-8", "replace") or "")[:200]
+                except Exception:
+                    pass
+                return None, f"供应商返回 HTTP 400: {detail[:120]}", detail
+            return None, _classify_llm_err(e), ""    # 已到服务端, 无需重试
+        except Exception as e1:
+            try:                                     # 传输层失败 → 强制直连重试(绕过系统代理)
+                response = urllib.request.build_opener(
+                    urllib.request.ProxyHandler({})).open(req, timeout=timeout)
+                note = "(经强制直连成功——你的系统代理在拦此域名, 建议代理规则把它设 DIRECT)"
+            except urllib.error.HTTPError as e:
+                return None, _classify_llm_err(e), ""
+            except Exception as e2:
+                return None, (_classify_llm_err(e2) +
+                              "; 默认/直连两路都不通——检查 base_url 与网络"), ""
+        try:
+            data = json.loads(response.read())
+        except Exception as e:
+            return None, f"响应解析失败({type(e).__name__})", ""
+        finally:
+            try:
+                response.close()                     # 复审 P2: 正常/异常路径都必须关闭
+            except Exception:
+                pass
+        return data, (note or None), ""
+
+    data, err, detail = _post(payload)
+    if data is None and detail and "temperature" in detail:
+        # 温度自愈(2026-09-11): 部分模型只允许固定温度(实测 GLM-5.3-Flash 关思考=0.6/
+        # 开思考=1, 传 0.4 直接 400), 省略字段走厂商默认——重试一次。
+        data, err, _ = _post({k: v for k, v in payload.items() if k != "temperature"})
+        if data is not None:
+            err = ((err or "") + "(已省略 temperature 重试成功: 该模型只允许固定温度)") or None
+    if data is None:
+        return None, err
     try:
-        data = json.loads(response.read())
         content = ((data.get("choices") or [{}])[0].get("message") or {}).get("content")
     except Exception as e:
         return None, f"响应解析失败({type(e).__name__})"
-    finally:
-        try:
-            response.close()                     # 复审 P2: 正常/异常路径都必须关闭
-        except Exception:
-            pass
     content = (content or "").strip()
     if not content:
         return None, ("返回空 content——推理模型? 在成稿设置 extra_body 填 "
-                      '{"thinking":{"type":"disabled"}}(智谱)') + note
-    return content, note or None
+                      '{"thinking":{"type":"disabled"}}(智谱)') + (err or "")
+    return content, err or None
 
 
 _VIDEO_MIME = {".mp4": "video/mp4", ".m4v": "video/mp4", ".mov": "video/quicktime",
@@ -649,7 +673,22 @@ def try_begin_job(kind: str, request: dict) -> bool:
 
 
 def status_payload() -> dict:
-    jobs = load_jobs()
+    with config.file_lock("video_jobs"):
+        jobs = load_jobs()
+        healed = False
+        # 读路径僵死自愈(2026-09-11): CLI 进程被杀/会话中断没走 finish_job 时,
+        # running 标志永真 → 前端「生成中」横栏永远亮着。begin 侧有 stale 检查,
+        # 读侧没有 —— 这里补齐同阈值: 超 JOB_STALE_S 判僵落盘, 标志自动解除。
+        for kind, j in jobs.items():
+            if isinstance(j, dict) and j.get("running")                     and _age_seconds(j.get("started_at")) > JOB_STALE_S.get(kind, 20 * 60):
+                j.update({"running": False, "finished_at": _now(), "exit": 3,
+                          "error": "任务超时判僵(进程失联), 已自动解锁",
+                          "progress": {**(j.get("progress") or {}),
+                                       "stage": "stale", "pct": 0, "message": ""}})
+                jobs[kind] = j
+                healed = True
+        if healed:
+            _save_jobs(jobs)
     common = ("running", "started_at", "finished_at", "exit", "progress", "error",
               "hint", "request")
     out = {kind: {k: jobs[kind].get(k) for k in common} for kind in jobs}
