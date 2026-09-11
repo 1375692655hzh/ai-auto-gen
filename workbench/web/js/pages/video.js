@@ -1698,7 +1698,7 @@ WB.pages.video = {
           </div>
           <div v-else-if="!curMake" class="card empty">正在准备制作单…</div>
           <template v-else>
-            <div style="border:1px solid var(--border);border-radius:12px;padding:14px 16px">
+            <div class="make-stage">
             <div class="card">
               <h3>视频名称</h3>
               <div class="form-row">
