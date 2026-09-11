@@ -885,6 +885,51 @@ def _translate_cfg(cfg: dict) -> tuple[str, str, str] | None:
     return values if all(values) else None
 
 
+def _compose_cfg(cfg: dict) -> tuple | None:
+    """成稿模型配置(compose 段): (base, key, model, extra)。extra_body 必须随调用透传
+    (GLM 推理模型 thinking 禁用, 否则 reasoning_content 吃光 max_tokens 返空)。"""
+    c = cfg.get("compose") or {}
+    values = (str(c.get("base_url") or ""), str(c.get("api_key") or ""),
+              str(c.get("model") or ""))
+    if not all(values):
+        return None
+    extra = c.get("extra_body") if isinstance(c.get("extra_body"), dict) else None
+    return (*values, extra)
+
+
+def _llm_for_narration(cfg: dict, source: str) -> tuple | None:
+    """口播生成供应商: compose=成稿模型(默认, 2026-09-12 用户拍板) / translate=翻译链(免费兜底)。
+    统一返回 (base, key, model, extra|None); 所选未配置时落另一路。"""
+    picks = ([_compose_cfg, _translate_cfg] if source == "compose" else [_translate_cfg, _compose_cfg])
+    for get in picks:
+        v = get(cfg)
+        if v:
+            return (*v[:3], v[3] if len(v) > 3 else None)
+    return None
+
+
+MAX_MATERIAL_CHARS = 20000          # 与 _material_for_generate 对齐
+CHUNK_CHARS = 12000                 # 超长文分段摘要的单段上限
+
+
+def _digest_long_material(material: str, brief: str, llm: tuple, warnings: list) -> str:
+    """超长文(>MAX_MATERIAL_CHARS)两阶段: 分段忠实摘要 → 合并为生成材料。
+    每段单次 LLM 调用(温度 0.2), 摘要保留事实/数据/论证骨架不评论; 失败段降级原文截断。"""
+    chunks = [material[i:i + CHUNK_CHARS] for i in range(0, len(material), CHUNK_CHARS)]
+    base, key, model, extra = llm
+    digests = []
+    for i, chunk in enumerate(chunks):
+        prompt = ("把下面这段长文压缩为忠实摘要：保留全部事实、数据、时间、主体与论证要点，"
+                  "只删冗余修辞，不评论不补充，控制在原文 1/3 以内。直接输出摘要正文。"
+                  + chr(10) + chr(10) + chunk)
+        raw = chat_completions(base, key, model, [{"role": "user", "content": prompt}],
+                               0.2, 4000, 120, extra=extra)
+        digests.append(raw.strip() if raw and raw.strip() else chunk[:4000])
+        tick("generate", "llm", 8 + i, f"长文分段摘要 {i + 1}/{len(chunks)}…")
+    warnings.append(f"材料超长（{len(material)} 字），已分 {len(chunks)} 段忠实摘要后生成")
+    return chr(10).join(chr(10).join([f"【材料第 {i + 1} 段摘要】", d]) for i, d in enumerate(digests))
+
+
 def run_analyze(request: dict) -> tuple[dict, int]:
     """执行 G0/G1/G2 分析链；本函数只由 CLI 进程调用。"""
     target, err = _target(request or {})
@@ -1605,7 +1650,9 @@ def _ai_tone_repair(obj: dict, llm: tuple, hits: dict) -> None:
               "只重写表达为自然口语。输出且仅输出一个 ```json 代码块："
               '{"paragraphs":[{"id":"原id","text":"改写后"}]}' + chr(10)
               + json.dumps(bad, ensure_ascii=False))
-    raw = chat_completions(*llm, [{"role": "user", "content": prompt}], 0.4, 2000, 60)
+    base, key, model, extra = llm
+    raw = chat_completions(base, key, model, [{"role": "user", "content": prompt}],
+                           0.4, 2000, 60, extra=extra)
     fix, _ = _parse_json_reply(raw or "")
     fixed = {p.get("id"): p.get("text") for p in (fix or {}).get("paragraphs", [])
              if isinstance(p, dict) and isinstance(p.get("text"), str) and p["text"].strip()}
@@ -1635,9 +1682,12 @@ def run_narration(request: dict) -> tuple[dict, int]:
     material, err = _material_for_generate({**request, "pasted": request.get("ref_text") or request.get("pasted")})
     if err:
         return err, 4
-    llm = _translate_cfg(config.load())
+    cfg = config.load()
+    llm_source = "compose" if request.get("llm_source") != "translate" else "translate"
+    llm = _llm_for_narration(cfg, llm_source)
     if not llm:
-        return {"error": "no_llm_config", "hint": "到设置页配置翻译模型"}, 4
+        return {"error": "no_llm_config",
+                "hint": "到设置页配置成稿模型(compose)或翻译模型(translate)"}, 4
     brief = str(request.get("brief") or "").strip()
     # 片长档(秒) → 字数区间; 未给档用风格自带 wc(高级用法兼容)
     try:
@@ -1649,6 +1699,10 @@ def run_narration(request: dict) -> tuple[dict, int]:
     fidelity_line = ("改写幅度：忠于原文——按原文结构与信息顺序顺稿，只做口语化重写"
                      if fidelity == "faithful" else
                      "改写幅度：重写成片——允许重组段落、砍枝节、重排信息优先级")
+    gen_warnings = []
+    if len(material) > MAX_MATERIAL_CHARS:
+        tick("generate", "llm", 8, "长文分段摘要…")
+        material = _digest_long_material(material, brief, llm, gen_warnings)
     user = (f"目标时长约 {length_s or style['target_s']} 秒（约 {lo}—{hi} 字）。" + chr(10)
             + fidelity_line + chr(10))
     if style_id and style_id != DEFAULT_STYLE_ID:
@@ -1659,13 +1713,23 @@ def run_narration(request: dict) -> tuple[dict, int]:
     # 财经纪律条件注入: 材料或简报命中财经关键词才挂, 泛内容不被强行合规化
     system = NARRATION_SYSTEM + (FINANCE_DISCIPLINE if _is_finance_material(material + chr(10) + brief) else "")
     tick("generate", "llm", 15, "生成口播稿中…")
-    raw = chat_completions(*llm, [{"role": "system", "content": system},
-                                  {"role": "user", "content": user}], 0.5, 3500, 90)
-    obj, _ = _parse_json_reply(raw or "")
-    paragraphs = obj.get("paragraphs") if isinstance(obj, dict) else None
-    if not isinstance(paragraphs, list) or not paragraphs or not all(
-            isinstance(p, dict) and isinstance(p.get("text"), str) for p in paragraphs):
-        return {"error": "llm_failed", "hint": "模型未返回有效口播稿 JSON"}, 3
+    base, key, model, extra = llm
+    messages = [{"role": "system", "content": system}, {"role": "user", "content": user}]
+    obj = None
+    for attempt in (1, 2):
+        raw = chat_completions(base, key, model, messages, 0.5, 3500, 90, extra=extra)
+        obj, _ = _parse_json_reply(raw or "")
+        paragraphs = obj.get("paragraphs") if isinstance(obj, dict) else None
+        if isinstance(paragraphs, list) and paragraphs and all(
+                isinstance(p, dict) and isinstance(p.get("text"), str) for p in paragraphs):
+            break
+        if attempt == 1:
+            messages.append({"role": "user", "content":
+                "上次输出不是有效 JSON。严格只输出一个 ```json 代码块，按要求的 schema，不要任何解释。"})
+            tick("generate", "llm", 20, "输出格式异常, 自动重试…")
+            obj = None
+    if obj is None:
+        return {"error": "llm_failed", "hint": "模型两次未返回有效口播稿 JSON"}, 3
     # 去AI味后置自检(确定性扫描, 命中段二次重写; 失败静默)
     try:
         hits = _ai_tone_hits([p["text"] for p in paragraphs])
@@ -1680,10 +1744,12 @@ def run_narration(request: dict) -> tuple[dict, int]:
         obj["disclaimer"] = disclaimer_for(text, eff_style_id)
     if not isinstance(obj.get("warnings"), list):
         obj["warnings"] = []
+    obj["warnings"] = gen_warnings + obj["warnings"]
     _attach_claims(obj, obj["warnings"])
     obj.update(schema="wb-narration/v1", title=str(obj.get("title") or "未命名口播稿")[:30],
                format=style["format"], text=text, word_count=_word_count(text),
-               length_s=length_s or style["target_s"], fidelity=fidelity)
+               length_s=length_s or style["target_s"], fidelity=fidelity,
+               llm_source=llm_source, llm_model=model)
     if row:
         current = make_get(row["id"])
         if not current or current["narration"]["locked"]:

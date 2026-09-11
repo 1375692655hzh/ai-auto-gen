@@ -20,7 +20,7 @@ WB.pages.video = {
       pool: [], poolMeta: null, poolIds: {}, poolSel: null,
       anUrl: '', anRec: null, anBusy: false, anErr: null, anProgress: null,
       jobPolls: { analyze: null, generate: null, voice: null, build: null },
-      styles: [], lengthTiers: [], drafts: [],
+      styles: [], lengthTiers: [], llmOptions: [], drafts: [],
       scripts: [], scriptSel: null, scriptFilter: '', reusableOnly: false,
       /* ── 追踪账号 ── */
       chs: [], chMeta: null, chQ: "",
@@ -563,7 +563,7 @@ WB.pages.video = {
     },
     /* ── 脚本生成 / 仓库 ── */
     async loadStyles() {
-      try { const d = await WB.api.get('/video-script/styles'); this.styles = d.styles || []; this.lengthTiers = d.length_tiers || []; }
+      try { const d = await WB.api.get('/video-script/styles'); this.styles = d.styles || []; this.lengthTiers = d.length_tiers || []; this.llmOptions = d.llm_options || []; }
       catch (e) { WB.toast(e.error); }
     },
     async loadDrafts() {
@@ -798,7 +798,7 @@ WB.pages.video = {
       finally { this.coverForm.busy = false; }
     },
     normalizeMake(m) {
-      return { ...m, narration: { text: '', ref_text: '', style_id: '', source: '', locked: false, length_s: 0, fidelity: 'faithful', ...m.narration },
+      return { ...m, narration: { text: '', ref_text: '', style_id: '', source: '', locked: false, length_s: 0, fidelity: 'faithful', llm_source: 'compose', ...m.narration },
         script_meta: { locked: false, ...m.script_meta }, voice: { profile_id: '', voice: '', voice_key: '', items: {}, ...m.voice },
         assets: m.assets || [], voice_bad: m.voice_bad || [],
         video: { mode: 'unified', aspect: '16:9', fps: 30, theme: 'terminal-dark', layout: 'auto',
@@ -1123,7 +1123,7 @@ WB.pages.video = {
       this[errKey] = ''; this.makeActionBusy = true;
       try {
         await this.flushMake(id); const m = this.curMake;
-        const payload = task === 'narration' ? { make_id: id, brief: this.narBrief, ref_text: m.narration.ref_text, style_id: m.narration.style_id, length_s: m.narration.length_s || 0, fidelity: m.narration.fidelity || 'faithful' }
+        const payload = task === 'narration' ? { make_id: id, brief: this.narBrief, ref_text: m.narration.ref_text, style_id: m.narration.style_id, length_s: m.narration.length_s || 0, fidelity: m.narration.fidelity || 'faithful', llm_source: m.narration.llm_source || 'compose' }
           : task === 'voice' ? { make_id: id, provider_id: m.voice.profile_id, voice: m.voice.voice, scope }
           : task === 'build' ? { make_id: id, mode: this.buildMode } : { make_id: id };
         const d = await WB.api.post(task === 'build' ? '/video-build' : '/video-' + task + '/generate', payload);
@@ -1797,6 +1797,9 @@ WB.pages.video = {
                       <select v-model="curMake.narration.length_s" @change="saveMake()">
                         <option v-for="t in lengthTiers" :key="t" :value="t">{{ t }} 秒</option></select>
                       <span class="muted" style="font-size:11px">按参考文字数自动推荐，可改</span></div>
+                    <div class="form-row" v-if="llmOptions.length > 1"><label>生成模型</label>
+                      <select v-model="curMake.narration.llm_source" @change="saveMake()">
+                        <option v-for="o in llmOptions" :key="o.id" :value="o.id">{{ o.label }}（{{ o.model }}）{{ o.default ? ' · 默认' : '' }}</option></select></div>
                     <div class="form-row"><label>改写幅度</label><span class="radio-group">
                       <label><input type="radio" value="faithful" v-model="curMake.narration.fidelity" @change="saveMake()">忠于原文</label>
                       <label><input type="radio" value="rewrite" v-model="curMake.narration.fidelity" @change="saveMake()">重写成片</label></span></div>
