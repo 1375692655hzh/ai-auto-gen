@@ -67,6 +67,7 @@ if (project.status !== "reviewed" && !FORCE && !ESTIMATE) {
 
 const meta = story.meta;
 const fps = meta.fps ?? 30;
+const TRIM_SILENCE = meta.trimSilence ?? true;      // P1: TTS 头尾静默裁剪总闸(出问题置 false 一键回滚)
 const pad = meta.padSeconds ?? 0.3;   // 2026-09-13 节奏收紧(MoA四岗评审): 幕间停顿 ~1.9s→~1.0s
 const LEAD_S = meta.leadSeconds ?? 0.45;   // 音频前置静默: 语音开始时画面动画已展开(0.35 会贴着慢弹簧入场"空画面说话", 取 0.45)
 // 最短场景兜底(模板感知): versus/stacked/vpoints 最晚入场元素 ~4.7s, 保 5.0; 其余 4.0
@@ -208,6 +209,78 @@ function probeDuration(file) {
 	return Number(out.trim());
 }
 
+/* ---- P1(2026-09-13 MoA四岗方案): TTS 头尾静默裁剪 ----
+   副本落 audio/trim/<id>.mp3, 原件/manifest/对轴 sidecar 一律不动(红线);
+   silencedetect 阈值 -42dB, 头留 50ms/尾留 80ms 保护边防切到爆破音起振;
+   -ss/-t 流拷贝零重编码; ffmpeg 缺滤镜或探测/裁剪失败 → 返回 null 降级用原件
+   (降级模式照抄电平检测: 系统完整版 ffmpeg 优先, compositor 兜底)。
+   副本旁写 <id>.mp3.trim.json 缓存(源 mtime+size 命中即复用), 幂等可重跑。 */
+let TRIM_FFMPEG;
+function resolveTrimFfmpeg() {
+	if (TRIM_FFMPEG) return TRIM_FFMPEG;
+	const where = spawnSync("where", ["ffmpeg"], { encoding: "utf8", shell: true });
+	const sys = (where.stdout ?? "").split(/\r?\n/)[0]?.trim();
+	TRIM_FFMPEG = where.status === 0 && sys && existsSync(sys) ? sys
+		: FFPROBE.replace(/ffprobe(\.exe)?$/, "ffmpeg$1");
+	return TRIM_FFMPEG;
+}
+function trimSilence(file, dur) {
+	if (!(dur > 0.6)) return null;                       // 极短音频不裁
+	const st = existsSync(file) ? statSync(file) : null;
+	if (!st) return null;
+	const cacheFile = `${file}.trim.json`;
+	const out = path.join(path.dirname(file), "trim", path.basename(file));
+	try {
+		const cached = JSON.parse(readFileSync(cacheFile, "utf8"));
+		if (cached.mtimeMs === st.mtimeMs && cached.size === st.size && existsSync(out))
+			return { audio: `audio/trim/${path.basename(file)}`, duration: cached.duration, head: cached.head };
+	} catch { /* 无缓存走探测 */ }
+	const ff = resolveTrimFfmpeg();
+	const r = spawnSync(ff, ["-hide_banner", "-i", file,
+		"-af", "silencedetect=noise=-42dB:d=0.08", "-f", "null", "-"], { encoding: "utf8" });
+	const log = `${r.stdout ?? ""}
+${r.stderr ?? ""}`;
+	if (r.error || !/silence_/.test(log)) return null;   // 无滤镜/无输出 → 降级原件
+	const starts = [...log.matchAll(/silence_start: ([\d.]+)/g)].map((m) => +m[1]);
+	const ends = [...log.matchAll(/silence_end: ([\d.]+)/g)].map((m) => +m[1]);
+	let head = 0, tail = 0;
+	if (starts.length && ends.length && starts[0] <= 0.05) head = ends[0] ?? 0;
+	if (starts.length > ends.length) {                    // 尾段静默直到 EOF(无 silence_end)
+		const lastStart = starts[starts.length - 1];
+		if (lastStart >= (ends[ends.length - 1] ?? 0)) tail = dur - lastStart;
+	}
+	const headCut = Math.max(0, head - 0.05);
+	const tailCut = Math.max(0, tail - 0.08);
+	if (headCut + tailCut < 0.05) return null;            // 可裁量太小, 跳过
+	mkdirSync(path.dirname(out), { recursive: true });
+	const cutLen = Math.max(0.1, dur - tailCut - headCut);
+	const c = spawnSync(ff, ["-hide_banner", "-loglevel", "error", "-y",
+		"-ss", headCut.toFixed(3), "-t", cutLen.toFixed(3), "-i", file, "-c", "copy", out], { encoding: "utf8" });
+	if (c.status !== 0 || !existsSync(out)) return null;
+	const duration = probeDuration(out);
+	if (!(duration > 0.5) || duration >= dur) { try { rmSync(out); } catch {} return null; }
+	writeFileSync(cacheFile, JSON.stringify({ mtimeMs: st.mtimeMs, size: st.size, head: headCut, duration }));
+	return { audio: `audio/trim/${path.basename(file)}`, duration, head: headCut };
+}
+// 对轴轨(Edge cues.json / whisper alignment.json)按裁头量平移并钳位到裁后时长——
+// cue 一对, SRT/字幕/快切镜头吸附(visualShots)全链路自动对齐; 整条落裁剪区的行丢弃。
+function shiftAudioTrack(track, head, newDur) {
+	if (!track || !(head > 0)) return track;
+	const rows = Array.isArray(track.cues) ? track.cues : Array.isArray(track.segments) ? track.segments : null;
+	if (!rows) return track;
+	const shifted = [];
+	for (const c of rows) {
+		const start = Math.max(0, (c.start ?? 0) - head);
+		const end = Math.min(newDur, (c.end ?? 0) - head);
+		if (end <= start) continue;
+		shifted.push({ ...c, start: Number(start.toFixed(3)), end: Number(end.toFixed(3)) });
+	}
+	if (!shifted.length) return null;
+	const next = { ...track };
+	if (Array.isArray(track.cues)) next.cues = shifted; else next.segments = shifted;
+	return next;
+}
+
 /* ---- 引擎无关对轴（whisper.cpp）：无线界引擎(volc/dashscope/custom)的场景补齐 alignment，
  * 字幕与手绘跟随用真实音频时间而不是纯文本权重估算。对齐失败/缺失一律回退估算，不阻断制作。
  * 本机组件不存在时整段跳过（隔离测试环境没有 whisper 二进制，且那里必须保持估算口径）。
@@ -254,6 +327,7 @@ let totalFrames = 0;
 for (const s of story.scenes) {
 	let dur;
 	let audio = null;
+	let trimHead = 0;
 	if (s.silent) {                      // 静默场景: 固定时长(公告每页5s)
 		dur = s.durationS ?? 5;
 	} else if (ESTIMATE) {
@@ -262,6 +336,10 @@ for (const s of story.scenes) {
 		const file = path.join(audioDir, `${s.id}.mp3`);
 		dur = probeDuration(file);
 		audio = `audio/${s.id}.mp3`;
+		if (TRIM_SILENCE) {                              // P1: 头尾静默裁剪(副本), 原件不动
+			const trimmed = trimSilence(file, dur);
+			if (trimmed) { audio = trimmed.audio; dur = trimmed.duration; trimHead = trimmed.head; }
+		}
 	}
 	const silent = Boolean(s.silent);
 	const visualFrames = Math.ceil((dur + (silent ? 0 : pad + LEAD_S)) * fps);
@@ -284,6 +362,10 @@ for (const s of story.scenes) {
 				alignmentTrack = saved;
 		} catch { /* 损坏或哈希不符的对齐轨按缺失处理，走文本估算 */ }
 	}
+	if (trimHead > 0) {                                 // P1: 对轴轨随裁头平移+钳位(防末 cue 越界回退估算)
+		providerTrack = shiftAudioTrack(providerTrack, trimHead, dur) || undefined;
+		alignmentTrack = shiftAudioTrack(alignmentTrack, trimHead, dur) || undefined;
+	}
 	const subtitles = silent ? {cues: [], method: "silent"} : captionTimeline({
 		text: s.narration, duration: dur, fps, lead: LEAD_S, cues: s.captions,
 		providerTrack,
@@ -300,6 +382,7 @@ for (const s of story.scenes) {
 		visualDurationInFrames: visualFrames,
 		leadFrames: silent ? 0 : Math.round(LEAD_S * fps),
 		audioDuration: Number(dur.toFixed(3)),
+		trimHead: Number(trimHead.toFixed(3)) || undefined,
 		durationInFrames: f,
 	});
 	totalFrames += f;
@@ -509,6 +592,8 @@ let qaStatus = "built";
 		builtAt: new Date().toISOString() };
 	qa.checks.push(`最短场景 ${Math.min(...frames.map((f) => f.durationInFrames / fps)).toFixed(2)} 秒（模板感知兜底 ≥4.0，versus/stacked/vpoints ≥5.0）`);
 	qa.checks.push(`场景首帧 ${stills}/${frames.length}（out/keyframes）`);
+	const trimmedCount = frames.filter((f) => f.trimHead > 0).length;
+	if (trimmedCount) qa.checks.push(`TTS 静默裁剪 ${trimmedCount}/${frames.length} 幕（audio/trim/ 副本，原件保留）`);
 	qa.captionMethods = [...new Set(frames.map((f) => f.alignmentMethod))];
 	if (!existsSync(outFile)) qa.errors.push(`产物缺失: ${outFile}`);
 	else qa.checks.push(`产物存在（${(statSync(outFile).size / 1024 / 1024).toFixed(1)} MB）`);

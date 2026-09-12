@@ -1,7 +1,7 @@
 // Isolated CLI builds use a temporary cwd. Never touch a user project or active-story.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {mkdtempSync, mkdirSync, writeFileSync, readFileSync, copyFileSync, rmSync, readdirSync} from 'node:fs';
+import {mkdtempSync, mkdirSync, writeFileSync, readFileSync, copyFileSync, rmSync, readdirSync, existsSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
@@ -31,6 +31,21 @@ test('stale audio is preserved byte for byte',()=>fixture(({audio,project,invoke
  const bytes=Buffer.from('preserve this selected audio');writeFileSync(audio,bytes);
  writeFileSync(path.join(project,'audio/manifest.json'),JSON.stringify({b1:'stale'}));
  const result=invoke();assert.notEqual(result.status,0);assert.match(result.stderr,/语音已过期/);assert.deepEqual(readFileSync(audio),bytes);
+}));
+test('TTS head/tail silence is trimmed into audio/trim copy, original preserved',()=>fixture(({root,project,source,audio,invoke})=>{
+ mkdirSync(path.join(root,compositor),{recursive:true});
+ for(const name of readdirSync(path.join(video,compositor)).filter(n=>n.endsWith('.dll') || n==='ffprobe.exe' || n==='ffmpeg.exe')) copyFileSync(path.join(video,compositor,name),path.join(root,compositor,name));
+ const ff=path.join(root,compositor,'ffmpeg.exe');
+ execFileSync(ff,['-v','error','-f','lavfi','-i','sine=frequency=440:duration=2','-af','adelay=300|300,apad=pad_dur=0.4','-c:a','libmp3lame',audio]);
+ const original=readFileSync(audio);
+ writeFileSync(path.join(project,'audio/manifest.json'),JSON.stringify({b1:sha(source.scenes[0].narration)}));
+ const result=invoke();assert.equal(result.status,0,result.stderr);
+ const {frames}=JSON.parse(readFileSync(path.join(project,'out/timeline.json')));
+ assert.equal(frames[0].audio,'audio/trim/b1.mp3');                       // 走裁剪副本
+ assert.ok(frames[0].audioDuration<2.6&&frames[0].audioDuration>1.9,`裁后时长异常: ${frames[0].audioDuration}`);
+ assert.ok(frames[0].trimHead>0.15&&frames[0].trimHead<0.35,`裁头量异常: ${frames[0].trimHead}`);
+ assert.ok(existsSync(path.join(project,'audio/b1.mp3')));                 // 原件保留
+ assert.deepEqual(readFileSync(audio),original);                           // 原件字节不变
 }));
 test('actual mp3 duration, selected custom audio, fps and SRT on isolated CLI',()=>fixture(({root,project,source,audio,invoke})=>{
  mkdirSync(path.join(root,compositor),{recursive:true});
