@@ -82,7 +82,9 @@ class MakeTests(unittest.TestCase):
     def test_narration_flatten_and_lock_protection(self):
         row = self.make(False)
         result = {"schema": "wb-narration/v1", "paragraphs": [{"text": "第一段口播。"}, {"text": "第二段 口播。"}], "title": "口播"}
-        with (patch.object(vstudio, "_translate_cfg", return_value=("x", "k", "m")),
+        with (patch.object(vstudio, "_narration_chain",
+                           return_value=[{"id": "t", "name": "测试链位", "engine": "openai",
+                                          "base_url": "x", "api_key": "k", "model": "m", "extra_body": {}}]),
               patch.object(vstudio, "chat_completions", return_value=json.dumps(result))):
             report, code = vstudio.run_narration({"make_id": row["id"], "style_id": "event-fast", "ref_text": "材料"})
         self.assertEqual(code, 0)

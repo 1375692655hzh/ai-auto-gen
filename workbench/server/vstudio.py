@@ -2689,15 +2689,20 @@ def build_presets() -> dict:
     voices = [{"id": v["id"], "name": f"{v['name']}（{p['name']}）", "provider": p["id"],
                "engine": p["engine"]} for p in tts["providers"] if p.get("enabled") for v in p.get("voices", [])]
     aspect_labels = {"16:9": "横版", "9:16": "竖版", "1:1": "方形", "4:5": "4:5 竖构图"}
+    theme_rows = [{"id": k, "name": v, "swatch": THEME_SWATCHES[k],
+                   "desc": vmake.THEME_META.get(k, {}).get("desc", ""),
+                   **({"aspect_limit": "16:9"} if k == "vox-collage" else {})}
+                  for k, v in vmake.THEMES.items()]
+    layout_rows = [{"id": k, "name": v, "desc": vmake.LAYOUT_META.get(k, {}).get("desc", "")}
+                   for k, v in vmake.LAYOUTS.items()]
+    # 视觉风格预设(2026-09-12 一个选择框): 三元组套餐+服务端派生 aspects/cost 下发
+    from .generation_methods import style_presets_view
     return {"generation_methods": vmake.GENERATION_METHODS, "voices": voices,
             "tts": {"default": tts["default"], "providers": [
                 {k: p.get(k) for k in ("id", "name", "engine", "enabled", "voices")} for p in tts["providers"]]},
-            "themes": [{"id": k, "name": v, "swatch": THEME_SWATCHES[k],
-                        "desc": vmake.THEME_META.get(k, {}).get("desc", ""),
-                        **({"aspect_limit": "16:9"} if k == "vox-collage" else {})}
-                       for k, v in vmake.THEMES.items()],
-            "layouts": [{"id": k, "name": v, "desc": vmake.LAYOUT_META.get(k, {}).get("desc", "")}
-                        for k, v in vmake.LAYOUTS.items()],
+            "themes": theme_rows,
+            "layouts": layout_rows,
+            "style_presets": style_presets_view(theme_rows, layout_rows),
             "engine_templates": _engine_templates(),
             "aspects": [{"id": k, "label": aspect_labels[k], "dims": list(dims)}
                         for k, dims in vmake.ASPECTS.items()],

@@ -116,6 +116,36 @@ WB.pages.video = {
     ttsProviders() { return ((this.presets && this.presets.tts && this.presets.tts.providers) || []).filter((p) => p.enabled && (p.voices || []).length); },
     makeVoices() { const p = this.ttsProviders.find((p) => this.curMake && p.id === this.curMake.voice.profile_id); return p ? p.voices || [] : []; },
     makeTheme() { return ((this.presets && this.presets.themes) || []).find((t) => this.curMake && t.id === this.curMake.video.theme); },
+    // ── 视觉风格预设(一个选择框): 预设=三元组套餐, 选中即写三字段, id 永不落库 ──
+    stylePresetList() { return (this.presets && this.presets.style_presets) || []; },
+    resolveMakeMethod(v) {
+      // inherit 解析规则源 = vmake inherit 分支(vox-collage 主题或 fast-cut 编排→vox-fast-cut,
+      // 否则 template); 仅做展示层两层匹配, 改渲染链须同步此函数
+      const gm = v.generation_method || 'inherit';
+      if (gm !== 'inherit') return gm;
+      return (v.theme === 'vox-collage' || v.layout === 'fast-cut') ? 'vox-fast-cut' : 'template';
+    },
+    curStylePreset() {
+      const v = this.curMake && this.curMake.video; if (!v) return null;
+      const rm = this.resolveMakeMethod(v);
+      return this.stylePresetList.find((p) => p.theme === v.theme && p.layout === v.layout && p.method_resolved === rm) || null;
+    },
+    curStylePresetId: {
+      get() { return this.curStylePreset ? this.curStylePreset.id : 'custom'; },
+      async set(id) {
+        const p = this.stylePresetList.find((x) => x.id === id); if (!p || !this.curMake) return;
+        const v = this.curMake.video;
+        v.theme = p.theme; v.layout = p.layout; v.generation_method = p.generation_method;
+        await this.saveMake(); WB.toast('已应用风格：' + p.name + (p.cost_type === 'billed' ? '（生图计费）' : ''));
+      },
+    },
+    customStyleLabel() {
+      const v = (this.curMake && this.curMake.video) || {};
+      const nm = (rows, id) => { const r = ((this.presets && this.presets[rows]) || []).find((x) => x.id === id); return r ? r.name : (id || '—'); };
+      const gm = { inherit: '按主题/编排', template: '模板动效', 'vox-fast-cut': 'VOX拼贴快切', 'vox-collage': 'VOX纸拼贴', 'hand-drawn': '手绘跟随' }[v.generation_method] || v.generation_method || '—';
+      return '自定义（' + nm('themes', v.theme) + ' × ' + nm('layouts', v.layout) + ' × ' + gm + '，保持原设置）';
+    },
+    beatOverrideCount() { return this.curMake ? (this.curMake.video.beat_overrides || []).length : 0; },
     makeBusy() { return this.makeActionBusy || Object.values(this.makeJobIds).includes(this.cur) || Object.keys(this.assetUploadBusy).some((k) => k.startsWith(this.cur + ':') && this.assetUploadBusy[k]); },
     makeVoiceReady() { return this.segBadge(3).cls === 'green'; },
     /* 划分铁律(2026-09-12 用户定): 视频项目列表只摆出了片的成品(built/警告);
@@ -1919,21 +1949,38 @@ WB.pages.video = {
               <fieldset :disabled="makeBusy" style="border:0;min-width:0;padding:0">
                 <div class="form-row"><label>语音稿</label><select disabled style="max-width:100%"><option>{{ curMake.voice.voice_key || '尚无语音稿' }}</option></select></div>
                 <div class="form-row"><label>画幅</label><select v-model="curMake.video.aspect" @change="changeMakeAspect"><option v-for="a in (presets && presets.aspects) || []" :key="a.id" :value="a.id">{{ a.label }} {{ a.dims.join('×') }}</option></select></div>
+                <div class="form-row"><label>视觉风格</label>
+                  <select v-model="curStylePresetId" style="max-width:100%">
+                    <option v-for="p in stylePresetList" :key="p.id" :value="p.id" :disabled="!p.aspects.includes(curMake.video.aspect)">{{ p.name }}{{ !p.aspects.includes(curMake.video.aspect) ? '（仅 16:9）' : '' }}{{ p.cost_type==='billed' ? ' · 生图计费' : '' }}</option>
+                    <option v-if="curStylePresetId==='custom'" value="custom">{{ customStyleLabel }}</option>
+                  </select>
+                  <span v-if="makeTheme" style="display:inline-flex;gap:5px"><span v-for="(color,i) in makeTheme.swatch" :key="i" :style="{backgroundColor:color}" style="display:inline-block;width:14px;height:14px;border-radius:50%;border:1px solid var(--border)"></span></span></div>
+                <div class="form-row" v-if="curStylePreset"><label></label>
+                  <span class="muted" style="display:inline-flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:12px;min-width:0">
+                    {{ curStylePreset.desc }}<span class="badge" :class="curStylePreset.cost_type==='billed' ? 'yellow' : 'green'">{{ curStylePreset.cost_label }}</span>
+                    <span v-if="curStylePreset.cost_type==='billed' && curMake.video.image_budget > 0">本次上限 {{ curMake.video.image_budget }} 张（高级可改）</span>
+                    <span v-if="beatOverrideCount">逐拍覆盖 {{ beatOverrideCount }} 拍优先于全片风格</span>
+                  </span></div>
+                <div v-if="aspectBlocked().length" class="notice">当前画幅不支持：{{ aspectBlocked().join('、') }}。请改选支持当前画幅的风格或切回 16:9；不会静默忽略，制作时会直接报错。</div>
+                <details style="margin:6px 0">
+                  <summary class="muted" style="cursor:pointer;font-size:12px">高级设置（主题 / 编排 / 生成方式 / 帧率 / 逐拍覆盖…）</summary>
+                  <div style="padding:8px 0 0">
                 <div class="form-row"><label>帧率</label><div class="radio-group"><label v-for="fps in [30,60]" :key="fps"><input type="radio" :value="fps" v-model="curMake.video.fps" @change="saveMake()">{{ fps }} fps</label></div></div>
                 <div class="form-row"><label>制作方式</label><div class="radio-group">
                   <label><input type="radio" value="unified" v-model="curMake.video.mode" @change="saveMake()">统一生成</label>
                   <label><input type="radio" value="edit" v-model="curMake.video.mode" @change="saveMake()" :disabled="curMake.video.aspect!=='16:9'">编辑生成</label></div>
                   <span v-if="curMake.video.aspect!=='16:9'" class="muted">编辑生成仅支持 16:9</span></div>
-                  <div v-if="aspectBlocked().length" class="notice">当前画幅不支持：{{ aspectBlocked().join('、') }}。请改选模板动效或切回 16:9；不会静默忽略，制作时会直接报错。</div>
-                  <div class="form-row"><label>视觉风格</label><select v-model="curMake.video.theme" @change="saveMake()"><option v-for="t in (presets && presets.themes) || []" :key="t.id" :value="t.id" :disabled="t.aspect_limit && t.aspect_limit!==curMake.video.aspect">{{ t.name }}{{ t.aspect_limit && t.aspect_limit!==curMake.video.aspect ? '（仅 '+t.aspect_limit+'）' : '' }}</option></select>
-                    <span v-if="makeTheme" style="display:inline-flex;gap:5px"><span v-for="(color,i) in makeTheme.swatch" :key="i" :style="{backgroundColor:color}" style="display:inline-block;width:14px;height:14px;border-radius:50%;border:1px solid var(--border)"></span></span></div>
+                  <div class="form-row"><label>视觉主题</label><select v-model="curMake.video.theme" @change="saveMake()"><option v-for="t in (presets && presets.themes) || []" :key="t.id" :value="t.id" :disabled="t.aspect_limit && t.aspect_limit!==curMake.video.aspect">{{ t.name }}{{ t.aspect_limit && t.aspect_limit!==curMake.video.aspect ? '（仅 '+t.aspect_limit+'）' : '' }}</option></select></div>
                   <div class="form-row"><label>编排策略</label><select v-model="curMake.video.layout" @change="saveMake()"><option v-for="l in (presets && presets.layouts) || []" :key="l.id" :value="l.id" :disabled="l.id==='fast-cut' && curMake.video.aspect!=='16:9'">{{ l.name }}{{ l.id==='fast-cut' && curMake.video.aspect!=='16:9' ? '（仅 16:9）' : '' }}</option></select></div>
                   <div class="form-row"><label>画面编排</label><div class="radio-group"><label><input type="radio" value="llm" v-model="curMake.video.enrich" @change="saveMake()" :disabled="!presets || !presets.llm_ready">AI 编排</label>
                     <label><input type="radio" value="plain" v-model="curMake.video.enrich" @change="saveMake()">简洁</label></div>
                     <span v-if="!presets || !presets.llm_ready" class="muted">AI 编排需先在设置页配置翻译模型</span></div>
-                  <div class="form-row"><label>默认生成方式</label><select v-model="curMake.video.generation_method" @change="saveMake()"><option value="inherit">按主题 / 编排</option><option v-for="m in ((presets && presets.generation_methods) || []).filter(x => ['template','vox-fast-cut','vox-collage','hand-drawn'].includes(x.id))" :key="m.id" :value="m.id" :disabled="!m.aspects.includes(curMake.video.aspect)">{{ m.name }}</option></select></div>
+                  <div class="form-row"><label>默认生成方式</label><select v-model="curMake.video.generation_method" @change="saveMake()"><option value="inherit">按主题 / 编排</option><option v-for="m in ((presets && presets.generation_methods) || []).filter(x => ['template','vox-fast-cut','vox-collage','hand-drawn'].includes(x.id))" :key="m.id" :value="m.id" :disabled="!m.aspects.includes(curMake.video.aspect)">{{ m.name }}{{ !m.aspects.includes(curMake.video.aspect) ? "（不支持此画幅）" : "" }}</option></select>
+                    <span class="muted" style="font-size:11px">手改任一项，上方风格即显示为「自定义」</span></div>
                   <div class="form-row"><label>本次生图上限</label><input type="number" min="0" max="100" v-model.number="curMake.video.image_budget" @change="saveMake()" placeholder="默认 8 张；0 禁止新生图"></div>
-                  <div class="notice">逐拍选择优先于全片主题。VOX 快切 / 纸拼贴保留完整图片，约每 3–6 秒切换构图；每父拍最多一张新图，重复提示词复用缓存。手绘跟随使用本地 SVG，箭头仅表示原文顺序。字幕无真实对齐轨时按音频时长估算，不重合成已选语音。生图按供应商计费，耗时取决于缓存、音频与帧率。</div>
+                  <div class="notice" style="font-size:11px">逐拍选择优先于全片主题。VOX 快切 / 纸拼贴保留完整图片，约每 3–6 秒切换构图；每父拍最多一张新图，重复提示词复用缓存。手绘跟随使用本地 SVG，箭头仅表示原文顺序。字幕无真实对齐轨时按音频时长估算，不重合成已选语音。生图按供应商计费，耗时取决于缓存、音频与帧率。</div>
+                  </div>
+                </details>
                 <div v-if="curMake.video.mode==='edit'" style="overflow-x:auto"><table class="tbl"><thead><tr><th>拍</th><th>生成方法</th><th>素材 / 参数</th></tr></thead><tbody>
                   <tr v-for="(b,i) in makeBeats" :key="b.id"><td>{{ i+1 }} · {{ b.id }}</td>
                     <td><select :value="beatOverride(b).method" @change="setBeatOverride(b,'method',$event.target.value)">

@@ -185,6 +185,46 @@ class VideoLibraryTests(unittest.TestCase):
             with patch.object(Path, "read_text", **kwargs):
                 self.assertEqual(vstudio._engine_templates(), {"ids": [], "vertical_ids": []})
 
+    def test_style_presets_payload_and_matching(self):
+        """视觉风格预设(一个选择框): 下发完整性 + 三元组合法 + 两层匹配语义。"""
+        presets = vstudio.build_presets()
+        rows = presets["style_presets"]
+        self.assertEqual(len(rows), 8)
+        theme_ids = set(vmake.THEMES)
+        layout_ids = set(vmake.LAYOUTS)
+        method_ids = {m["id"] for m in vmake.GENERATION_METHODS}
+        defaults = [r for r in rows if r.get("default")]
+        self.assertEqual(len(defaults), 1)
+        self.assertEqual((defaults[0]["theme"], defaults[0]["layout"], defaults[0]["generation_method"]),
+                         ("terminal-dark", "auto", "inherit"))
+        for r in rows:
+            self.assertIn(r["theme"], theme_ids)
+            self.assertIn(r["layout"], layout_ids)
+            self.assertIn(r["generation_method"], method_ids)
+            self.assertIn(",".join(r["aspects"]), ("16:9,9:16,1:1,4:5", "16:9"))
+            self.assertEqual(r["cost_type"], "zero" if r["method_resolved"] in ("template", "hand-drawn") else "billed")
+            self.assertTrue(r["cost_label"])
+        # inherit 解析推导与 vmake 渲染侧同规则
+        by_id = {r["id"]: r for r in rows}
+        self.assertEqual(by_id["vox-cut"]["method_resolved"], "vox-fast-cut")
+        self.assertEqual(by_id["midnight-cut"]["aspects"], ["16:9"])
+        self.assertEqual(by_id["hand-sketch"]["aspects"], ["16:9"])
+        # 两层匹配(前端 resolveMakeMethod 的服务端镜像): 等价组合即命中, 冷门组合落自定义
+        def resolve(v):
+            gm = v["generation_method"]
+            if gm != "inherit":
+                return gm
+            return "vox-fast-cut" if (v["theme"] == "vox-collage" or v["layout"] == "fast-cut") else "template"
+
+        def match(v):
+            rm = resolve(v)
+            return any(r["theme"] == v["theme"] and r["layout"] == v["layout"]
+                       and r["method_resolved"] == rm for r in rows)
+
+        self.assertTrue(match({"theme": "terminal-dark", "layout": "auto", "generation_method": "inherit"}))
+        self.assertTrue(match({"theme": "terminal-dark", "layout": "auto", "generation_method": "template"}))
+        self.assertFalse(match({"theme": "paper-light", "layout": "quote-big", "generation_method": "inherit"}))
+
     def test_style_validation_and_atomic_patch(self):
         client = self.client()
         for payload in ({"default_theme": "wrong"}, {"default_layout": []},
