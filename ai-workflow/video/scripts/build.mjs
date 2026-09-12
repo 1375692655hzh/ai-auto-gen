@@ -68,8 +68,8 @@ if (project.status !== "reviewed" && !FORCE && !ESTIMATE) {
 const meta = story.meta;
 const fps = meta.fps ?? 30;
 const TRIM_SILENCE = meta.trimSilence ?? true;      // P1: TTS 头尾静默裁剪总闸(出问题置 false 一键回滚)
-const pad = meta.padSeconds ?? 0.3;   // 2026-09-13 节奏收紧(MoA四岗评审): 幕间停顿 ~1.9s→~1.0s
-const LEAD_S = meta.leadSeconds ?? 0.45;   // 音频前置静默: 语音开始时画面动画已展开(0.35 会贴着慢弹簧入场"空画面说话", 取 0.45)
+const pad = meta.padSeconds ?? 0.25;   // 2026-09-13 节奏收紧(MoA四岗评审): 幕间停顿 ~1.9s→~1.0s
+const LEAD_S = meta.leadSeconds ?? 0.4;   // 音频前置静默: 语音开始时画面动画已展开(0.35 会贴着慢弹簧入场"空画面说话", 取 0.45)
 // 最短场景兜底(模板感知): versus/stacked/vpoints 最晚入场元素 ~4.7s, 保 5.0; 其余 4.0
 const SLOW_TEMPLATES = new Set(["versus", "stacked", "vpoints"]);
 const minSceneS = (tpl) => (SLOW_TEMPLATES.has(tpl) ? 5.0 : 4.0);

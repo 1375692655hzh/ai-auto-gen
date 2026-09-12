@@ -15,7 +15,7 @@ from flows.steps import step
 
 FPS = 30
 SPEED = 4.2          # 与 script.py/build.mjs 同口径
-LEAD_S = 0.45        # 音频前置静默(与 build.mjs 默认一致, 2026-09-13 节奏收紧同步)
+LEAD_S = 0.4        # 音频前置静默(与 build.mjs 默认一致, 2026-09-13 节奏收紧同步)
 ROW_ACCENTS = {"背景": "blue", "进展": "green", "影响": "amber", "展望": "purple",
                "详情": "blue", "指标": "red"}
 
@@ -287,7 +287,7 @@ def _build_story(intro, outro, blocks, date: str, indices=None, anns=None) -> di
                  "tagline": _r("每天几分钟, 看懂财经", True)},
     })
     return {"meta": {"title": vt, "voice": "zh-CN-XiaoxiaoNeural",
-                     "fps": FPS, "width": 1920, "height": 1080, "padSeconds": 0.3, "leadSeconds": 0.45},
+                     "fps": FPS, "width": 1920, "height": 1080, "padSeconds": 0.25, "leadSeconds": 0.4},
             "scenes": scenes}
 
 
