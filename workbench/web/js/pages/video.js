@@ -109,8 +109,6 @@ WB.pages.video = {
     ttsProviders() { return ((this.presets && this.presets.tts && this.presets.tts.providers) || []).filter((p) => p.enabled && (p.voices || []).length); },
     makeVoices() { const p = this.ttsProviders.find((p) => this.curMake && p.id === this.curMake.voice.profile_id); return p ? p.voices || [] : []; },
     makeTheme() { return ((this.presets && this.presets.themes) || []).find((t) => this.curMake && t.id === this.curMake.video.theme); },
-    /* 步骤子页导航(0913a): 一次只见一个步骤, 状态徽章与分段口径同源 */
-    goMakeStep(n) { this.makeSeen[n] = true; this.makeStep = n; },
     makeSteps() {
       const titled = this.curMake && String(this.curMake.title || '').trim();
       return [
@@ -123,13 +121,6 @@ WB.pages.video = {
     },
     // ── 视觉风格预设(一个选择框): 预设=三元组套餐, 选中即写三字段, id 永不落库 ──
     stylePresetList() { return (this.presets && this.presets.style_presets) || []; },
-    resolveMakeMethod(v) {
-      // inherit 解析规则源 = vmake inherit 分支(vox-collage 主题或 fast-cut 编排→vox-fast-cut,
-      // 否则 template); 仅做展示层两层匹配, 改渲染链须同步此函数
-      const gm = v.generation_method || 'inherit';
-      if (gm !== 'inherit') return gm;
-      return (v.theme === 'vox-collage' || v.layout === 'fast-cut') ? 'vox-fast-cut' : 'template';
-    },
     curStylePreset() {
       const v = this.curMake && this.curMake.video; if (!v) return null;
       const rm = this.resolveMakeMethod(v);
@@ -155,10 +146,8 @@ WB.pages.video = {
     makeVoiceReady() { return this.segBadge(3).cls === 'green'; },
     /* 划分铁律(2026-09-13 用户重申): 草稿=未出片, 历史项目=已出片; 两者都是制作单,
        载入同一套五步编辑器——历史项目默认直跳 Step5 看成片, 流程自己翻 */
-    isHistoryMake(m) { return m.status === 'built' || !!m.last_build; },
     draftMakes() { return (this.makes || []).filter((m) => !this.isHistoryMake(m)); },
     historyMakes() { return (this.makes || []).filter((m) => this.isHistoryMake(m)); },
-    histDur(m) { const v = (this.videos || []).find((x) => x.id === m.project_id); return v && v.verify_duration_s ? this.fmtDur(v.verify_duration_s) : ''; },
     /* 本项目产出（第四段出片）：在视频项目列表中定位当前制作单的成片 */
     makeProject() {
       const pid = this.curMake && this.curMake.project_id;
@@ -172,6 +161,18 @@ WB.pages.video = {
 
   },
   methods: {
+    /* 带参工具必须住 methods: 误放 computed 会被当无参 getter, 取值即炸(0913f 双列表
+       全 0 事故根因)。Vue computed 只收无参 getter。 */
+    goMakeStep(n) { this.makeSeen[n] = true; this.makeStep = n; },
+    isHistoryMake(m) { return m.status === 'built' || !!m.last_build; },
+    histDur(m) { const v = (this.videos || []).find((x) => x.id === m.project_id); return v && v.verify_duration_s ? this.fmtDur(v.verify_duration_s) : ''; },
+    resolveMakeMethod(v) {
+      // inherit 解析规则源 = vmake inherit 分支(vox-collage 主题或 fast-cut 编排→vox-fast-cut,
+      // 否则 template); 仅做展示层两层匹配, 改渲染链须同步此函数
+      const gm = v.generation_method || 'inherit';
+      if (gm !== 'inherit') return gm;
+      return (v.theme === 'vox-collage' || v.layout === 'fast-cut') ? 'vox-fast-cut' : 'template';
+    },
     gateClass(s) { return s === "built" ? "green" : s === "built_with_warnings" ? "yellow" : s === "qa_failed" ? "red" : ""; },
     /* 用户模型(2026-09-12): 出没出片是唯一分界线——没成片的一律「草稿」(含旧 draft/reviewed) */
     gateText(s) { return { draft: "草稿", reviewed: "草稿", built: "已出片",
