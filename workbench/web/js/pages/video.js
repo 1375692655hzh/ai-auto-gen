@@ -948,12 +948,6 @@ WB.pages.video = {
       if (!m) return;
       if (m._blank) { this.materializeBlank(); return; }
       if (!m.id) return;
-      if (m.narration && !m.narration.length_s && this.lengthTiers.length
-          && (m.narration.ref_text || '').length > 40) {
-        const n = (m.narration.ref_text || '').replace(/\s+/g, '').length / 4.2;
-        m.narration.length_s = this.lengthTiers.reduce((a, b) =>
-          Math.abs(b - n) < Math.abs(a - n) ? b : a);   // 片长按参考文字数自动推荐(可改)
-      }
       this.saveVersions[m.id] = (this.saveVersions[m.id] || 0) + 1;
       this.savePending[m.id] = { body: this.makePayload(m), version: this.saveVersions[m.id] };
       this.saveState[m.id] = 'pending'; clearTimeout(this.saveTimers[m.id]);
@@ -1795,8 +1789,9 @@ WB.pages.video = {
                     <div class="form-row"><label>一句话简报</label><input type="text" v-model="narBrief" placeholder="这期视频讲什么（可空）" style="flex:1;min-width:0"></div>
                     <div class="form-row"><label>片长</label>
                       <select v-model="curMake.narration.length_s" @change="saveMake()">
-                        <option v-for="t in lengthTiers" :key="t" :value="t">{{ t }} 秒</option></select>
-                      <span class="muted" style="font-size:11px">按参考文字数自动推荐，可改</span></div>
+                        <option :value="0">不限 · 由材料定（默认，质量优先）</option>
+                        <option v-for="t in lengthTiers" :key="t" :value="t">约 {{ t }} 秒</option></select>
+                      <span class="muted" style="font-size:11px">默认不限长，要发限时平台才选档</span></div>
                     <div class="form-row" v-if="llmOptions.length > 1"><label>生成模型</label>
                       <select v-model="curMake.narration.llm_source" @change="saveMake()">
                         <option v-for="o in llmOptions" :key="o.id" :value="o.id">{{ o.label }}（{{ o.model }}）{{ o.default ? ' · 默认' : '' }}</option></select></div>

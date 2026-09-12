@@ -1699,12 +1699,17 @@ def run_narration(request: dict) -> tuple[dict, int]:
     fidelity_line = ("改写幅度：忠于原文——按原文结构与信息顺序顺稿，只做口语化重写"
                      if fidelity == "faithful" else
                      "改写幅度：重写成片——允许重组段落、砍枝节、重排信息优先级")
+    # 篇幅策略(2026-09-12 用户拍板: 文本质量第一, 默认不限长)——
+    # 未选档时绝不注入目标时长(逼模型压缩/注水两头伤质量), 反而明确禁止凑数;
+    # 仅当用户显式选档(明确要发限时平台)才给目标。
+    length_line = (f"目标时长约 {length_s} 秒（约 {lo}—{hi} 字）。"
+                   if length_s > 0 else
+                   "篇幅不限：由材料信息量决定，写透为止；不得为凑时长压缩信息或注水。")
     gen_warnings = []
     if len(material) > MAX_MATERIAL_CHARS:
         tick("generate", "llm", 8, "长文分段摘要…")
         material = _digest_long_material(material, brief, llm, gen_warnings)
-    user = (f"目标时长约 {length_s or style['target_s']} 秒（约 {lo}—{hi} 字）。" + chr(10)
-            + fidelity_line + chr(10))
+    user = length_line + chr(10) + fidelity_line + chr(10)
     if style_id and style_id != DEFAULT_STYLE_ID:
         user += f"结构变体（高级）：{style['prompt']}" + chr(10)
     if brief:
