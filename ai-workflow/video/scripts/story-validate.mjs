@@ -72,7 +72,7 @@ export function validateStory(story) {
 			}
 		}
 		const knownMeta = new Set(["title", "voice", "tts", "fps", "width", "height",
-			"padSeconds", "format", "theme", "layout"]);
+			"padSeconds", "leadSeconds", "format", "theme", "layout"]);
 		const unknownMeta = Object.keys(meta).filter((k) => !knownMeta.has(k));
 		if (unknownMeta.length) warn(`meta 含未知字段（放行）: ${unknownMeta.join(", ")}`);
 	}

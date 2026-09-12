@@ -19,7 +19,8 @@ REPO = Path(__file__).resolve().parents[2]          # workbench/server/vmake.py 
 VIDEO_DIR = REPO / "ai-workflow" / "video"
 VIDEOS_DIR = VIDEO_DIR / "videos"
 
-PAD_SECONDS = 0.8
+PAD_SECONDS = 0.3          # 2026-09-13 节奏收紧(MoA四岗评审): 幕间停顿过长
+LEAD_SECONDS = 0.45        # 音频前置静默(与 build.mjs 默认同值)
 FAST_CUT_MIN_SENT_CHARS = 8
 ASPECTS = {"16:9": (1920, 1080), "9:16": (1080, 1920),
            "1:1": (1080, 1080), "4:5": (1080, 1350)}
@@ -176,7 +177,8 @@ def _build_meta(script: dict, settings: dict, fmt: str, fps: int, theme: str, la
     meta = {"title": title, "voice": meta_voice, "fps": fps,
             "width": width, "height": height, "format": fmt,
             "theme": theme, "layout": layout,
-            "padSeconds": float(settings.get("pad_seconds", PAD_SECONDS))}
+            "padSeconds": float(settings.get("pad_seconds", PAD_SECONDS)),
+            "leadSeconds": float(settings.get("lead_seconds", LEAD_SECONDS))}
     if tts:
         meta["tts"] = tts
     return meta

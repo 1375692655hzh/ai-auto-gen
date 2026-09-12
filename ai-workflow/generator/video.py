@@ -116,7 +116,7 @@ def build_story(entries: list) -> dict:
     })
     return {
         "meta": {"title": vt, "voice": "zh-CN-XiaoxiaoNeural",
-                 "fps": 30, "width": 1920, "height": 1080, "padSeconds": 0.8},
+                 "fps": 30, "width": 1920, "height": 1080, "padSeconds": 0.3, "leadSeconds": 0.45},
         "scenes": scenes,
     }
 

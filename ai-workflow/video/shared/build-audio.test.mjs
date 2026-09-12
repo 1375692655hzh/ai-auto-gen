@@ -43,9 +43,9 @@ test('actual mp3 duration, selected custom audio, fps and SRT on isolated CLI',(
   const result=invoke();assert.equal(result.status,0,result.stderr);assert.match(result.stdout,/跳过 TTS/);
   const {frames}=JSON.parse(readFileSync(path.join(project,'out/timeline.json')));
   assert.equal(frames.length,1);assert.equal(frames[0].audio,'audio/b1.mp3');
-  assert.ok(Math.abs(frames[0].audioDuration-3)<.1);assert.equal(frames[0].leadFrames,fps*.7);
+  assert.ok(Math.abs(frames[0].audioDuration-3)<.1);assert.equal(frames[0].leadFrames,Math.round(fps*.45));
   assert.equal(frames[0].alignmentMethod,'approximate-text-weight');
-  assert.match(readFileSync(path.join(project,'out/subtitles.srt'),'utf8'),/00:00:00,700/);
+  assert.match(readFileSync(path.join(project,'out/subtitles.srt'),'utf8'),/00:00:00,4\d\d/);
   assert.deepEqual(readFileSync(audio),original);
  }
 }));
