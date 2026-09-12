@@ -27,7 +27,7 @@ WB.pages.video = {
       chForm: { input: "", note: "" }, showChForm: false, adding: false, chBusyId: "",
       coverForm: { open: false, busy: false, err: '', done: '', title: '', kicker: '', sub: '', bg_asset_id: '', person_asset_id: '' },
       /* ── 视频制作(原视频页内容) ── */
-      videos: [], sel: null, error: null,
+      videos: [], error: null,
       /* 四段制作：草稿持久化，任务槽独立恢复。 */
       makes: [], cur: null, blank: null,   /* blank=内存态空白新稿(不落库, 首次编辑才建行) */
       presets: null, narTab: 'a', narBrief: '', narDraftId: '', importId: '',
@@ -39,7 +39,7 @@ WB.pages.video = {
       buildBusy: false, buildProgress: null, buildErr: '', buildPid: '', buildMakeId: '',
       buildMode: 'build', buildLogOpen: false, buildLogLines: [], buildLogTruncated: false, buildWarnings: [],
       assetUploadBusy: {}, makeActionBusy: false, saveTimers: {}, savePending: {}, saveChains: {},
-      saveVersions: {}, saveState: {}, savedAt: {}, renameDraft: null, renameDraftTitle: '', projTitle: '',
+      saveVersions: {}, saveState: {}, savedAt: {}, renameDraft: null, renameDraftTitle: '',
       voiceFolderPath: '', outFolderPath: '',
       beatCursors: {}, makeJobIds: {}, disposed: false,
       /* ── 素材 / 模板仓库 ── */
@@ -50,21 +50,12 @@ WB.pages.video = {
     };
   },
   computed: {
-    selMp4() {
-      if (!this.sel || !this.sel.mp4.length) return "";
-      const pick = this.sel.mp4.includes("final.mp4") ? "final.mp4"
-        : this.sel.mp4.includes("preview-silent.mp4") ? "preview-silent.mp4"
-        : this.sel.mp4[0];
-      return "/wb-api/videos/" + this.sel.id + "/file/" + pick;
-    },
-    pubCmd() {
-      if (!this.sel) return '';
-      const mp4 = this.sel.mp4.includes('final.mp4') ? 'final.mp4' : (this.sel.mp4[0] || 'final.mp4');
-      return 'python cli.py publish run-video --video ai-workflow/video/videos/' + this.sel.id
-        + '/out/' + mp4 + ' --title "' + this.sel.title + '" --draft';
-    },
-    selCover() {
-      return this.sel && this.sel.cover ? "/wb-api/videos/" + this.sel.id + "/file/cover.png" : "";
+    makePubCmd() {
+      const p = this.makeProject;
+      if (!p) return '';
+      const mp4 = p.mp4.includes('final.mp4') ? 'final.mp4' : (p.mp4[0] || 'final.mp4');
+      return 'python cli.py publish run-video --video ai-workflow/video/videos/' + p.id
+        + '/out/' + mp4 + ' --title "' + ((this.curMake && this.curMake.title) || '') + '" --draft';
     },
     enabledChannels() {
       return (this.chs || []).filter((c) => c.resolve_status === "resolved" && c.enabled !== false);
@@ -162,10 +153,12 @@ WB.pages.video = {
     beatOverrideCount() { return this.curMake ? (this.curMake.video.beat_overrides || []).length : 0; },
     makeBusy() { return this.makeActionBusy || Object.values(this.makeJobIds).includes(this.cur) || Object.keys(this.assetUploadBusy).some((k) => k.startsWith(this.cur + ':') && this.assetUploadBusy[k]); },
     makeVoiceReady() { return this.segBadge(3).cls === 'green'; },
-    /* 划分铁律(2026-09-12 用户定): 视频项目列表只摆出了片的成品(built/警告);
-       没出片的 project(draft/reviewed/qa_failed 残留)不是成品, 归并到草稿概念, 从列表隐藏。 */
-    productVideos() { return (this.videos || []).filter((v) => v.status === "built" || v.status === "built_with_warnings"); },
-    orphanVideos() { return (this.videos || []).filter((v) => !(v.status === "built" || v.status === "built_with_warnings")); },
+    /* 划分铁律(2026-09-13 用户重申): 草稿=未出片, 历史项目=已出片; 两者都是制作单,
+       载入同一套五步编辑器——历史项目默认直跳 Step5 看成片, 流程自己翻 */
+    isHistoryMake(m) { return m.status === 'built' || !!m.last_build; },
+    draftMakes() { return (this.makes || []).filter((m) => !this.isHistoryMake(m)); },
+    historyMakes() { return (this.makes || []).filter((m) => this.isHistoryMake(m)); },
+    histDur(m) { const v = (this.videos || []).find((x) => x.id === m.project_id); return v && v.verify_duration_s ? this.fmtDur(v.verify_duration_s) : ''; },
     /* 本项目产出（第四段出片）：在视频项目列表中定位当前制作单的成片 */
     makeProject() {
       const pid = this.curMake && this.curMake.project_id;
@@ -574,10 +567,9 @@ WB.pages.video = {
             await this.refreshMakeJob(job);
             const pid = (job.request && job.request.project_id) || this.buildPid;
             const hit = this.videos.find((v) => pid && v.id.indexOf(pid) === 0);
-            if (hit) this.sel = hit;
             this.buildWarnings = (job.result && job.result.warnings) || [];
             this.buildErr = '';
-            WB.toast('视频已生成' + (hit ? ': ' + this.cut(hit.title, 18) : ''));
+            WB.toast('视频已生成' + (hit ? ': ' + this.cut(hit.title, 18) : '') + '——成片在本项目产出(Step 5)');
           } else if (kind === 'voice' || task === 'narration' || task === 'storyboard') {
             await this.refreshMakeJob(job);
             WB.toast(kind === 'voice' ? '语音已生成' : task === 'narration' ? '口播稿已生成' : '分镜脚本已生成');
@@ -777,26 +769,7 @@ WB.pages.video = {
       catch (e) { this.error = e; }
       this.registerSubs();
     },
-    async delVideo(v) {
-      if (!confirm('删除项目「' + (v.title || v.id) + '」？\n删除后不可恢复')) return;
-      try {
-        await WB.api.del('/videos/' + v.id); WB.toast('已删除');
-        if (this.sel && this.sel.id === v.id) this.sel = null;
-        await this.loadVideos();
-      } catch (e) { WB.toast(e.error); }
-    },
-    async cleanOrphanVideos() {
-      const rows = this.orphanVideos;
-      if (!rows.length) return;
-      const preview = rows.map((v) => '· ' + (v.title || v.id)).slice(0, 8).join(' / ');
-      if (!confirm('清理 ' + rows.length + ' 个未出片的残留项目？' + preview + (rows.length > 8 ? ' …' : '') + ' —— 这些项目没有成片，删除后不可恢复')) return;
-      for (const v of rows) {
-        try { await WB.api.del('/videos/' + v.id); } catch (e) {}
-      }
-      WB.toast('已清理 ' + rows.length + ' 个残留项目');
-      await this.loadVideos();
-    },
-    copyPubCmd() { WB.copyText(this.pubCmd); },
+    copyMakePubCmd() { WB.copyText(this.makePubCmd); WB.toast('投稿命令已复制'); },
     makeError(e) { return String(e.error || e.message || e || '请求失败') + (e.hint ? ' — ' + e.hint : ''); },
     anStartRename(h) { this.anRenaming = h.key; this.anRenameTitle = h.title || ''; },
     async anSubmitRename(h) {
@@ -922,6 +895,7 @@ WB.pages.video = {
       try {
         if (this.cur) await this.flushMake(this.cur);
         const m = await this.fetchMake(id);
+        if (this.isHistoryMake(m)) this.makeStep = 5;   /* 历史项目: 默认直跳成片页(0913e) */
         this.makeSeen = { [this.makeStep]: true };   /* 换稿只挂当前步骤(0913c 懒挂载) */
         this.cur = m.id; this.blank = null; this.narTab = m.narration.source === 'manual' ? 'b' : 'a';
         this.narBrief = ''; this.narDraftId = ''; this.importId = ''; this.beatCursors = {};
@@ -979,9 +953,12 @@ WB.pages.video = {
     },
     async deleteMake(m) {
       if (Object.values(this.makeJobIds).includes(m.id)) { WB.toast('该草稿正在执行任务，请收尾后删除'); return; }
-      if (!confirm('删除制作草稿「' + m.title + '」及其语音和素材？删除后不可恢复')) return;
+      const isHist = this.isHistoryMake(m) && m.project_id;
+      if (!confirm(isHist ? '删除历史项目「' + m.title + '」及其成片？删除后不可恢复'
+                           : '删除制作草稿「' + m.title + '」及其语音和素材？删除后不可恢复')) return;
       try {
         await this.flushMake(m.id); await WB.api.del('/video-makes/' + m.id);
+        if (isHist) { try { await WB.api.del('/videos/' + m.project_id); } catch (e) {} await this.loadVideos(); }
         this.makes = this.makes.filter((r) => r.id !== m.id);
         if (this.cur === m.id) { this.cur = null; await this.ensureActiveMake(); }
       } catch (e) { this.makeErr = this.makeError(e); }
@@ -1034,25 +1011,6 @@ WB.pages.video = {
         if (this.cur === m.id && this.curMake) this.curMake.title = t;
         this.savedAt = { ...this.savedAt, [m.id]: new Date().toTimeString().slice(0, 8) };
         this.renameDraft = null;
-        WB.toast('已重命名');
-      } catch (e) { WB.toast(this.makeError(e)); }
-    },
-    openProj(v) { this.sel = v; this.projTitle = v.title; },
-    /* 视频项目 → 创作流程桥(0913d): 成片行/弹层一键跳回其制作草稿(五步全在) */
-    makeOfProject(pid) { return (this.makes || []).find((m) => m.project_id === pid) || null; },
-    async openMakeFlow(v) {
-      const m = this.makeOfProject(v.id);
-      if (!m) { WB.toast('该成片没有关联的制作草稿（可能由 CLI 直接生成）'); return; }
-      this.sel = null;
-      await this.selectMake(m.id);
-    },
-    async saveProjTitle() {
-      if (!this.sel) return;
-      const t = (this.projTitle || '').trim();
-      if (!t) { WB.toast('标题不能为空'); return; }
-      try {
-        const d = await WB.api.post('/videos/' + this.sel.id + '/rename', { title: t });
-        this.sel.title = d.title || t; this.projTitle = d.title || t;
         WB.toast('已重命名');
       } catch (e) { WB.toast(this.makeError(e)); }
     },
@@ -2048,6 +2006,7 @@ WB.pages.video = {
                   <button class="btn" @click="openMakeFolder('project_out')">打开成片文件夹</button>
                   <button class="btn" @click="copyFolderPath('project_out')">复制路径</button>
                   <a class="btn" v-if="makeProject.has_review" :href="'/wb-api/videos/'+encodeURIComponent(curMake.project_id)+'/file/'+encodeURIComponent('发布前核对.md')" download="发布前核对.md">发布前核对</a>
+                  <button class="btn" v-if="makePubCmd" title="B站/抖音投稿命令(先草稿)" @click="copyMakePubCmd">复制投稿命令</button>
                   <span class="muted" style="font-size:11px">含 final.mp4 / 封面 / 字幕 SRT</span></div>
                 <p class="muted" style="margin-top:6px">该成片同时会出现在「视频项目」列表。</p>
                 <div style="margin-top:10px;border-top:1px dashed var(--line,#ccc);padding-top:10px">
@@ -2072,9 +2031,9 @@ WB.pages.video = {
           </template>
         </div>
         <div style="position:sticky;top:64px;align-self:start;max-height:calc(100vh - 76px);overflow-y:auto;min-width:0">
-          <div class="card"><h3>草稿箱（{{ makes.length }}）</h3>
-            <div v-if="!makes.length" class="muted">尚无制作草稿</div>
-            <div v-for="m in makes" :key="m.id" class="list-item" :class="{sel:cur===m.id}"
+          <div class="card"><h3>草稿箱（{{ draftMakes.length }}）</h3>
+            <div v-if="!draftMakes.length" class="muted">尚无制作草稿——没出片的都在这</div>
+            <div v-for="m in draftMakes" :key="m.id" class="list-item" :class="{sel:cur===m.id}"
                  style="padding:7px 10px;cursor:pointer" title="点击载入该草稿" @click="selectMake(m.id)">
               <div class="t" style="display:flex;align-items:center;gap:6px">
                 <span :title="m.title" style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ m.title }}</span>
@@ -2092,44 +2051,26 @@ WB.pages.video = {
                 <button class="btn" style="padding:2px 9px;font-size:12px" @click="renameDraft=null">取消</button></div>
             </div>
           </div>
-          <div class="card"><h3>视频项目（{{ productVideos.length }}）<button class="btn" @click="loadVideos">刷新</button></h3>
-            <div v-if="!productVideos.length" class="muted">暂无已出片项目 —— 出了片的成品才会出现在这里</div>
-          <div v-for="v in productVideos" :key="v.id" class="list-item" :class="{sel: sel === v}"
-               style="padding:7px 10px;cursor:pointer" @click="openProj(v)">
-            <div class="t" style="display:flex;align-items:center;gap:6px">
-              <span :title="v.title" style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ v.title }}</span>
-              <span v-if="v.status !== 'built'" class="badge" :class="gateClass(v.status)" style="flex-shrink:0">{{ gateText(v.status) }}</span></div>
-            <div style="display:flex;align-items:center;gap:5px;margin-top:5px">
-              <span class="muted" style="font-size:11px;flex:1;min-width:0;overflow:hidden;white-space:nowrap">{{ v.date || v.id }}<span v-if="v.scenes"> · {{ v.scenes }} 幕</span><span v-if="v.verify_duration_s"> · {{ fmtDur(v.verify_duration_s) }}</span></span>
-              <button class="btn" style="padding:2px 9px;font-size:12px;flex-shrink:0" @click.stop="openProj(v)">打开</button>
-              <button class="btn" v-if="makeOfProject(v.id)" style="padding:2px 9px;font-size:12px;flex-shrink:0" title="回到这条成片的制作草稿（口播/脚本/语音/视频五步）" @click.stop="openMakeFlow(v)">流程</button>
-              <button class="btn" style="padding:2px 9px;font-size:12px;flex-shrink:0" @click.stop.prevent="delVideo(v)">删除</button></div>
+          <div class="card"><h3>历史项目（{{ historyMakes.length }}）</h3>
+            <div v-if="!historyMakes.length" class="muted">暂无历史项目——出了片的制作会归档到这里</div>
+            <div v-for="m in historyMakes" :key="m.id" class="list-item" :class="{sel:cur===m.id}"
+                 style="padding:7px 10px;cursor:pointer" title="点击载入——直达成片页看视频，五步流程可自行翻看" @click="selectMake(m.id)">
+              <div class="t" style="display:flex;align-items:center;gap:6px">
+                <span :title="m.title" style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ m.title }}</span>
+                <span class="badge green" style="flex-shrink:0">已出片</span>
+                <span v-if="histDur(m)" class="muted" style="font-size:11px;flex-shrink:0">{{ histDur(m) }}</span></div>
+              <div style="display:flex;align-items:center;gap:5px;margin-top:5px">
+                <span class="muted" style="font-size:11px;flex:1;min-width:0;overflow:hidden;white-space:nowrap">{{ (m.last_build || m.updated_at || '').slice(5, 16).replace('T', ' ') }}</span>
+                <button class="btn" style="padding:2px 9px;font-size:12px;flex-shrink:0" :disabled="makeActionBusy" @click.stop="selectMake(m.id)">{{ cur===m.id ? '退回' : '载入' }}</button>
+                <button class="btn" style="padding:2px 9px;font-size:12px;flex-shrink:0" :disabled="makeActionBusy" @click.stop="startRenameDraft(m)">重命名</button>
+                <button class="btn" style="padding:2px 9px;font-size:12px;flex-shrink:0" :disabled="makeActionBusy || Object.values(makeJobIds).includes(m.id)" @click.stop="deleteMake(m)">删除</button></div>
+              <div v-if="renameDraft===m.id" class="form-row" style="gap:5px;margin:5px 0 0" @click.stop>
+                <input v-model="renameDraftTitle" :disabled="makeActionBusy" style="min-width:0;flex:1"
+                       placeholder="新标题" @keyup.enter="saveRenameDraft(m)" @keyup.esc="renameDraft=null">
+                <button class="btn primary" style="padding:2px 9px;font-size:12px" @click="saveRenameDraft(m)">存</button>
+                <button class="btn" style="padding:2px 9px;font-size:12px" @click="renameDraft=null">取消</button></div>
+            </div>
           </div>
-            <div v-if="orphanVideos.length" class="muted" style="font-size:11px;margin-top:6px;border-top:1px dashed var(--border);padding-top:6px">
-              另有 {{ orphanVideos.length }} 个未出片残留(草稿类, 已隐藏)
-              <a style="cursor:pointer;color:var(--red)" title="逐个确认后删除全部残留" @click.stop="cleanOrphanVideos">一键清理</a></div>
-          </div>
-        </div>
-      </div>
-      <div v-if="sel" role="presentation" @click.self="sel=null" @keydown.esc="sel=null" style="position:fixed;inset:0;background:rgba(0,0,0,.65);z-index:80;display:flex;align-items:center;justify-content:center;padding:24px">
-        <div class="card" role="dialog" aria-modal="true" aria-labelledby="video-project-title" tabindex="-1" style="width:min(860px,100%);max-height:90vh;overflow:auto">
-          <h3 id="video-project-title" style="display:flex;gap:8px;align-items:center">
-            <input v-model="projTitle" @keyup.enter="saveProjTitle" style="flex:1;min-width:0"
-                   title="点击此处可重命名，回车或点「重命名」保存">
-            <button class="btn" @click="saveProjTitle">重命名</button>
-            <button class="btn" autofocus @click="sel=null">关闭</button></h3>
-          <p class="muted">项目 {{ sel.id }} · 门禁状态：{{ gateText(sel.status) }} <span v-if="sel.verify_duration_s!=null" class="badge">成片 {{ Math.round(sel.verify_duration_s) }} 秒</span><span v-if="sel.verify_mode==='estimate'" class="badge yellow">无声预览版</span></p>
-          <div v-if="buildWarnings.length && buildPid && sel.id.indexOf(buildPid)===0" class="notice"><div v-for="(w,i) in buildWarnings" :key="i">{{ w }}</div></div>
-          <div v-if="sel.verify_warnings && sel.verify_warnings.length" class="notice"><strong>QA 警告</strong><div v-for="(w,i) in sel.verify_warnings" :key="i">{{ w }}</div></div>
-          <div v-if="sel.verify_errors && sel.verify_errors.length" class="err-box"><div v-for="(e,i) in sel.verify_errors" :key="i">{{ e }}</div></div>
-          <video v-if="selMp4" :src="selMp4" :key="selMp4" controls preload="metadata" style="max-height:420px"></video>
-          <img v-else-if="selCover" :src="selCover" class="cover-thumb" style="max-width:280px"><div v-else class="muted">尚无渲染产物(out/ 为空)</div>
-          <div v-if="sel.mp4.length>1" class="muted">产物：<span v-for="m in sel.mp4" :key="m" class="mono" style="margin-right:8px">{{ m }}</span></div>
-          <div class="stub-wrap" style="margin:12px 0"><button class="btn stub" disabled>投稿 B站/抖音</button><div class="stub-tip">投稿（先草稿）：<code style="white-space:pre-wrap;overflow-wrap:anywhere">{{ pubCmd }}</code><button class="btn" @click="copyPubCmd">复制</button></div></div>
-          <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
-            <button class="btn primary" v-if="makeOfProject(sel.id)" @click="openMakeFlow(sel)">打开创作流程</button>
-            <span v-else class="muted" style="font-size:12px">该成片没有关联的制作草稿（可能由 CLI 直接生成）</span>
-            <button class="btn" @click="delVideo(sel)">删除项目</button></div>
         </div>
       </div>
     </div>
