@@ -1813,8 +1813,15 @@ WB.pages.video = {
           </div>
           <div v-else-if="!curMake" class="card empty">正在准备制作单…</div>
           <template v-else>
+            <div class="make-wrap">
+              <aside class="make-step-nav" aria-label="制作步骤">
+                <button v-for="s in makeSteps" :key="s.n" type="button" class="step-item" :class="{sel: makeStep===s.n}"
+                        @click="makeStep=s.n">
+                  <span class="lbl"><span class="num">{{ s.n }}</span>{{ s.label }}</span>
+                  <span class="st" :style="{color: ({green:'var(--green)', yellow:'var(--yellow)', blue:'var(--accent)'})[s.badge.cls] || 'var(--text-mute)'}">{{ s.badge.text }}</span>
+                </button>
+              </aside>
             <div class="make-stage">
-            <div class="make-steps">
               <div class="make-step-main">
             <div class="card" v-show="makeStep===1">
               <h3>项目名称</h3>
@@ -2049,13 +2056,6 @@ WB.pages.video = {
               <div v-else class="muted">本项目尚未出片 —— 第五步点「开始制作」后，成片会出现在这里。</div>
             </div>
               </div>
-              <aside class="make-step-nav" aria-label="制作步骤">
-                <button v-for="s in makeSteps" :key="s.n" type="button" class="step-item" :class="{sel: makeStep===s.n}"
-                        @click="makeStep=s.n">
-                  <span class="num">{{ s.n }}</span><span class="lbl">{{ s.label }}</span>
-                  <span class="st" :style="{color: ({green:'var(--green)', yellow:'var(--yellow)', blue:'var(--accent)'})[s.badge.cls] || 'var(--text-mute)'}">{{ s.badge.text }}</span>
-                </button>
-              </aside>
             </div>
             </div>
           </template>

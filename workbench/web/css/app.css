@@ -130,25 +130,25 @@ a:hover { color: var(--text); }
 .make-stage .make-step-main > .card input[type=text], .make-stage .make-step-main > .card input[type=password],
 .make-stage .make-step-main > .card input[type=number], .make-stage .make-step-main > .card select,
 .make-stage .make-step-main > .card textarea { background: var(--bg-card); }
-/* 步骤子页双栏(0913a): 主区=当前步骤内容, 右侧=步骤导航(一次只见一步) */
-.make-steps { display: grid; grid-template-columns: minmax(0, 1fr) 196px; gap: var(--s3); align-items: start; }
+/* 步骤子页·书签标签(0913b): 左侧窄轨, 未选=融进背景的小标签, 选中=与"纸"同底色
+   无缝焊接(盖住纸的左边框 1px)——一张纸旁边突出小标签的一体视觉, 不做独立模块 */
+.make-wrap { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: start; }
 .make-step-main { min-width: 0; }
-.make-step-nav { display: flex; flex-direction: column; gap: 6px; position: sticky; top: 64px; }
-.make-step-nav .step-item { display: flex; align-items: center; gap: 8px; width: 100%;
-  padding: 8px 10px; border: 1px solid var(--border); border-radius: var(--r-ctl);
-  background: var(--bg); color: var(--text); font: inherit; text-align: left; cursor: pointer; }
-.make-step-nav .step-item .num { flex: none; width: 20px; height: 20px; border-radius: 50%;
-  background: var(--bg-hover); color: var(--text-mute); display: inline-flex;
-  align-items: center; justify-content: center; font-size: 11px; }
-.make-step-nav .step-item .lbl { flex: 1; min-width: 0; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.make-step-nav .step-item .st { flex: none; font-size: 11px; color: var(--text-mute); }
-.make-step-nav .step-item:hover { border-color: var(--accent); }
-.make-step-nav .step-item.sel { border-color: var(--accent); background: var(--accent-weak); }
-.make-step-nav .step-item.sel .num { background: var(--accent); color: #fff; }
+.make-step-nav { display: flex; flex-direction: column; gap: 4px; padding: 14px 0 0 2px; width: 108px; }
+.make-step-nav .step-item { display: flex; flex-direction: column; gap: 2px; padding: 7px 10px 6px;
+  border: 1px solid transparent; border-radius: 9px 0 0 9px; background: transparent;
+  color: var(--text-mute); font: inherit; text-align: left; cursor: pointer; position: relative; }
+.make-step-nav .step-item .lbl { font-size: 12.5px; white-space: nowrap; }
+.make-step-nav .step-item .num { font-size: 11px; margin-right: 5px; opacity: .75; }
+.make-step-nav .step-item .st { font-size: 10.5px; padding-left: 16px; }
+.make-step-nav .step-item:hover { color: var(--text); }
+.make-step-nav .step-item.sel { background: var(--bg-card); border-color: var(--border);
+  border-right-color: transparent; margin-right: -1px; z-index: 1; color: var(--text); font-weight: 600; }
 @media (max-width: 1100px) {
-  .make-steps { grid-template-columns: 1fr; }
-  .make-step-nav { position: static; flex-direction: row; flex-wrap: wrap; }
-  .make-step-nav .step-item { width: auto; flex: 1 1 auto; }
+  .make-wrap { grid-template-columns: 1fr; }
+  .make-step-nav { width: auto; flex-direction: row; flex-wrap: wrap; padding: 0 0 8px; }
+  .make-step-nav .step-item { border-radius: 9px; border-color: var(--border); }
+  .make-step-nav .step-item.sel { margin-right: 0; border-right-color: var(--border); }
 }
 .btn { display: inline-flex; align-items: center; gap: 6px; padding: 6px 13px;
   border-radius: var(--r-ctl); border: 1px solid var(--border); background: var(--bg-hover);
