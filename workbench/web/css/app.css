@@ -130,10 +130,6 @@ a:hover { color: var(--text); }
 .make-stage .make-step-main .card input[type=text], .make-stage .make-step-main .card input[type=password],
 .make-stage .make-step-main .card input[type=number], .make-stage .make-step-main .card select,
 .make-stage .make-step-main .card textarea { background: var(--bg-card); }
-/* Step5 视频生成双栏(0919e): 左=生成设置(压缩高度), 右=成片预览(播放器撑满列宽) */
-.step5-wrap { display: grid; grid-template-columns: minmax(0, 7fr) minmax(0, 9fr); gap: var(--s3); align-items: start; }
-.step5-wrap:has(> .card:only-child) { grid-template-columns: minmax(0, 1fr); }
-@media (max-width: 1100px) { .step5-wrap { grid-template-columns: 1fr; } }
 /* 步骤子页·书签标签(0913b): 左侧窄轨, 未选=融进背景的小标签, 选中=与"纸"同底色
    无缝焊接(盖住纸的左边框 1px)——一张纸旁边突出小标签的一体视觉, 不做独立模块 */
 .make-wrap { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: start; }

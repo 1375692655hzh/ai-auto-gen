@@ -1933,13 +1933,11 @@ WB.pages.video = {
               </template>
               <div v-if="voiceErr" class="err-box" style="padding:12px">{{ voiceErr }}</div>
             </div>
-            <div class="step5-wrap" v-if="makeSeen[5]" v-show="makeStep===5">
-            <div class="card">
+            <div class="card" v-if="makeSeen[5]" v-show="makeStep===5">
               <h3>视频生成 <span class="badge" :class="segBadge(4).cls">{{ segBadge(4).text }}</span></h3>
-              <p v-if="!makeVoiceReady" class="notice">语音尚未就绪，可先定稿脚本并制作无声预览</p>
+              <p class="muted" style="font-size:11px;margin:0 0 8px">语音稿：{{ curMake.voice.voice_key || '尚无（语音在第四步生成）' }}<span v-if="!makeVoiceReady"> · 语音尚未就绪，可先做无声预览</span></p>
               <fieldset :disabled="makeBusy" style="border:0;min-width:0;padding:0">
-                <div class="form-row"><label>语音稿</label><select disabled style="max-width:100%"><option>{{ curMake.voice.voice_key || '尚无语音稿' }}</option></select></div>
-                <div class="form-row"><label>画幅</label><select v-model="curMake.video.aspect" @change="changeMakeAspect"><option v-for="a in (presets && presets.aspects) || []" :key="a.id" :value="a.id">{{ a.label }} {{ a.dims.join('×') }}</option></select></div>
+                                <div class="form-row"><label>画幅</label><select v-model="curMake.video.aspect" @change="changeMakeAspect"><option v-for="a in (presets && presets.aspects) || []" :key="a.id" :value="a.id">{{ a.label }} {{ a.dims.join('×') }}</option></select></div>
                 <div class="form-row"><label>视觉风格</label>
                   <select v-model="curStylePresetId" style="max-width:100%">
                     <option v-for="p in stylePresetList" :key="p.id" :value="p.id" :disabled="!p.aspects.includes(curMake.video.aspect)">{{ p.name }}{{ !p.aspects.includes(curMake.video.aspect) ? '（仅 16:9）' : '' }}{{ p.cost_type==='billed' ? ' · 生图计费' : '' }}</option>
@@ -1988,8 +1986,8 @@ WB.pages.video = {
                         <div class="form-row"><label>起止（秒）</label><input type="number" min="0" step="0.1" :value="beatOverride(b).start" @input="setBeatOverride(b,'start',$event.target.value==='' ? '' : Number($event.target.value))" style="width:75px" aria-label="开始秒数">—<input type="number" min="0" step="0.1" :value="beatOverride(b).end" @input="setBeatOverride(b,'end',$event.target.value==='' ? '' : Number($event.target.value))" style="width:75px" aria-label="结束秒数"></div>
                       </details>
                     </td></tr></tbody></table></div>
-                <div class="form-row" style="margin-top:12px"><label>出片模式</label><div class="radio-group"><label><input type="radio" value="build" v-model="buildMode">正式成片</label><label><input type="radio" value="sample" v-model="buildMode">带音样片20s</label><label><input type="radio" value="keyframes" v-model="buildMode">静帧预览</label><label><input type="radio" value="estimate" v-model="buildMode">无声预览</label></div></div>
-                <button class="btn primary" :disabled="buildBusy || !curMake.script_meta.locked || curMake.script_stale || (buildMode!=='estimate' && !makeVoiceReady)" @click="runMakeJob('build')">开始制作</button>
+                <div class="form-row" style="margin-top:10px;flex-wrap:wrap;gap:8px"><label>出片模式</label><div class="radio-group" style="flex:1;min-width:0;flex-wrap:wrap"><label><input type="radio" value="build" v-model="buildMode">正式成片</label><label><input type="radio" value="sample" v-model="buildMode">带音样片20s</label><label><input type="radio" value="keyframes" v-model="buildMode">静帧预览</label><label><input type="radio" value="estimate" v-model="buildMode">无声预览</label></div>
+                  <button class="btn primary" style="flex-shrink:0" :disabled="buildBusy || !curMake.script_meta.locked || curMake.script_stale || (buildMode!=='estimate' && !makeVoiceReady)" @click="runMakeJob('build')">开始制作</button></div>
               </fieldset>
               <div v-if="buildBusy || curMake.status==='rendering'" style="margin-top:12px">
                 <div style="display:flex;justify-content:space-between"><span>{{ buildProgress && buildProgress.message || '正在恢复制作进度…' }}</span><span>{{ buildProgress && buildProgress.pct || 0 }}%</span></div>
@@ -2000,7 +1998,7 @@ WB.pages.video = {
                 <button class="btn primary" :disabled="makeBusy || buildBusy || !curMake.script_meta.locked || curMake.script_stale || (buildMode!=='estimate' && !makeVoiceReady)" @click="runMakeJob('build')">重试</button></div></div>
               <div v-if="buildLogOpen" style="max-height:260px;overflow:auto;margin-top:8px"><p v-if="buildLogTruncated" class="muted">仅显示末尾 {{ buildLogLines.length }} 行</p><pre class="mono" style="white-space:pre-wrap">{{ buildLogLines.join('\\n') }}</pre></div>
             </div>
-            <div class="card" v-if="curMake.project_id">
+            <div class="card" v-if="curMake.project_id && makeSeen[5]" v-show="makeStep===5">
               <h3>本项目产出
                 <span class="muted" style="margin-left:10px;font-weight:400" v-if="makeProject && makeProject.built_at">成片于 {{ makeProject.built_at.slice(0,19).replace('T',' ') }}</span></h3>
               <template v-if="makeProject">
@@ -2027,7 +2025,6 @@ WB.pages.video = {
                 </div>
               </template>
               <div v-else class="muted">本项目尚未出片 —— 第五步点「开始制作」后，成片会出现在这里。</div>
-            </div>
             </div>
               </div>
             </div>
