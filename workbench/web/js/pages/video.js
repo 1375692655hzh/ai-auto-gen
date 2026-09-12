@@ -1933,7 +1933,8 @@ WB.pages.video = {
               </template>
               <div v-if="voiceErr" class="err-box" style="padding:12px">{{ voiceErr }}</div>
             </div>
-            <div class="card" v-if="makeSeen[5]" v-show="makeStep===5">
+            <div class="step5-wrap" v-if="makeSeen[5]" v-show="makeStep===5">
+            <div class="card">
               <h3>视频生成 <span class="badge" :class="segBadge(4).cls">{{ segBadge(4).text }}</span></h3>
               <p v-if="!makeVoiceReady" class="notice">语音尚未就绪，可先定稿脚本并制作无声预览</p>
               <fieldset :disabled="makeBusy" style="border:0;min-width:0;padding:0">
@@ -1999,11 +2000,11 @@ WB.pages.video = {
                 <button class="btn primary" :disabled="makeBusy || buildBusy || !curMake.script_meta.locked || curMake.script_stale || (buildMode!=='estimate' && !makeVoiceReady)" @click="runMakeJob('build')">重试</button></div></div>
               <div v-if="buildLogOpen" style="max-height:260px;overflow:auto;margin-top:8px"><p v-if="buildLogTruncated" class="muted">仅显示末尾 {{ buildLogLines.length }} 行</p><pre class="mono" style="white-space:pre-wrap">{{ buildLogLines.join('\\n') }}</pre></div>
             </div>
-            <div class="card" v-if="curMake.project_id && makeSeen[5]" v-show="makeStep===5">
+            <div class="card" v-if="curMake.project_id">
               <h3>本项目产出
                 <span class="muted" style="margin-left:10px;font-weight:400" v-if="makeProject && makeProject.built_at">成片于 {{ makeProject.built_at.slice(0,19).replace('T',' ') }}</span></h3>
               <template v-if="makeProject">
-                <video v-if="makeOutUrl" :key="makeOutUrl" :src="makeOutUrl" controls preload="metadata" style="max-width:100%;max-height:460px;border-radius:8px"></video>
+                <video v-if="makeOutUrl" :key="makeOutUrl" :src="makeOutUrl" controls preload="metadata" style="width:100%;height:auto;max-height:560px;border-radius:8px"></video>
                 <div class="form-row" style="margin-top:10px;align-items:center">
                   <button class="btn" @click="openMakeFolder('project_out')">打开成片文件夹</button>
                   <button class="btn" @click="copyFolderPath('project_out')">复制路径</button>
@@ -2026,6 +2027,7 @@ WB.pages.video = {
                 </div>
               </template>
               <div v-else class="muted">本项目尚未出片 —— 第五步点「开始制作」后，成片会出现在这里。</div>
+            </div>
             </div>
               </div>
             </div>
