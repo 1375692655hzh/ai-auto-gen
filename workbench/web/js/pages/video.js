@@ -1038,6 +1038,14 @@ WB.pages.video = {
       } catch (e) { WB.toast(this.makeError(e)); }
     },
     openProj(v) { this.sel = v; this.projTitle = v.title; },
+    /* 视频项目 → 创作流程桥(0913d): 成片行/弹层一键跳回其制作草稿(五步全在) */
+    makeOfProject(pid) { return (this.makes || []).find((m) => m.project_id === pid) || null; },
+    async openMakeFlow(v) {
+      const m = this.makeOfProject(v.id);
+      if (!m) { WB.toast('该成片没有关联的制作草稿（可能由 CLI 直接生成）'); return; }
+      this.sel = null;
+      await this.selectMake(m.id);
+    },
     async saveProjTitle() {
       if (!this.sel) return;
       const t = (this.projTitle || '').trim();
@@ -2094,6 +2102,7 @@ WB.pages.video = {
             <div style="display:flex;align-items:center;gap:5px;margin-top:5px">
               <span class="muted" style="font-size:11px;flex:1;min-width:0;overflow:hidden;white-space:nowrap">{{ v.date || v.id }}<span v-if="v.scenes"> · {{ v.scenes }} 幕</span><span v-if="v.verify_duration_s"> · {{ fmtDur(v.verify_duration_s) }}</span></span>
               <button class="btn" style="padding:2px 9px;font-size:12px;flex-shrink:0" @click.stop="openProj(v)">打开</button>
+              <button class="btn" v-if="makeOfProject(v.id)" style="padding:2px 9px;font-size:12px;flex-shrink:0" title="回到这条成片的制作草稿（口播/脚本/语音/视频五步）" @click.stop="openMakeFlow(v)">流程</button>
               <button class="btn" style="padding:2px 9px;font-size:12px;flex-shrink:0" @click.stop.prevent="delVideo(v)">删除</button></div>
           </div>
             <div v-if="orphanVideos.length" class="muted" style="font-size:11px;margin-top:6px;border-top:1px dashed var(--border);padding-top:6px">
@@ -2117,7 +2126,10 @@ WB.pages.video = {
           <img v-else-if="selCover" :src="selCover" class="cover-thumb" style="max-width:280px"><div v-else class="muted">尚无渲染产物(out/ 为空)</div>
           <div v-if="sel.mp4.length>1" class="muted">产物：<span v-for="m in sel.mp4" :key="m" class="mono" style="margin-right:8px">{{ m }}</span></div>
           <div class="stub-wrap" style="margin:12px 0"><button class="btn stub" disabled>投稿 B站/抖音</button><div class="stub-tip">投稿（先草稿）：<code style="white-space:pre-wrap;overflow-wrap:anywhere">{{ pubCmd }}</code><button class="btn" @click="copyPubCmd">复制</button></div></div>
-          <button class="btn" @click="delVideo(sel)">删除项目</button>
+          <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+            <button class="btn primary" v-if="makeOfProject(sel.id)" @click="openMakeFlow(sel)">打开创作流程</button>
+            <span v-else class="muted" style="font-size:12px">该成片没有关联的制作草稿（可能由 CLI 直接生成）</span>
+            <button class="btn" @click="delVideo(sel)">删除项目</button></div>
         </div>
       </div>
     </div>
