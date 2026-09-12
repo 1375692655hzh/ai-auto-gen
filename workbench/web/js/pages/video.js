@@ -1938,6 +1938,7 @@ WB.pages.video = {
               <p class="muted" style="font-size:11px;margin:0 0 8px">语音稿：{{ curMake.voice.voice_key || '尚无（语音在第四步生成）' }}<span v-if="!makeVoiceReady"> · 语音尚未就绪，可先做无声预览</span></p>
               <fieldset :disabled="makeBusy" style="border:0;min-width:0;padding:0">
                                 <div class="form-row"><label>画幅</label><select v-model="curMake.video.aspect" @change="changeMakeAspect"><option v-for="a in (presets && presets.aspects) || []" :key="a.id" :value="a.id">{{ a.label }} {{ a.dims.join('×') }}</option></select></div>
+                <div class="form-row"><label>帧率</label><div class="radio-group"><label v-for="fps in [30,60]" :key="fps"><input type="radio" :value="fps" v-model="curMake.video.fps" @change="saveMake()">{{ fps }} fps</label></div></div>
                 <div class="form-row"><label>视觉风格</label>
                   <select v-model="curStylePresetId" style="max-width:100%">
                     <option v-for="p in stylePresetList" :key="p.id" :value="p.id" :disabled="!p.aspects.includes(curMake.video.aspect)">{{ p.name }}{{ !p.aspects.includes(curMake.video.aspect) ? '（仅 16:9）' : '' }}{{ p.cost_type==='billed' ? ' · 生图计费' : '' }}</option>
@@ -1954,7 +1955,6 @@ WB.pages.video = {
                 <details style="margin:6px 0">
                   <summary class="muted" style="cursor:pointer;font-size:12px">高级设置（主题 / 编排 / 生成方式 / 帧率 / 逐拍覆盖…）</summary>
                   <div style="padding:8px 0 0">
-                <div class="form-row"><label>帧率</label><div class="radio-group"><label v-for="fps in [30,60]" :key="fps"><input type="radio" :value="fps" v-model="curMake.video.fps" @change="saveMake()">{{ fps }} fps</label></div></div>
                 <div class="form-row"><label>制作方式</label><div class="radio-group">
                   <label><input type="radio" value="unified" v-model="curMake.video.mode" @change="saveMake()">统一生成</label>
                   <label><input type="radio" value="edit" v-model="curMake.video.mode" @change="saveMake()" :disabled="curMake.video.aspect!=='16:9'">编辑生成</label></div>
