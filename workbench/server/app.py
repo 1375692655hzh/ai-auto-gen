@@ -1244,15 +1244,14 @@ def create_app(bind_host: str = "127.0.0.1") -> FastAPI:
             row = {k: s[k] for k in ("id", "name", "format", "target_s", "wc", "prompt")}
             row["default"] = bool(s.get("default"))
             rows.append(row)
-        # 口播生成供应商选项(页面可选, 2026-09-12 用户拍板默认成稿模型): 只透模型名不透 key
+        # 口播生成供应商 = 成稿模型链全量(2026-09-12 用户拍板: 页面可选链上任一配置位,
+        # 选中位打头其余链位自动兜底; 不掺翻译模型); 只透模型名/引擎, 不透 key
         cfg = config.load()
         llm_options = []
-        if (cfg.get("compose") or {}).get("model"):
-            llm_options.append({"id": "compose", "label": "成稿模型",
-                                "model": cfg["compose"]["model"], "default": True})
-        if (cfg.get("translate") or {}).get("model"):
-            llm_options.append({"id": "translate", "label": "翻译模型",
-                                "model": cfg["translate"]["model"]})
+        for i, m in enumerate(vstudio._narration_chain(cfg)):
+            label = str(m.get("model") or "").strip() or str(m.get("name") or "").strip() or f"链位 {i + 1}"
+            llm_options.append({"id": f"compose:{i}", "label": label,
+                                "engine": m.get("engine") or "openai", "default": i == 0})
         return {"styles": rows, "length_tiers": vstudio.LENGTH_TIERS,
                 "llm_options": llm_options}
 

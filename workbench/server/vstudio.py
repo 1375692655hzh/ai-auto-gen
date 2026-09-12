@@ -885,27 +885,37 @@ def _translate_cfg(cfg: dict) -> tuple[str, str, str] | None:
     return values if all(values) else None
 
 
-def _compose_cfg(cfg: dict) -> tuple | None:
-    """成稿模型配置(compose 段): (base, key, model, extra)。extra_body 必须随调用透传
-    (GLM 推理模型 thinking 禁用, 否则 reasoning_content 吃光 max_tokens 返空)。"""
-    c = cfg.get("compose") or {}
-    values = (str(c.get("base_url") or ""), str(c.get("api_key") or ""),
-              str(c.get("model") or ""))
-    if not all(values):
+def _narration_chain(cfg: dict | None = None) -> list:
+    """口播生成供应商 = 成稿模型链(2026-09-12 用户拍板: 页面可选链上任一配置位,
+    与图文成稿 gcompose 同源同律——链序=优先级, 前位失败自动落下一, 不回落翻译链)。"""
+    return config.compose_chain(cfg)
+
+
+def _llm_candidates(cfg: dict, llm_source) -> tuple[list, str]:
+    """按页面选择排好序的调用候选链: 选中位打头, 其余链位按优先级跟后兜底。
+    llm_source 形如 "compose:1"(styles 端点下发的 id); 旧值(compose/translate)与
+    异形值一律归链首。"""
+    chain = _narration_chain(cfg)
+    idx = 0
+    if isinstance(llm_source, str) and llm_source.startswith("compose:"):
+        try:
+            idx = int(llm_source.split(":", 1)[1])
+        except ValueError:
+            idx = 0
+    if not chain:
+        return [], "compose:0"
+    idx = max(0, min(idx, len(chain) - 1))
+    return [chain[idx]] + chain[:idx] + chain[idx + 1:], f"compose:{idx}"
+
+
+def _grok_cli_narration(system: str, messages: list, m: dict) -> str | None:
+    """grok-cli 链位: 复用 gcompose 的 CLI 调用(免 key, 会话慢钳 300s)。"""
+    from .gcompose import _grok_cli_call
+    user = (chr(10) + chr(10)).join(x["content"] for x in messages if x.get("role") == "user")
+    try:
+        return _grok_cli_call(system, user, model=m.get("model") or "", timeout=300)
+    except Exception:
         return None
-    extra = c.get("extra_body") if isinstance(c.get("extra_body"), dict) else None
-    return (*values, extra)
-
-
-def _llm_for_narration(cfg: dict, source: str) -> tuple | None:
-    """口播生成供应商: compose=成稿模型(默认, 2026-09-12 用户拍板) / translate=翻译链(免费兜底)。
-    统一返回 (base, key, model, extra|None); 所选未配置时落另一路。"""
-    picks = ([_compose_cfg, _translate_cfg] if source == "compose" else [_translate_cfg, _compose_cfg])
-    for get in picks:
-        v = get(cfg)
-        if v:
-            return (*v[:3], v[3] if len(v) > 3 else None)
-    return None
 
 
 MAX_MATERIAL_CHARS = 20000          # 与 _material_for_generate 对齐
@@ -1683,11 +1693,14 @@ def run_narration(request: dict) -> tuple[dict, int]:
     if err:
         return err, 4
     cfg = config.load()
-    llm_source = "compose" if request.get("llm_source") != "translate" else "translate"
-    llm = _llm_for_narration(cfg, llm_source)
-    if not llm:
+    # 供应商=成稿模型链(2026-09-12 用户拍板: 页面可选链上任一位, 选中位打头其余兜底)
+    cands, llm_source = _llm_candidates(cfg, request.get("llm_source"))
+    if not cands:
         return {"error": "no_llm_config",
-                "hint": "到设置页配置成稿模型(compose)或翻译模型(translate)"}, 4
+                "hint": "到设置页配置「成稿模型」(可配多条按优先级兜底, 口播生成走成稿模型链)"}, 4
+    head = cands[0]
+    llm = (head.get("base_url") or "", head.get("api_key") or "",
+           head.get("model") or "", head.get("extra_body") or None)
     brief = str(request.get("brief") or "").strip()
     # 片长档(秒) → 字数区间; 未给档用风格自带 wc(高级用法兼容)
     try:
@@ -1717,30 +1730,47 @@ def run_narration(request: dict) -> tuple[dict, int]:
     user += f"输入材料：" + chr(10) + material
     # 财经纪律条件注入: 材料或简报命中财经关键词才挂, 泛内容不被强行合规化
     system = NARRATION_SYSTEM + (FINANCE_DISCIPLINE if _is_finance_material(material + chr(10) + brief) else "")
-    tick("generate", "llm", 15, "生成口播稿中…")
-    base, key, model, extra = llm
+    tick("generate", "llm", 15,
+         f"生成口播稿中（{cands[0].get('model') or cands[0].get('name') or '链位 1'}）…")
     messages = [{"role": "system", "content": system}, {"role": "user", "content": user}]
-    obj = None
-    for attempt in (1, 2):
-        raw = chat_completions(base, key, model, messages, 0.5, 3500, 90, extra=extra)
-        obj, _ = _parse_json_reply(raw or "")
-        paragraphs = obj.get("paragraphs") if isinstance(obj, dict) else None
-        if isinstance(paragraphs, list) and paragraphs and all(
-                isinstance(p, dict) and isinstance(p.get("text"), str) for p in paragraphs):
-            break
-        if attempt == 1:
-            messages.append({"role": "user", "content":
-                "上次输出不是有效 JSON。严格只输出一个 ```json 代码块，按要求的 schema，不要任何解释。"})
-            tick("generate", "llm", 20, "输出格式异常, 自动重试…")
+    obj, used, failed = None, None, ""
+    for ci, m in enumerate(cands):
+        name = str(m.get("model") or m.get("name") or f"链位{ci + 1}")
+        if ci:
+            tick("generate", "llm", 30, f"{failed} 未出稿, 自动切链位 → {name}…")
+        for attempt in (1, 2):
+            if m.get("engine") == "grok-cli":
+                raw = _grok_cli_narration(system, messages, m)
+            else:
+                # max_tokens 不传=厂商默认上限(2026-09-11 全档裁决: 显式上限会被
+                # 推理模型 reasoning 烧光返空, 唯有不传天然适配所有厂商; 篇幅纪律在提示词)
+                raw = chat_completions(m["base_url"], m["api_key"], m["model"], messages,
+                                       0.5, 0, 120, extra=m.get("extra_body") or None)
+            obj, _ = _parse_json_reply(raw or "")
+            paragraphs = obj.get("paragraphs") if isinstance(obj, dict) else None
+            if isinstance(paragraphs, list) and paragraphs and all(
+                    isinstance(p, dict) and isinstance(p.get("text"), str) for p in paragraphs):
+                break
             obj = None
+            if attempt == 1:
+                messages.append({"role": "user", "content":
+                    "上次输出不是有效 JSON。严格只输出一个 ```json 代码块，按要求的 schema，不要任何解释。"})
+                tick("generate", "llm", 20, "输出格式异常, 自动重试…")
+        if obj is not None:
+            used = m
+            break
+        failed = name
+        messages = messages[:2]      # 纠偏消息只对当前链位有效, 换位前撤掉防污染下一家
     if obj is None:
-        return {"error": "llm_failed", "hint": "模型两次未返回有效口播稿 JSON"}, 3
-    # 去AI味后置自检(确定性扫描, 命中段二次重写; 失败静默)
+        return {"error": "llm_failed", "hint": "成稿模型链全部位均未返回有效口播稿 JSON"}, 3
+    # 去AI味后置自检(确定性扫描, 命中段二次重写; 失败静默)——用实际命中链位重写
     try:
+        used_llm = ((used.get("base_url") or ""), (used.get("api_key") or ""),
+                    (used.get("model") or ""), used.get("extra_body") or None)
         hits = _ai_tone_hits([p["text"] for p in paragraphs])
         if hits:
             tick("generate", "llm", 60, "去AI味自检重写命中段…")
-            _ai_tone_repair(obj, llm, hits)
+            _ai_tone_repair(obj, used_llm, hits)
     except Exception:
         pass
     text = (chr(10) + chr(10)).join(p["text"] for p in paragraphs)
@@ -1754,7 +1784,8 @@ def run_narration(request: dict) -> tuple[dict, int]:
     obj.update(schema="wb-narration/v1", title=str(obj.get("title") or "未命名口播稿")[:30],
                format=style["format"], text=text, word_count=_word_count(text),
                length_s=length_s or style["target_s"], fidelity=fidelity,
-               llm_source=llm_source, llm_model=model)
+               llm_source=llm_source,
+               llm_model=str(used.get("model") or used.get("name") or ""))
     if row:
         current = make_get(row["id"])
         if not current or current["narration"]["locked"]:
