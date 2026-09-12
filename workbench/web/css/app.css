@@ -122,11 +122,34 @@ a:hover { color: var(--text); }
 /* 视频制作·生成板块容器: 框=抬升面(浅), 内层子板块=基底(深) —— 包含层级靠配色读出(2026-09-12 用户定) */
 .make-stage { background: var(--bg-card); border: 1px solid var(--border);
   border-radius: var(--r-panel); padding: var(--s4); margin-bottom: var(--s3); }
-.make-stage > .card { background: var(--bg); }
+.make-stage > .card, .make-stage .make-step-main > .card { background: var(--bg); }
 /* 再往里一层: 卡内表单控件抬回升面(容器浅→卡深→控件浅, 三级明暗读出层级) */
 .make-stage > .card input[type=text], .make-stage > .card input[type=password],
 .make-stage > .card input[type=number], .make-stage > .card select,
-.make-stage > .card textarea { background: var(--bg-card); }
+.make-stage > .card textarea,
+.make-stage .make-step-main > .card input[type=text], .make-stage .make-step-main > .card input[type=password],
+.make-stage .make-step-main > .card input[type=number], .make-stage .make-step-main > .card select,
+.make-stage .make-step-main > .card textarea { background: var(--bg-card); }
+/* 步骤子页双栏(0913a): 主区=当前步骤内容, 右侧=步骤导航(一次只见一步) */
+.make-steps { display: grid; grid-template-columns: minmax(0, 1fr) 196px; gap: var(--s3); align-items: start; }
+.make-step-main { min-width: 0; }
+.make-step-nav { display: flex; flex-direction: column; gap: 6px; position: sticky; top: 64px; }
+.make-step-nav .step-item { display: flex; align-items: center; gap: 8px; width: 100%;
+  padding: 8px 10px; border: 1px solid var(--border); border-radius: var(--r-ctl);
+  background: var(--bg); color: var(--text); font: inherit; text-align: left; cursor: pointer; }
+.make-step-nav .step-item .num { flex: none; width: 20px; height: 20px; border-radius: 50%;
+  background: var(--bg-hover); color: var(--text-mute); display: inline-flex;
+  align-items: center; justify-content: center; font-size: 11px; }
+.make-step-nav .step-item .lbl { flex: 1; min-width: 0; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.make-step-nav .step-item .st { flex: none; font-size: 11px; color: var(--text-mute); }
+.make-step-nav .step-item:hover { border-color: var(--accent); }
+.make-step-nav .step-item.sel { border-color: var(--accent); background: var(--accent-weak); }
+.make-step-nav .step-item.sel .num { background: var(--accent); color: #fff; }
+@media (max-width: 1100px) {
+  .make-steps { grid-template-columns: 1fr; }
+  .make-step-nav { position: static; flex-direction: row; flex-wrap: wrap; }
+  .make-step-nav .step-item { width: auto; flex: 1 1 auto; }
+}
 .btn { display: inline-flex; align-items: center; gap: 6px; padding: 6px 13px;
   border-radius: var(--r-ctl); border: 1px solid var(--border); background: var(--bg-hover);
   color: var(--text); font-size: 13px; font-family: var(--font); cursor: pointer;

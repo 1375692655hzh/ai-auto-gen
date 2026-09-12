@@ -31,7 +31,8 @@ WB.pages.video = {
       /* 四段制作：草稿持久化，任务槽独立恢复。 */
       makes: [], cur: null, blank: null,   /* blank=内存态空白新稿(不落库, 首次编辑才建行) */
       presets: null, narTab: 'a', narBrief: '', narDraftId: '', importId: '',
-      makeRoute: 'script',   /* 制作路线: script=文案路线(四段) audio=音频路线(建设中) */
+      makeRoute: 'script',   /* 制作路线: script=文案路线 audio=音频路线(建设中) */
+      makeStep: 1,           /* 生成卡内部步骤子页(0913a): 1项目名称/2口播/3脚本/4音频/5视频 */
       narBusy: false, narProgress: null, storyBusy: false, storyProgress: null,
       voiceBusy: false, voiceProgress: null, makeErr: '', narErr: '', scriptErr: '', voiceErr: '',
       buildBusy: false, buildProgress: null, buildErr: '', buildPid: '', buildMakeId: '',
@@ -116,6 +117,17 @@ WB.pages.video = {
     ttsProviders() { return ((this.presets && this.presets.tts && this.presets.tts.providers) || []).filter((p) => p.enabled && (p.voices || []).length); },
     makeVoices() { const p = this.ttsProviders.find((p) => this.curMake && p.id === this.curMake.voice.profile_id); return p ? p.voices || [] : []; },
     makeTheme() { return ((this.presets && this.presets.themes) || []).find((t) => this.curMake && t.id === this.curMake.video.theme); },
+    /* 右侧步骤子页导航(0913a): 一次只见一个步骤, 状态徽章与分段口径同源 */
+    makeSteps() {
+      const titled = this.curMake && String(this.curMake.title || '').trim();
+      return [
+        { n: 1, label: '项目名称', badge: { cls: titled ? 'green' : '', text: titled ? '已命名' : '未命名' } },
+        { n: 2, label: '口播稿生成', badge: this.segBadge(1) },
+        { n: 3, label: '脚本生成', badge: this.segBadge(2) },
+        { n: 4, label: '音频生成', badge: this.segBadge(3) },
+        { n: 5, label: '视频生成', badge: this.segBadge(4) },
+      ];
+    },
     // ── 视觉风格预设(一个选择框): 预设=三元组套餐, 选中即写三字段, id 永不落库 ──
     stylePresetList() { return (this.presets && this.presets.style_presets) || []; },
     resolveMakeMethod(v) {
@@ -1279,7 +1291,7 @@ WB.pages.video = {
     importScriptJson(ev) {
       const f = ev.target.files && ev.target.files[0]; ev.target.value = '';
       if (!f) return;
-      if (this.curMake.script_meta.locked) { WB.toast('脚本已定稿锁定，请先解锁第二段'); return; }
+      if (this.curMake.script_meta.locked) { WB.toast('脚本已定稿锁定，请先解锁脚本'); return; }
       const reader = new FileReader();
       reader.onload = () => {
         try {
@@ -1784,14 +1796,12 @@ WB.pages.video = {
                  style="border-radius:10px;padding:12px 14px;cursor:pointer"
                  @click="makeRoute='script'" @keydown.enter="makeRoute='script'">
               <div style="display:flex;align-items:center;gap:8px;font-weight:600">✍️ 文案路线</div>
-              <div class="muted" style="font-size:12px;margin-top:4px">口播稿 → 视频脚本 → 语音配音 → 视频生成<br>从文案出发，AI 写口播并机器配音</div>
             </div>
             <div class="route-card" role="button" tabindex="0" :class="{sel: makeRoute==='audio'}"
                  :style="{border: makeRoute==='audio' ? '2px solid var(--accent)' : '1px solid var(--border)', background: makeRoute==='audio' ? 'var(--accent-weak)' : ''}"
                  style="border-radius:10px;padding:12px 14px;cursor:pointer"
                  @click="makeRoute='audio'" @keydown.enter="makeRoute='audio'">
               <div style="display:flex;align-items:center;gap:8px;font-weight:600">🎙️ 音频路线 <span class="badge yellow" style="font-size:10px">建设中</span></div>
-              <div class="muted" style="font-size:12px;margin-top:4px">上传音频 + 提取文案 → 视频脚本 → 视频生成<br>从成品音频出发，转写后直进脚本分镜</div>
             </div>
           </div>
           <div v-if="makeRoute==='audio'" class="card" style="padding:48px 24px;text-align:center">
@@ -1804,14 +1814,16 @@ WB.pages.video = {
           <div v-else-if="!curMake" class="card empty">正在准备制作单…</div>
           <template v-else>
             <div class="make-stage">
-            <div class="card">
-              <h3>视频名称</h3>
+            <div class="make-steps">
+              <div class="make-step-main">
+            <div class="card" v-show="makeStep===1">
+              <h3>项目名称</h3>
               <div class="form-row">
                 <input type="text" v-model="curMake.title" @input="saveMake()" :disabled="makeBusy" placeholder="给这条片子起个名字" style="flex:1;min-width:0;font-weight:600">
                 <span class="muted" style="white-space:nowrap">{{ {pending:'2 秒后自动保存',saving:'保存中…',saved:('已保存 ' + (savedAt[cur] || '')),error:'保存失败'}[saveState[cur]] || '' }}</span></div>
             </div>
-            <div class="card">
-              <h3>1 · 口播稿 <span class="badge" :class="segBadge(1).cls">{{ segBadge(1).text }}</span></h3>
+            <div class="card" v-show="makeStep===2">
+              <h3>口播稿生成 <span class="badge" :class="segBadge(1).cls">{{ segBadge(1).text }}</span></h3>
               <fieldset :disabled="makeBusy" style="border:0;min-width:0;padding:0">
                 <template v-if="!curMake.narration.locked">
                   <div class="form-row radio-group">
@@ -1851,8 +1863,8 @@ WB.pages.video = {
               </fieldset>
               <div v-if="narErr" class="err-box" style="padding:12px">{{ narErr }}</div>
             </div>
-            <div class="card">
-              <h3>2 · 视频脚本 <span class="badge" :class="segBadge(2).cls">{{ segBadge(2).text }}</span></h3>
+            <div class="card" v-show="makeStep===3">
+              <h3>脚本生成 <span class="badge" :class="segBadge(2).cls">{{ segBadge(2).text }}</span></h3>
               <div v-if="!curMake.narration.locked" class="stub-wrap" style="padding:30px;text-align:center;background:var(--bg-hover);color:var(--text-mute)">先定稿口播稿</div>
               <template v-else>
                 <div v-if="curMake.script_stale" class="notice">口播稿已重定稿，脚本与口播不一致——重新生成或手动对齐后再定稿</div>
@@ -1862,7 +1874,7 @@ WB.pages.video = {
                   <button class="btn" @click="exportScriptJson">导出 JSON</button>
                   <button class="btn" @click="exportNarrationTxt">导出口播 TXT</button>
                   <label class="btn">导入 JSON<input type="file" accept=".json" style="display:none" @change="importScriptJson"></label>
-                  <span class="muted">可导出修改后再导入；导入仅改副字段与节拍，口播仍以第一段为准</span></div>
+                  <span class="muted">可导出修改后再导入；导入仅改副字段与节拍，口播仍以口播稿定稿为准</span></div>
                 <fieldset :disabled="makeBusy" style="border:0;min-width:0;padding:0">
                   <div v-if="!curMake.script_meta.locked" class="form-row">
                     <button class="btn primary" :disabled="narBusy || storyBusy" @click="runMakeJob('storyboard')">{{ storyBusy ? '分镜生成中…' : curMake.script ? '重新生成分镜脚本' : 'AI 生成分镜脚本' }}</button>
@@ -1911,8 +1923,8 @@ WB.pages.video = {
               </template>
               <div v-if="scriptErr" class="err-box" style="padding:12px">{{ scriptErr }}</div>
             </div>
-            <div class="card">
-              <h3>3 · 语音 <span class="badge" :class="segBadge(3).cls">{{ segBadge(3).text }}</span></h3>
+            <div class="card" v-show="makeStep===4">
+              <h3>音频生成 <span class="badge" :class="segBadge(3).cls">{{ segBadge(3).text }}</span></h3>
               <div v-if="!curMake.script_meta.locked" class="stub-wrap" style="padding:30px;text-align:center;background:var(--bg-hover);color:var(--text-mute)">先定稿视频脚本</div>
               <template v-else>
                 <div v-if="curMake.voice_bad.length" class="notice">{{ curMake.voice_bad.length }} 拍语音与最新脚本不一致，需重生成（{{ curMake.voice_bad.map(id => {const i=makeBeats.findIndex(b=>b.id===id);return i>=0 ? '第 '+(i+1)+' 拍 ('+id+')' : id;}).join('、') }}）</div>
@@ -1943,8 +1955,8 @@ WB.pages.video = {
               </template>
               <div v-if="voiceErr" class="err-box" style="padding:12px">{{ voiceErr }}</div>
             </div>
-            <div class="card">
-              <h3>4 · 视频 <span class="badge" :class="segBadge(4).cls">{{ segBadge(4).text }}</span></h3>
+            <div class="card" v-show="makeStep===5">
+              <h3>视频生成 <span class="badge" :class="segBadge(4).cls">{{ segBadge(4).text }}</span></h3>
               <p v-if="!makeVoiceReady" class="notice">语音尚未就绪，可先定稿脚本并制作无声预览</p>
               <fieldset :disabled="makeBusy" style="border:0;min-width:0;padding:0">
                 <div class="form-row"><label>语音稿</label><select disabled style="max-width:100%"><option>{{ curMake.voice.voice_key || '尚无语音稿' }}</option></select></div>
@@ -2009,7 +2021,7 @@ WB.pages.video = {
                 <button class="btn primary" :disabled="makeBusy || buildBusy || !curMake.script_meta.locked || curMake.script_stale || (buildMode!=='estimate' && !makeVoiceReady)" @click="runMakeJob('build')">重试</button></div></div>
               <div v-if="buildLogOpen" style="max-height:260px;overflow:auto;margin-top:8px"><p v-if="buildLogTruncated" class="muted">仅显示末尾 {{ buildLogLines.length }} 行</p><pre class="mono" style="white-space:pre-wrap">{{ buildLogLines.join('\\n') }}</pre></div>
             </div>
-            <div class="card" v-if="curMake.project_id">
+            <div class="card" v-if="curMake.project_id" v-show="makeStep===5">
               <h3>本项目产出
                 <span class="muted" style="margin-left:10px;font-weight:400" v-if="makeProject && makeProject.built_at">成片于 {{ makeProject.built_at.slice(0,19).replace('T',' ') }}</span></h3>
               <template v-if="makeProject">
@@ -2019,7 +2031,7 @@ WB.pages.video = {
                   <button class="btn" @click="copyFolderPath('project_out')">复制路径</button>
                   <a class="btn" v-if="makeProject.has_review" :href="'/wb-api/videos/'+encodeURIComponent(curMake.project_id)+'/file/'+encodeURIComponent('发布前核对.md')" download="发布前核对.md">发布前核对</a>
                   <span class="muted" style="font-size:11px">含 final.mp4 / 封面 / 字幕 SRT</span></div>
-                <p class="muted" style="margin-top:6px">该成片同时会出现在右侧「视频项目」列表。</p>
+                <p class="muted" style="margin-top:6px">该成片同时会出现在「视频项目」列表。</p>
                 <div style="margin-top:10px;border-top:1px dashed var(--line,#ccc);padding-top:10px">
                   <button class="btn" @click="coverForm.open=!coverForm.open">{{ coverForm.open ? '收起封面制作' : '制作封面' }}</button>
                   <span v-if="coverForm.done" class="muted" style="margin-left:8px">✓ {{ coverForm.done }}</span>
@@ -2034,7 +2046,16 @@ WB.pages.video = {
                   </div>
                 </div>
               </template>
-              <div v-else class="muted">本项目尚未出片 —— 第四段点「开始制作」后，成片会出现在这里。</div>
+              <div v-else class="muted">本项目尚未出片 —— 第五步点「开始制作」后，成片会出现在这里。</div>
+            </div>
+              </div>
+              <aside class="make-step-nav" aria-label="制作步骤">
+                <button v-for="s in makeSteps" :key="s.n" type="button" class="step-item" :class="{sel: makeStep===s.n}"
+                        @click="makeStep=s.n">
+                  <span class="num">{{ s.n }}</span><span class="lbl">{{ s.label }}</span>
+                  <span class="st" :style="{color: ({green:'var(--green)', yellow:'var(--yellow)', blue:'var(--accent)'})[s.badge.cls] || 'var(--text-mute)'}">{{ s.badge.text }}</span>
+                </button>
+              </aside>
             </div>
             </div>
           </template>
