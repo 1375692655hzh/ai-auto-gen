@@ -9,7 +9,7 @@ WB.pages.video = {
       /* ── 热点追踪 ── */
       hotItems: [], hotTotal: 0, hotMeta: null, hotInsights: [],
       f: { range: "7d", sort: "views", kind: "all", channel: "", q: "" },   // 默认7d: 低活跃日24h窗口天然为空
-      hotLoading: false, hotErr: null,
+      hotLoading: false, hotErr: null, anLoadingFile: false,
       voiceTesting: false, voiceTestUrl: "", voiceTestPhrase: "你好，我是特朗普的爷爷，巴菲特的爸爸，鲍威尔的祖宗",
       claimsOpen: false,   // claims 事实账本明细展开
       /* ── 视频分析·本地文件方式 + 历史结果 ── */
@@ -190,7 +190,7 @@ WB.pages.video = {
         { id: "analysis", title: "视频分析", cnt: this.pool.length || "",
           icon: I('<line x1="12" y1="20" x2="12" y2="10"/><line x1="18" y1="20" x2="18" y2="4"/><line x1="6" y1="20" x2="6" y2="16"/>'),
           onPick: () => { this.tab = "analysis"; } },
-        { id: "make", title: "视频制作", cnt: this.videos.length || "",
+        { id: "make", title: "视频制作", cnt: this.makes.length || "",
           icon: I('<rect x="2" y="2" width="20" height="20" rx="2.18"/><line x1="7" y1="2" x2="7" y2="22"/><line x1="17" y1="2" x2="17" y2="22"/><line x1="2" y1="12" x2="22" y2="12"/><line x1="2" y1="7" x2="7" y2="7"/><line x1="2" y1="17" x2="7" y2="17"/><line x1="17" y1="17" x2="22" y2="17"/><line x1="17" y1="7" x2="22" y2="7"/>'),
           onPick: () => { this.tab = "make"; this.loadMakePresets().then(() => { if (this.curMake) this.setMakeDefaults(this.curMake); }); this.ensureActiveMake(); } },
         { id: "templates", title: "模板仓库",
@@ -220,6 +220,7 @@ WB.pages.video = {
     },
     fmtDur(s) {
       if (s == null) return "—";
+      s = Math.round(s);                        // 秒取整: 浮点残留会显示成 5:1.9666…
       const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), sec = s % 60;
       return h ? h + ":" + String(m).padStart(2, "0") + ":" + String(sec).padStart(2, "0")
                : m + ":" + String(sec).padStart(2, "0");
@@ -2009,7 +2010,7 @@ WB.pages.video = {
                   <a class="btn" v-if="makeProject.has_review" :href="'/wb-api/videos/'+encodeURIComponent(curMake.project_id)+'/file/'+encodeURIComponent('发布前核对.md')" download="发布前核对.md">发布前核对</a>
                   <button class="btn" v-if="makePubCmd" title="B站/抖音投稿命令(先草稿)" @click="copyMakePubCmd">复制投稿命令</button>
                   <span class="muted" style="font-size:11px">含 final.mp4 / 封面 / 字幕 SRT</span></div>
-                <p class="muted" style="margin-top:6px">该成片同时会出现在「视频项目」列表。</p>
+                <p class="muted" style="margin-top:6px">该制作单同时在右列「历史项目」。</p>
                 <div style="margin-top:10px;border-top:1px dashed var(--line,#ccc);padding-top:10px">
                   <button class="btn" @click="coverForm.open=!coverForm.open">{{ coverForm.open ? '收起封面制作' : '制作封面' }}</button>
                   <span v-if="coverForm.done" class="muted" style="margin-left:8px">✓ {{ coverForm.done }}</span>
@@ -2061,7 +2062,7 @@ WB.pages.video = {
                 <span class="badge green" style="flex-shrink:0">已出片</span>
                 <span v-if="histDur(m)" class="muted" style="font-size:11px;flex-shrink:0">{{ histDur(m) }}</span></div>
               <div style="display:flex;align-items:center;gap:5px;margin-top:5px">
-                <span class="muted" style="font-size:11px;flex:1;min-width:0;overflow:hidden;white-space:nowrap">{{ (m.last_build || m.updated_at || '').slice(5, 16).replace('T', ' ') }}</span>
+                <span class="muted" style="font-size:11px;flex:1;min-width:0;overflow:hidden;white-space:nowrap">{{ ((m.last_build && m.last_build.at) || m.updated_at || '').slice(5, 16).replace('T', ' ') }}</span>
                 <button class="btn" style="padding:2px 9px;font-size:12px;flex-shrink:0" :disabled="makeActionBusy" @click.stop="selectMake(m.id)">{{ cur===m.id ? '退回' : '载入' }}</button>
                 <button class="btn" style="padding:2px 9px;font-size:12px;flex-shrink:0" :disabled="makeActionBusy" @click.stop="startRenameDraft(m)">重命名</button>
                 <button class="btn" style="padding:2px 9px;font-size:12px;flex-shrink:0" :disabled="makeActionBusy || Object.values(makeJobIds).includes(m.id)" @click.stop="deleteMake(m)">删除</button></div>
