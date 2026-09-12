@@ -33,6 +33,7 @@ WB.pages.video = {
       presets: null, narTab: 'a', narBrief: '', narDraftId: '', importId: '',
       makeRoute: 'script',   /* 制作路线: script=文案路线 audio=音频路线(建设中) */
       makeStep: 1,           /* 生成卡内部步骤子页(0913a): 1项目名称/2口播/3脚本/4音频/5视频 */
+      makeSeen: { 1: true }, /* 步骤懒挂载(0913c): 首次访问才建DOM(47拍分镜+47audio全量构建=载入慢的根因), 之后v-show保活 */
       narBusy: false, narProgress: null, storyBusy: false, storyProgress: null,
       voiceBusy: false, voiceProgress: null, makeErr: '', narErr: '', scriptErr: '', voiceErr: '',
       buildBusy: false, buildProgress: null, buildErr: '', buildPid: '', buildMakeId: '',
@@ -117,7 +118,8 @@ WB.pages.video = {
     ttsProviders() { return ((this.presets && this.presets.tts && this.presets.tts.providers) || []).filter((p) => p.enabled && (p.voices || []).length); },
     makeVoices() { const p = this.ttsProviders.find((p) => this.curMake && p.id === this.curMake.voice.profile_id); return p ? p.voices || [] : []; },
     makeTheme() { return ((this.presets && this.presets.themes) || []).find((t) => this.curMake && t.id === this.curMake.video.theme); },
-    /* 右侧步骤子页导航(0913a): 一次只见一个步骤, 状态徽章与分段口径同源 */
+    /* 步骤子页导航(0913a): 一次只见一个步骤, 状态徽章与分段口径同源 */
+    goMakeStep(n) { this.makeSeen[n] = true; this.makeStep = n; },
     makeSteps() {
       const titled = this.curMake && String(this.curMake.title || '').trim();
       return [
@@ -920,6 +922,7 @@ WB.pages.video = {
       try {
         if (this.cur) await this.flushMake(this.cur);
         const m = await this.fetchMake(id);
+        this.makeSeen = { [this.makeStep]: true };   /* 换稿只挂当前步骤(0913c 懒挂载) */
         this.cur = m.id; this.blank = null; this.narTab = m.narration.source === 'manual' ? 'b' : 'a';
         this.narBrief = ''; this.narDraftId = ''; this.importId = ''; this.beatCursors = {};
         this.narErr = ''; this.scriptErr = ''; this.voiceErr = ''; this.setMakeDefaults(m);
@@ -1816,20 +1819,20 @@ WB.pages.video = {
             <div class="make-wrap">
               <aside class="make-step-nav" aria-label="制作步骤">
                 <button v-for="s in makeSteps" :key="s.n" type="button" class="step-item" :class="{sel: makeStep===s.n}"
-                        @click="makeStep=s.n">
+                        @click="goMakeStep(s.n)">
                   <span class="lbl"><span class="num">{{ s.n }}</span>{{ s.label }}</span>
                   <span class="st" :style="{color: ({green:'var(--green)', yellow:'var(--yellow)', blue:'var(--accent)'})[s.badge.cls] || 'var(--text-mute)'}">{{ s.badge.text }}</span>
                 </button>
               </aside>
             <div class="make-stage">
               <div class="make-step-main">
-            <div class="card" v-show="makeStep===1">
+            <div class="card" v-if="makeSeen[1]" v-show="makeStep===1">
               <h3>项目名称</h3>
               <div class="form-row">
                 <input type="text" v-model="curMake.title" @input="saveMake()" :disabled="makeBusy" placeholder="给这条片子起个名字" style="flex:1;min-width:0;font-weight:600">
                 <span class="muted" style="white-space:nowrap">{{ {pending:'2 秒后自动保存',saving:'保存中…',saved:('已保存 ' + (savedAt[cur] || '')),error:'保存失败'}[saveState[cur]] || '' }}</span></div>
             </div>
-            <div class="card" v-show="makeStep===2">
+            <div class="card" v-if="makeSeen[2]" v-show="makeStep===2">
               <h3>口播稿生成 <span class="badge" :class="segBadge(1).cls">{{ segBadge(1).text }}</span></h3>
               <fieldset :disabled="makeBusy" style="border:0;min-width:0;padding:0">
                 <template v-if="!curMake.narration.locked">
@@ -1870,7 +1873,7 @@ WB.pages.video = {
               </fieldset>
               <div v-if="narErr" class="err-box" style="padding:12px">{{ narErr }}</div>
             </div>
-            <div class="card" v-show="makeStep===3">
+            <div class="card" v-if="makeSeen[3]" v-show="makeStep===3">
               <h3>脚本生成 <span class="badge" :class="segBadge(2).cls">{{ segBadge(2).text }}</span></h3>
               <div v-if="!curMake.narration.locked" class="stub-wrap" style="padding:30px;text-align:center;background:var(--bg-hover);color:var(--text-mute)">先定稿口播稿</div>
               <template v-else>
@@ -1930,7 +1933,7 @@ WB.pages.video = {
               </template>
               <div v-if="scriptErr" class="err-box" style="padding:12px">{{ scriptErr }}</div>
             </div>
-            <div class="card" v-show="makeStep===4">
+            <div class="card" v-if="makeSeen[4]" v-show="makeStep===4">
               <h3>音频生成 <span class="badge" :class="segBadge(3).cls">{{ segBadge(3).text }}</span></h3>
               <div v-if="!curMake.script_meta.locked" class="stub-wrap" style="padding:30px;text-align:center;background:var(--bg-hover);color:var(--text-mute)">先定稿视频脚本</div>
               <template v-else>
@@ -1962,7 +1965,7 @@ WB.pages.video = {
               </template>
               <div v-if="voiceErr" class="err-box" style="padding:12px">{{ voiceErr }}</div>
             </div>
-            <div class="card" v-show="makeStep===5">
+            <div class="card" v-if="makeSeen[5]" v-show="makeStep===5">
               <h3>视频生成 <span class="badge" :class="segBadge(4).cls">{{ segBadge(4).text }}</span></h3>
               <p v-if="!makeVoiceReady" class="notice">语音尚未就绪，可先定稿脚本并制作无声预览</p>
               <fieldset :disabled="makeBusy" style="border:0;min-width:0;padding:0">
@@ -2028,7 +2031,7 @@ WB.pages.video = {
                 <button class="btn primary" :disabled="makeBusy || buildBusy || !curMake.script_meta.locked || curMake.script_stale || (buildMode!=='estimate' && !makeVoiceReady)" @click="runMakeJob('build')">重试</button></div></div>
               <div v-if="buildLogOpen" style="max-height:260px;overflow:auto;margin-top:8px"><p v-if="buildLogTruncated" class="muted">仅显示末尾 {{ buildLogLines.length }} 行</p><pre class="mono" style="white-space:pre-wrap">{{ buildLogLines.join('\\n') }}</pre></div>
             </div>
-            <div class="card" v-if="curMake.project_id" v-show="makeStep===5">
+            <div class="card" v-if="curMake.project_id && makeSeen[5]" v-show="makeStep===5">
               <h3>本项目产出
                 <span class="muted" style="margin-left:10px;font-weight:400" v-if="makeProject && makeProject.built_at">成片于 {{ makeProject.built_at.slice(0,19).replace('T',' ') }}</span></h3>
               <template v-if="makeProject">
