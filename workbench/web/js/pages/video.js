@@ -967,7 +967,8 @@ WB.pages.video = {
     },
     makePayload(m) {
       const p = { id: m.id, title: m.title, video: m.video, voice: { profile_id: m.voice.profile_id, voice: m.voice.voice } };
-      if (!m.narration.locked) p.narration = { text: m.narration.text, ref_text: m.narration.ref_text, source: m.narration.source, style_id: m.narration.style_id };
+      if (!m.narration.locked) p.narration = { text: m.narration.text, ref_text: m.narration.ref_text, source: m.narration.source, style_id: m.narration.style_id,
+        llm_source: m.narration.llm_source, length_s: m.narration.length_s || 0, fidelity: m.narration.fidelity };  // 0913g: 三字段此前两头都丢, 保存回路把生成模型/片长/改写幅度顶回旧值
       if (!m.script_meta.locked && m.script) p.script = m.script;
       return JSON.parse(JSON.stringify(p));
     },

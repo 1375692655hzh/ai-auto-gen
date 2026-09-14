@@ -1300,9 +1300,15 @@ def make_upsert(payload: dict) -> dict | None:
     if "title" in payload:
         row["title"] = str(payload["title"])
     if not row["narration"]["locked"]:
-        for key in ("text", "ref_text", "style_id", "source"):
+        # 0913g: llm_source/length_s/fidelity 此前被丢, 保存回显会把生成模型顶回链首
+        for key in ("text", "ref_text", "style_id", "source", "llm_source", "fidelity"):
             if key in (payload.get("narration") or {}):
                 row["narration"][key] = str(payload["narration"][key] or "")
+        if "length_s" in (payload.get("narration") or {}):
+            try:
+                row["narration"]["length_s"] = int(payload["narration"]["length_s"] or 0)
+            except (TypeError, ValueError):
+                row["narration"]["length_s"] = 0
     if "script" in payload and not row["script_meta"]["locked"]:
         row["script"] = copy.deepcopy(payload["script"])
         row["status"] = "editing_script" if row["narration"]["locked"] else "editing_narration"
