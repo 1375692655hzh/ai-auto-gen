@@ -53,7 +53,10 @@ DEFAULTS = {
             {"base_url": "http://127.0.0.1:20128/v1", "api_key": "omniroute-local",
              "model": "oc/muse-spark-1.2-contributor-free"},   # 主力免费(docs/翻译模型实测与推荐.md)
             {"base_url": "http://127.0.0.1:20128/v1", "api_key": "omniroute-local",
-             "model": "oc/mimo-v2.5-free"},                    # 免费替补: muse 用完/挂自动落这
+             "model": "oc/big-pickle"},               # 二棒(2026-09-14 三模型同题实测: 最流畅/术语准/
+                                                     #  1.8s 最快; 缺点=会把 $22.6B 换算成 226亿美元)
+            {"base_url": "http://127.0.0.1:20128/v1", "api_key": "omniroute-local",
+             "model": "oc/mimo-v2.5-free"},                    # 末位兜底: 无地区门禁, 大陆裸网可用
         ],
     },
     "youtube": {                                    # YouTube 热点追踪(Data API v3, 视频页)
@@ -117,13 +120,21 @@ def load() -> dict:
         if isinstance(saved.get("tts"), dict) and "default" in saved["tts"]:
             merged["tts"]["default"] = saved["tts"]["default"]
         # 出厂免费兜底位强制在链: 老机器 settings 冻结了旧 models 列表(_merge 对列表
-        # 整段替换), muse 用完自动落 mimo 的替补位必须补回; 用户自定义链位原位保留。
+        # 整段替换), 免费链位必须补回; 且出厂位之间保持 DEFAULTS 质量序(2026-09-14 加
+        # big-pickle 二棒后, 存量 [muse,mimo] 须重排成 [muse,big-pickle,mimo])。
+        # 链位无 UI 编辑口, 不存在用户序可破坏; 手工塞进 models 的自定义位保持在前(优先级只升不降)。
         tr = merged.get("translate") or {}
         if isinstance(tr.get("models"), list):
-            have = {str(m.get("model") or "") for m in tr["models"] if isinstance(m, dict)}
-            for slot in DEFAULTS["translate"]["models"]:
-                if slot["model"] not in have:
-                    tr["models"].append(dict(slot))
+            order = {s["model"]: i for i, s in enumerate(DEFAULTS["translate"]["models"])}
+            customs, got = [], {}
+            for m in tr["models"]:
+                mid = str(m.get("model") or "") if isinstance(m, dict) else ""
+                if mid in order:
+                    got.setdefault(mid, m)
+                else:
+                    customs.append(m)
+            tr["models"] = customs + [got.get(s["model"]) or dict(s)
+                                      for s in DEFAULTS["translate"]["models"]]
         # 成稿模型链实体化迁移(2026-09-10): 存档 compose 无 models 键(升级前)而旧单
         # 配置有值 → 合成链头一条进 merged; 下次任意保存即固化, 老用户零感知。
         # 此后链以 models 为准: 用户在 UI 删光链位 ≠ 旧单配置回魂。
@@ -274,12 +285,17 @@ def _tts_provider(prev, incoming: dict) -> dict | None:
     pid = incoming.get("id")
     if not _tts_id_ok(pid):
         return None
+    # 0913g 修复: 白名单曾丢 model/style/format 且 custom 引擎被打回 edge ——
+    # mimo/MiniMax(custom) 一保存就报废(引擎变 edge+模型清空)。custom 是合法引擎, 四字段并入白名单。
     engine = incoming.get("engine", prev.get("engine") or "edge")
-    if engine not in ("edge", "dashscope", "volc"):
-        engine = prev.get("engine") if prev.get("engine") in ("edge", "dashscope", "volc") else "edge"
+    if engine not in ("edge", "dashscope", "volc", "custom"):
+        engine = prev.get("engine") if prev.get("engine") in ("edge", "dashscope", "volc", "custom") else "edge"
     name = incoming["name"] if "name" in incoming else prev.get("name") or pid
     enabled = incoming["enabled"] if "enabled" in incoming else prev.get("enabled", True)
     base_url = incoming["base_url"] if "base_url" in incoming else prev.get("base_url", "")
+    model = incoming["model"] if "model" in incoming else prev.get("model", "")
+    style = incoming["style"] if "style" in incoming else prev.get("style", "")
+    fmt = incoming["format"] if "format" in incoming else prev.get("format", "")
     api_key = prev.get("api_key") or ""
     if incoming.get("api_key"):
         api_key = str(incoming["api_key"])
@@ -287,6 +303,7 @@ def _tts_provider(prev, incoming: dict) -> dict | None:
               else _tts_voices(prev.get("voices")))
     return {"id": pid, "name": str(name or pid).strip()[:40] or pid, "engine": engine,
             "enabled": bool(enabled), "api_key": api_key, "base_url": str(base_url or ""),
+            "model": str(model or ""), "style": str(style or ""), "format": str(fmt or ""),
             "voices": voices}
 
 

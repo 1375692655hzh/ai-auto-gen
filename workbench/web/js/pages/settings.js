@@ -605,8 +605,9 @@ WB.pages.settings = {
       <div class="key-guide">
         <b>推荐方案(免费, 零费用):</b> 装
         <a href="https://omniroute.online" target="_blank" rel="noopener">OmniRoute</a>
-        (下方按钮一键安装, 监听 127.0.0.1:20128), 出厂链已预置免费双保险:
-        <b>muse 主力 → 用完/挂了自动落 mimo(同为免费)</b>, 无需任何手动干预。<br>
+        (下方按钮一键安装, 监听 127.0.0.1:20128), 出厂链已预置免费三保险:
+        <b>muse 主力 → big-pickle 二棒 → mimo 末位兜底</b>(同为免费, 按翻译实测质量排序),
+        无需任何手动干预。<br>
         <b>地区说明:</b> 免费位直连 opencode.ai 公共端点, 其服务端按<b>模型</b>做地区门禁——
         只封 muse(大陆/香港出口被拒), <b>mimo 无地区门禁, 大陆裸网也能用</b>。
         所以即使不配代理, 链也会自动落 mimo 不会全断; 想让 muse 也可用,
