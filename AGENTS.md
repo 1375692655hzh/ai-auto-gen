@@ -56,6 +56,8 @@ workbench/                  板块四·前端工作台: server/ FastAPI后端(�
 data/                       运行时数据(gitignored: 缓存/健康/运行产物/workbench配置)
 docs/                       方案与操作手册
 scripts/ skills/            工具脚本 / agent 技能
+deploy/cloud/               数据站云端部署套件(Linux systemd 单元/一键安装/每日备份/Caddyfile;
+                            方案见 docs/云端部署方案.md; 核心链路已审计零 Windows 绑定)
 bin/*_task.bat              24/7 运维: 幂等启动脚本(端口已听则零副作用退出), 由 schtasks 登录自启
                             (aag-serve/aag-workbench/aag-omniroute/aag-console) + 每15min刷新(aag-sources-refresh/:00相位,
                             aag-xsurge-refresh/:07相位错开) + 每日yttrack(aag-yttrack-refresh 09:00)
@@ -67,7 +69,7 @@ bin/*_task.bat              24/7 运维: 幂等启动脚本(端口已听则零�
                             日志 data/resident_start_all.log); 笔记本任务已放开电池限制(拔电不停+错过补跑)
 ```
 
-**运维入口**：桌面快捷方式「数据站控制台」→ `bin/console.bat` 打开数据站自带控制台 `http://127.0.0.1:8786/`（`global-news-sources/sources/console.py` + `global-news-sources/web/console.html`，与数据站同机部署，未来上云随站部署、对外绑定用 Bearer key）；工作台是用户端，只填数据站地址+key 接入。
+**运维入口**：桌面快捷方式「数据站控制台」→ `bin/console.bat` 打开数据站自带控制台 `http://127.0.0.1:8786/`（`global-news-sources/sources/console.py` + `global-news-sources/web/console.html`，与数据站同机部署，未来上云随站部署、对外绑定用 Bearer key）；工作台是用户端，只填数据站地址+key 接入。**云端部署**（公司机→云服务器迁移）用 `deploy/cloud/` 套件，Linux 上以 systemd 替代 bat/schtasks，方案与长期稳定清单见 `docs/云端部署方案.md`。
 
 ## 状态文件（agent 的共享内存）
 

@@ -1,0 +1,8 @@
+[Unit]
+Description=aag daily backup (items.db + local configs)
+After=aag-refresh.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=@REPO@
+ExecStart=@REPO@/deploy/cloud/backup.sh

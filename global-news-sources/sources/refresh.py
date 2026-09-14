@@ -33,8 +33,12 @@ DEAD_PROBE_MAX = 3                 # 每轮最多带几个 dead 源试针
 
 try:
     import msvcrt                  # Windows 字节锁(进程死亡内核自动释放)
-except ImportError:                 # 非 Windows 环境降级为无锁(本仓运行环境是 Windows)
+except ImportError:                 # Linux 云端部署(2026-09-08): fcntl 同语义降级链
     msvcrt = None
+try:
+    import fcntl                   # POSIX 建议锁(进程死亡内核自动释放)
+except ImportError:
+    fcntl = None
 
 _LOCK_FH = None                     # 模块级持有句柄, 防 GC 提前释放锁
 
@@ -50,13 +54,16 @@ def _acquire_lock() -> bool:
     无陈旧锁问题。锁内写 PID/时间戳仅供人工诊断, 不作为解锁依据。
     """
     global _LOCK_FH
-    if msvcrt is None:
+    if msvcrt is None and fcntl is None:
         return True
     p = _store._serve_dir() / "refresh.lock"
     p.parent.mkdir(parents=True, exist_ok=True)
     fh = open(p, "a+b")
     try:
-        msvcrt.locking(fh.fileno(), msvcrt.LK_NBLCK, 1)
+        if msvcrt is not None:
+            msvcrt.locking(fh.fileno(), msvcrt.LK_NBLCK, 1)
+        else:
+            fcntl.lockf(fh.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
     except OSError:
         fh.close()
         return False

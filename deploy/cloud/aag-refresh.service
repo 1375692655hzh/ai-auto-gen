@@ -1,0 +1,11 @@
+[Unit]
+Description=aag sources refresh (15min 一轮; 单实例锁 fcntl, 撞锁跳过)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=@REPO@
+ExecStart=@REPO@/.venv/bin/python cli.py sources refresh
+TimeoutStartSec=900
+Environment=PYTHONUTF8=1

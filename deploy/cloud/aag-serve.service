@@ -1,0 +1,14 @@
+[Unit]
+Description=aag data station serve (8787, loopback; 对外由 Caddy TLS 反代)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+WorkingDirectory=@REPO@
+ExecStart=@REPO@/.venv/bin/python cli.py sources serve --host 127.0.0.1 --port 8787
+Restart=always
+RestartSec=5
+Environment=PYTHONUTF8=1
+
+[Install]
+WantedBy=multi-user.target
