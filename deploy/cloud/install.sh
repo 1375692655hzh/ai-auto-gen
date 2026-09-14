@@ -11,12 +11,20 @@ command -v python3 >/dev/null || { echo "缺 python3"; exit 1; }
 [ -d "$VENV" ] || python3 -m venv "$VENV"
 "$VENV/bin/pip" -q install -r "$REPO/global-news-sources/requirements.txt"
 
+UNITS=""
 for u in aag-serve.service aag-refresh.service aag-refresh.timer \
          aag-backup.service aag-backup.timer; do
     sed -e "s|@REPO@|$REPO|g" "$REPO/deploy/cloud/$u" | sudo tee "/etc/systemd/system/$u" >/dev/null
 done
+
+# 翻译层: 2026-09-14 用户拍板, 数据站不做预翻译(工作台浏览层按需翻译承接),
+# 云端默认不装 Node/OmniRoute。确需免费预翻再装: Node≥22 + npm i -g omniroute
+# + sudo cp deploy/cloud/aag-omniroute.service /etc/systemd/system/ 并 enable,
+# 然后板块根 config.local.yaml 开 sources.translate 并配 oc/mimo-v2.5-free 链
+# (HK 出口实测: muse 403 区域封锁 / mimo 可用)。
+
 sudo systemctl daemon-reload
-sudo systemctl enable --now aag-serve.service aag-refresh.timer aag-backup.timer
+sudo systemctl enable --now aag-serve.service aag-refresh.timer aag-backup.timer $UNITS
 
 sleep 2
 systemctl --no-pager is-active aag-serve.service && echo "serve 已监听 127.0.0.1:8787"

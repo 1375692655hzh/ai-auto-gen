@@ -1,0 +1,12 @@
+[Unit]
+Description=aag OmniRoute gateway (127.0.0.1:20128, free translate tier)
+After=network-online.target
+
+[Service]
+Environment=OMNIROUTE_SERVER_HOST=127.0.0.1
+ExecStart=/usr/bin/omniroute serve --no-open
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
