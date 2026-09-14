@@ -859,21 +859,43 @@ WB.pages.settings = {
     <div class="card" v-show="sec==='video'">
       <h3>语音合成 <span class="muted">视频制作·配音 · 可配置多个供应商</span></h3>
       <div class="key-guide">
-        <b>注册来源:</b> Edge TTS 免费免 Key;
-        DashScope 走
-        <a href="https://dashscope.console.aliyun.com/" target="_blank" rel="noopener">阿里云百炼</a>
-        → API-KEY(sk- 开头)。可添加多套同一引擎(例如两把 DashScope Key)。<br>
-        <b>说明:</b> 只服务视频制作「语音」段; 配置仅存本工作台。视频页只列出已启用且至少有一个音色的供应商。<br>
-        <b>自定义供应商:</b> 填 url/api_key/model 后点「检测预设语音」自动拉音色(端点不支持则手动加音色)。<br>
-        <b>mimo(小米)填写规则:</b> url=<code>https://api.xiaomimimo.com/v1</code> · model=<code>mimo-v2.5-tts</code> ·
-        key 从 <a href="https://api.xiaomimimo.com" target="_blank" rel="noopener">api.xiaomimimo.com</a> 创建;
-        音色=mimo_default/冰糖/茉莉/苏打/白桦/Mia/Chloe/Milo/Dean(检测可自动拉取); 可选「风格提示」控制语气。<br>
-        <b>MiniMax 填写规则:</b> url=<code>https://api.minimax.io/v1</code>(国内 <code>https://api.minimaxi.com/v1</code>) ·
-        model=<code>speech-2.8-hd</code>(或 speech-2.8-turbo) ·
-        key 从 <a href="https://platform.minimaxi.com" target="_blank" rel="noopener">platform.minimaxi.com</a>
-        「账户管理→API密钥」创建; 音色走 MiniMax 语音库(get_voice 自动检测),
-        如 male-qn-qingse/female-shaonv/audiobook_male_1; 音频为 mp3 输出。
+        <b>注册来源:</b> Edge TTS 免费免 Key · DashScope 走
+        <a href="https://dashscope.console.aliyun.com/" target="_blank" rel="noopener">阿里云百炼</a>（API-KEY, sk- 开头）·
+        其余三家看下方流程说明（<b>推荐顺序: mimo(免费) → 豆包 → MiniMax</b>）。可添加多套同引擎供应商。
+        <b>说明:</b> 只服务视频制作「语音」段; 配置仅存本工作台, key 不回显明文。
       </div>
+      <details class="key-guide" style="margin:8px 0">
+        <summary style="cursor:pointer;font-weight:600">🥇 推荐 · mimo(小米) TTS —— 免费 · 约 3 分钟配好</summary>
+        <ol style="margin:8px 0 4px 20px;padding:0;line-height:1.9">
+          <li>打开 <a href="https://api.xiaomimimo.com" target="_blank" rel="noopener">api.xiaomimimo.com</a>，注册并登录（免费额度，大陆裸网可用，无地区门禁）</li>
+          <li>在控制台「API Keys」页创建一把 Key（复制保存，只显示一次）</li>
+          <li>回到本页底部点 <b>「＋ mimo(小米) 模板」</b>——地址/模型/9 个音色/财经播报风格已一键填好</li>
+          <li>展开该供应商，把 Key 粘进「API Key」框 → 拉到底点 <b>「保存设置」</b></li>
+          <li>点「测试连接」能出试听音频即成功（音色可用「检测预设语音」自动拉全量）</li>
+        </ol>
+        <p class="muted" style="margin:4px 0 0">填写案例: 引擎=自定义 · 地址=<code>https://api.xiaomimimo.com/v1</code> · 模型=<code>mimo-v2.5-tts</code> · 音色=<code>冰糖</code>（或 Mia / Chloe / Milo / Dean）· 风格提示可自改（如"沉稳财经解读, 语速稍缓"）</p>
+      </details>
+      <details class="key-guide" style="margin:8px 0">
+        <summary style="cursor:pointer;font-weight:600">② 豆包 TTS 2.0（火山引擎）—— 音质档 · 按量计费（有免费额度）</summary>
+        <ol style="margin:8px 0 4px 20px;padding:0;line-height:1.9">
+          <li>打开 <a href="https://console.volcengine.com" target="_blank" rel="noopener">console.volcengine.com</a>，注册火山引擎账号并完成<b>个人实名认证</b></li>
+          <li>在控制台搜索「语音技术」，开通 <b>大模型语音合成 2.0（豆包语音 / seed-tts-2.0）</b></li>
+          <li>在 API Key 管理页创建 <b>新版 API Key</b>（一串单 Key，不是 AK/SK 双凭证）——本页走 X-Api-Key 单头鉴权</li>
+          <li>本页点「＋ 空白供应商」→ 引擎选 <b>「豆包 TTS 2.0（火山引擎）」</b>，把 Key 粘进「API Key」框 →「保存设置」</li>
+          <li>「测试连接」试听。音色已内置三档: <code>zh_male_liufei_uranus_bigtts</code>（刘飞2.0·新闻口播）/ <code>zh_male_dayi_uranus_bigtts</code>（大壹·解说）/ <code>zh_male_m191_uranus_bigtts</code>（云舟·通用）</li>
+        </ol>
+        <p class="muted" style="margin:4px 0 0">填写案例: 引擎=豆包 TTS 2.0（火山引擎）· API Key=<code>粘贴控制台创建的单串 Key</code> · 无需填地址/模型（端点已内置）· 默认音色建议「刘飞2.0·新闻口播」</p>
+      </details>
+      <details class="key-guide" style="margin:8px 0">
+        <summary style="cursor:pointer;font-weight:600">③ MiniMax 语音 —— 情感音色最全 · 按量计费</summary>
+        <ol style="margin:8px 0 4px 20px;padding:0;line-height:1.9">
+          <li>打开 <a href="https://platform.minimaxi.com" target="_blank" rel="noopener">platform.minimaxi.com</a>（国际版 <a href="https://platform.minimax.io" target="_blank" rel="noopener">platform.minimax.io</a>），注册并登录</li>
+          <li>进入「账户管理 → API 密钥」创建 Key（复制保存）</li>
+          <li>回到本页点 <b>「＋ MiniMax 模板」</b>——国内/国际地址按注册地改一改，模型与 16 个音色已预填</li>
+          <li>把 Key 粘进「API Key」框 →「保存设置」→「测试连接」试听</li>
+        </ol>
+        <p class="muted" style="margin:4px 0 0">填写案例: 引擎=自定义 · 地址=<code>https://api.minimaxi.com/v1</code>（国内；国际用 <code>https://api.minimax.io/v1</code>）· 模型=<code>speech-2.8-hd</code>（省流量档 speech-2.8-turbo）· 音色=<code>male-qn-qingse</code>（青涩青年音；也有 presenter_male 播音/presenter_female 女主持等，走 t2a_v2 协议自动出 mp3）</p>
+      </details>
       <div class="form-row"><label>默认供应商</label>
         <select v-model="s.tts.default.provider_id" @change="onTtsDefaultProvider" style="max-width:280px">
           <option value="">未指定</option>
