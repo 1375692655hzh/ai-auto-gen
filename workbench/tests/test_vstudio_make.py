@@ -126,7 +126,8 @@ class MakeTests(unittest.TestCase):
         self.assertFalse(next(p["enabled"] for p in cfg["tts"]["providers"] if p["id"] == "dashscope"))
         self.assertEqual(cfg["tts"]["default"]["provider_id"], "edge")
         self.assertTrue(cfg["tts"]["default"]["voice"])
-        self.assertTrue(all(set(p) <= {"id", "name", "engine", "enabled", "api_key", "base_url", "voices"}
+        self.assertTrue(all(set(p) <= {"id", "name", "engine", "enabled", "api_key", "base_url",
+                                       "model", "style", "format", "voices"}   # 0913g: custom供应商四字段进白名单
                             for p in cfg["tts"]["providers"]))
         emptied = config.apply_patch({"tts": {"remove_ids": ids}})
         self.assertEqual(emptied["tts"]["providers"], [])
