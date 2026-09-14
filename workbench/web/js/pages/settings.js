@@ -560,12 +560,12 @@ WB.pages.settings = {
         <div class="radio-group">
           <label><input type="radio" value="local" v-model="s.source.mode"> 本机(127.0.0.1)</label>
           <label><input type="radio" value="lan" v-model="s.source.mode"> 局域网数据站</label>
-          <label style="opacity:.45"><input type="radio" value="cloud" disabled> 云端(未来开放)</label>
+          <label><input type="radio" value="cloud" v-model="s.source.mode"> 云端数据站</label>
         </div>
       </div>
       <div class="form-row"><label>数据源地址</label>
         <input type="text" v-model="s.source.base_url" placeholder="http://127.0.0.1:8787">
-        <span class="muted">sources serve 的地址</span></div>
+        <span class="muted">本机/局域网填 sources serve 地址; 云端模式填 https:// 域名</span></div>
       <div class="form-row"><label>API Key</label>
         <input type="password" v-model="s.source.api_key"
                :placeholder="hasKey ? '已配置(尾号 ' + keyTail + '), 留空保持不变' : '本机免密可留空'">
@@ -579,7 +579,8 @@ WB.pages.settings = {
       <div v-if="testResult" class="test-result" :class="testResult.ok ? 'ok' : 'fail'">
         {{ testResult.ok ? '✓ ' : '✗ ' }}{{ testResult.text }}</div>
       <p class="muted" style="margin-top:8px">本机数据站启动: <code class="mono">python cli.py sources serve</code>;
-        数据刷新由任务计划每 30 分钟自动执行(sources refresh)</p>
+        数据刷新由任务计划每 30 分钟自动执行(sources refresh);
+        云端模式无需本机数据站, 全部数据来自远程数据站</p>
     </div>
 
     <!-- 2. 界面偏好 -->
