@@ -154,6 +154,10 @@ VB.trans = (function () {
         sessionStorage.setItem("vb_tr_warned", "1");
         VB.toast("翻译服务暂不可用, 先显示原文");
       }
+      if (d.cooldown && !sessionStorage.getItem("vb_tr_cool")) {
+        sessionStorage.setItem("vb_tr_cool", "1");
+        VB.toast("翻译限流保护中, 稍后自动恢复");
+      }
       (d.results || []).forEach((res) => {
         const b = batch.find((x) => x.i === res.i);
         if (!b) return;

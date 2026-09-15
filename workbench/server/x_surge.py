@@ -326,6 +326,29 @@ def _call_translate(base: str, key: str, model: str, text: str, max_tokens: int 
         temperature=0.2, max_tokens=max_tokens, timeout=30)
 
 
+# ── 翻译熔断器(2026-09-15): 免费池账号级限流(429)时全链必死, 每条×链位×分段的
+#    雷群重试会持续空烧配额且永不清账 → 连续全败即全线停翻一段, 到点自动重试 ──
+BREAKER_FILE = DATA_DIR / "translate_breaker.json"
+BREAKER_COOLDOWN = 15 * 60       # 熔断时长(秒)
+
+
+def _breaker_until() -> float:
+    try:
+        return float(json.loads(BREAKER_FILE.read_text(encoding="utf-8")).get("until") or 0)
+    except Exception:
+        return 0.0
+
+
+def _trip_breaker(reason: str) -> None:
+    try:
+        DATA_DIR.mkdir(parents=True, exist_ok=True)
+        BREAKER_FILE.write_text(json.dumps(
+            {"until": time.time() + BREAKER_COOLDOWN, "reason": reason, "ts": time.time()}),
+            encoding="utf-8")
+    except Exception:
+        pass
+
+
 def translate_pending(cands: list, limit: int = 60) -> dict:
     """给候选里没译文的补翻译; 已是中文的直接记原生; 模型链(免费优先)逐条依次尝试。"""
     from . import config as wb_config
@@ -356,7 +379,12 @@ def translate_pending(cands: list, limit: int = 60) -> dict:
         return {"translated": 0, "translate_failed": 0, "zh_native": zh_native,
                 "pending": len(todo), "skipped": "translate 未配置, 跳过"}
     todo = [c for c in todo if len((c["text"] or "").strip()) >= 8][-limit:]  # 空文本不送翻
-    ok = fail = 0
+    if time.time() < _breaker_until():              # 熔断冷却中: 全线停翻防雷群空烧配额
+        if zh_native:
+            _save_texts(cache)
+        return {"translated": 0, "translate_failed": 0, "zh_native": zh_native,
+                "pending": len(todo), "skipped": "translate 熔断中(疑似免费池限流), 冷却后自动恢复"}
+    ok = fail = streak = 0
     for i, c in enumerate(todo):
         if i:                                        # 轻微间隔, 防 API 限流
             time.sleep(0.25)
@@ -369,8 +397,13 @@ def translate_pending(cands: list, limit: int = 60) -> dict:
         if zh:
             cache[c["status_id"]] = {"zh": zh, "ts": now_s}
             ok += 1
+            streak = 0
         else:
             fail += 1
+            streak += 1
+        if streak >= 5:                              # 连续全链失败=账号级限流/链路死, 熔断止损
+            _trip_breaker("translate_chain_dead")
+            break
     if ok or zh_native:
         _save_texts(cache)
     return {"translated": ok, "translate_failed": fail, "zh_native": zh_native,
@@ -695,17 +728,34 @@ def fetch_rss() -> dict:
     """拉 SoPilot 热帖 RSS → 解析 → 合并进缓存(按 tweet_id 去重, 48h 保留)。
 
     RSS item 形状(实测): title='名字 (@handle)'; description=正文 + 
-    '❤️ 33 🔁 0 💬 7 🔖 3 👀 16405' + '预测爆火概率:100%，预测浏览量:246000，
+    '❤️ 33 🔁 0 💬 7 🔖 3 👁 16405' + '预测爆火概率:100%，预测浏览量:246000，
     预测评论浏览量:2900' + '原推链接: https://x.com/...'。解析容错: 单条坏不炸轮。
+    上游 502 实测间歇出现(2026-09-11): 3 次递增退避重试; 全败也不抛——结果写进
+    缓存 last_fetch(status/页面空态透出), 别让分发用户对着白页猜。
     """
     import urllib.request
     import xml.etree.ElementTree as ET
-    req = urllib.request.Request(RSS_URL, headers={"User-Agent": "aag-workbench/0.1"})
-    with urllib.request.urlopen(req, timeout=20) as r:
-        xml_text = r.read().decode("utf-8", "replace")
-    root = ET.fromstring(xml_text)
     now_s = time.strftime("%Y-%m-%d %H:%M:%S")
+    xml_text, last_err = None, ""
+    for attempt in range(3):
+        try:
+            req = urllib.request.Request(RSS_URL, headers={"User-Agent": "aag-workbench/0.1"})
+            with urllib.request.urlopen(req, timeout=20) as r:
+                xml_text = r.read().decode("utf-8", "replace")
+            break
+        except Exception as e:                      # 502/DNS/TLS 全走这里, 重试
+            last_err = f"{type(e).__name__}: {e}"[:200]
+            if attempt < 2:
+                time.sleep(2 + 3 * attempt)
     cache = load_rss()
+    if xml_text is None:
+        cache["last_fetch"] = {"ts": now_s, "ok": False, "error": last_err}
+        _save_rss(cache)
+        rep = {"rss_ok": False, "rss_error": last_err,
+               "note": "SoPilot RSS 暂不可达(已重试3次), 服务恢复后自动可采"}
+        print(json.dumps(rep, ensure_ascii=False))
+        return rep
+    root = ET.fromstring(xml_text)
     ok = bad = 0
     for item in root.iter("item"):
         try:
@@ -762,6 +812,7 @@ def fetch_rss() -> dict:
         except Exception:
             pass
     cache["updated_at"] = now_s
+    cache["last_fetch"] = {"ts": now_s, "ok": True, "items_new": ok, "items_bad": bad}
     _save_rss(cache)
     # 顺带补翻译(和自产榜同一套配置)
     cands = [{"status_id": sid, "text": it["text"]} for sid, it in cache["items"].items()]
@@ -813,4 +864,5 @@ def rss_view(sort: str = "prob", limit: int = 100) -> dict:
     rows.sort(key=key, reverse=True)
     return {"items": rows[:limit], "total": len(rows),
             "meta": {"updated_at": cache.get("updated_at"), "source": "sopilot-rss",
+                     "last_fetch": cache.get("last_fetch"),
                      "rule": "数据源: SoPilot 今日热帖公开 RSS; 爆火概率/预测浏览/评论曝光为其服务端口径"}}

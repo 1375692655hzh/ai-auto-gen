@@ -119,7 +119,11 @@ def translate_batch(items: list) -> dict:
             continue
         todo.append((i, h, text))
     unconfigured = not chain
-    if not unconfigured:
+    cooldown = (not unconfigured) and time.time() < x_surge._breaker_until()
+    if unconfigured or cooldown:
+        failed = len(todo)
+    else:
+        streak = 0
         for n, (i, h, text) in enumerate(todo):
             if n:
                 time.sleep(SLEEP)
@@ -127,11 +131,14 @@ def translate_batch(items: list) -> dict:
             if zh:
                 cache[h] = {"zh": zh, "ts": now_s}
                 results.append({"i": i, "hash": h, "zh": zh})
+                streak = 0
             else:
                 failed += 1
-    else:
-        failed = len(todo)
-    if todo and not unconfigured:
+                streak += 1
+            if streak >= 5:          # 连续全链失败=账号级限流, 熔断止损防视口批次空烧
+                x_surge._trip_breaker("ondemand_chain_dead")
+                break
+    if todo and not unconfigured and not cooldown:
         _save(cache)
     return {"results": results, "failed": failed, "native": native,
-            "cached": cached, "unconfigured": unconfigured}
+            "cached": cached, "unconfigured": unconfigured, "cooldown": cooldown}
