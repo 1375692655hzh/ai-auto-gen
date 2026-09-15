@@ -32,21 +32,48 @@
   summary.vb-sum::after { content: "▾"; margin-left: auto; color: var(--text-mute); font-size: 11px; }
   details[open] > summary.vb-sum::after { content: "▴"; }
   details.vb-fold > .filter-group:last-of-type { margin-bottom: 0; }
-  /* YTB 表格横向滚动容器 */
-  .tbl-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; }
 
-  /* ── 移动端(≤720px): 底部Tab导航 + 单列紧凑 ── */
+  /* ── 排序竖排chip(标签 2字/行, 两行写完) + 紧凑状态行(2026-09-15 用户手机版裁决) ── */
+  .sort-strip { display: flex; gap: 5px; align-items: stretch; flex-wrap: wrap; margin: 8px 0 10px; }
+  .sort-strip .schip { display: flex; align-items: center; justify-content: center;
+                       cursor: pointer; padding: 4px 6px; border: 1px solid var(--border);
+                       border-radius: var(--r-ctl); background: var(--bg-panel);
+                       font-size: 11.5px; line-height: 1.25; color: var(--text-dim);
+                       width: 3em; word-break: break-all; text-align: center; user-select: none; }
+  .sort-strip .schip.on { border-color: var(--accent); color: var(--accent);
+                          background: var(--bg-card); font-weight: 700; }
+  .sort-strip .mini-check { display: inline-flex; align-items: center; gap: 5px; font-size: 12px;
+                            color: var(--text-dim); margin-left: auto; cursor: pointer; white-space: nowrap; }
+  .vb-tight { margin-bottom: 0; }
+  .vb-meta { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .reco-filter select, .vb-ytf select { width: auto; }
+  .vb-ytf .ytq { width: 150px; }
+  @media (max-width: 720px) { .vb-ytf .ytq { flex: 1; min-width: 120px; } }
+
+  /* ── YTB追踪: 深色视频区(浅色筛选卡之下) —— 深色值取自 app.css 暗色主题同款 ── */
+  .yt-dark { background: oklch(13% 0.018 35); border-radius: 12px; padding: 10px;
+             display: flex; flex-direction: column; gap: 8px; }
+  .yt-mod { display: block; background: oklch(19% 0.018 35);
+            border: 1px solid oklch(28% 0.015 35); border-radius: 10px;
+            padding: 10px 12px; text-decoration: none; color: oklch(95% 0.010 70); }
+  .yt-mod:hover { background: oklch(22% 0.018 35); }
+  .yt-mod.stale { opacity: .78; }
+  .ym-title { font-size: 14px; font-weight: 600; line-height: 1.35; margin-bottom: 6px;
+              display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+  .ym-row { display: flex; align-items: center; gap: 4px 10px; flex-wrap: wrap; font-size: 12px; }
+  .yt-dark .muted { color: oklch(68% 0.012 70); }
+  .ym-ch { color: oklch(85% 0.012 70); }
+  .ym-views { margin-left: auto; font-weight: 700; font-variant-numeric: tabular-nums; }
+  .ym-dims span { color: oklch(72% 0.012 70); font-variant-numeric: tabular-nums; }
+
+  /* ── 移动端(≤720px): 导航并顶栏一行 + 单列紧凑 ── */
   @media (max-width: 720px) {
-    body { padding-bottom: calc(58px + env(safe-area-inset-bottom)); }
     .vb-wrap { padding: 0 10px 26px; }
     .topbar { height: 44px; padding: 0 10px; position: sticky; top: 0; z-index: 90;
               background: var(--bg); }
-    .vb-title { font-size: 14px; padding-right: 10px; }
-    .vb-nav { position: fixed; left: 0; right: 0; bottom: 0; z-index: 100;
-              background: var(--bg-panel); border-top: 1px solid var(--border);
-              display: flex; gap: 2px; padding: 3px 4px calc(3px + env(safe-area-inset-bottom)); }
-    .vb-nav .nav-item { flex: 1; justify-content: center; font-size: 12.5px; padding: 9px 2px;
-                        border-radius: var(--r-ctl); }
+    .vb-title { font-size: 13px; padding-right: 8px; }
+    .vb-nav { gap: 2px; }
+    .vb-nav .nav-item { font-size: 12px; padding: 6px 5px; }
     .news-cols { grid-template-columns: 1fr; gap: 10px; }
     .card { padding: 10px 12px; }
     .feed-toolbar input[type=text] { flex-basis: 100%; min-width: 0; }
@@ -62,8 +89,6 @@
     .surge-rank .badge { margin-top: 0; }
     .surge-top { flex-wrap: wrap; row-gap: 2px; }
     .surge-top .muted:last-child { margin-left: 0 !important; flex-basis: 100%; font-size: 11px; }
-    table.tbl { font-size: 12px; }
-    table.tbl th, table.tbl td { padding: 6px 7px; }
     .reco-filter .chip, .filter-group .chip { font-size: 11.5px; padding: 1px 8px; }
     .xhot-text { font-size: 13.5px; }
     .foot-note { margin-bottom: 14px; }
@@ -222,6 +247,7 @@ const app = Vue.createApp({
       items: [], total: 0, nextCursor: "", loading: false, error: null,
       bodyExpanded: {}, showAllSectors: false, stats: null,
       /* ── X推荐 ── */
+      recoOpen: true,                      /* 筛选卡折叠态(手机默认收起) */
       xfSinceOpts: [["1h", "近1小时"], ["6h", "近6小时"], ["12h", "近12小时"],
                     ["24h", "近1天"], ["48h", "近2天"]],
       sortOpts: [["fv", "金融价值"], ["time", "时间顺序"], ["growth", "增速"],
@@ -234,6 +260,8 @@ const app = Vue.createApp({
       rssSortOpts: [["prob", "爆火概率"], ["views", "浏览量"], ["exposure", "评论曝光"], ["time", "时间"]],
       rs: { sort: "prob", items: [], total: 0, meta: {}, loading: false },
       /* ── YTB追踪 ── */
+      ytSortOpts: [["views", "播放量"], ["newest", "时间顺序"], ["delta24h", "1日增量"],
+                   ["delta7d", "7日增量"]],      /* 折合日速与1日增量口径重叠, 用户裁决砍掉 */
       yf: { range: "7d", kind: "all", channel: "", sort: "views", q: "" },
       yItems: [], yTotal: 0, yMeta: null, yLoading: false, yErr: null,
       yChannels: [], yChannelsMeta: {},
@@ -247,6 +275,10 @@ const app = Vue.createApp({
     sector48() { return (this.stats && this.stats.sectors_48h) || []; },
     sector48Top() { return this.sector48.slice(0, 8); },
     sector48Rest() { return this.showAllSectors ? this.sector48.slice(8) : []; },
+    xfFilterCount() {
+      return this.xf.markets.length + this.xf.sectors.length
+        + (this.xf.golden ? 1 : 0) + (this.xf.bigOnly ? 1 : 0) + (this.xf.finance ? 1 : 0);
+    },
     recoGroups() {
       const items = this.xf.items || [];
       if (this.xf.sort !== "fv") return [{ key: "all", label: "", cls: "", items }];
@@ -481,7 +513,7 @@ const app = Vue.createApp({
     const m = location.hash.match(/^#k=(.+)$/);
     if (m) { localStorage.setItem("vb_key", m[1].trim()); history.replaceState(null, "", location.pathname); }
     /* 手机: 筛选卡默认收起, 信息流直接顶到首屏 */
-    if (window.innerWidth <= 720) { this.filterOpen = false; this.sectorOpen = false; }
+    if (window.innerWidth <= 720) { this.filterOpen = false; this.sectorOpen = false; this.recoOpen = false; }
     this.checkGate();
     this.loadXF();
   },
@@ -500,18 +532,24 @@ const app = Vue.createApp({
 
       <!-- ═══ 2 X推荐 ═══ -->
       <div v-show="tab==='reco'">
-        <div class="feed-toolbar">
+        <div class="feed-toolbar vb-tight">
           <select v-model="xf.since" @change="loadXF()">
             <option v-for="[v, t] in xfSinceOpts" :key="v" :value="v">{{ t }}</option>
           </select>
-          <div class="radio-group">
-            <label v-for="[v, t] in sortOpts" :key="v">
-              <input type="radio" :value="v" v-model="xf.sort" @change="loadXF()"> {{ t }}</label>
-          </div>
-          <span style="flex:1"></span>
-          <button class="btn" @click="loadXF()">{{ xf.loading ? '刷新中…' : '刷新' }}</button>
+          <span v-if="xf.loading" class="muted vb-meta">快照计算中…(首轮要几秒)</span>
+          <span v-else-if="xf.meta.updated_at" class="muted vb-meta">快照 {{ xf.meta.updated_at }} ·
+            {{ xf.meta.data_age_min }} 分钟前 · 在跟踪 {{ xf.meta.tracked }} 帖 · 共 {{ xf.total }}</span>
+          <span v-else class="muted vb-meta">暂无快照</span>
+          <span v-if="xf.meta.err" class="badge red">{{ xf.meta.err }}</span>
         </div>
-        <div class="card reco-filter" style="margin-bottom:10px">
+        <div class="sort-strip">
+          <span v-for="[v, t] in sortOpts" :key="v" class="schip" :class="{on: xf.sort===v}"
+                @click="xf.sort = v; loadXF()">{{ t }}</span>
+          <label v-if="xf.sort === 'fv' && xf.items.length" class="mini-check">
+            <input type="checkbox" v-model="hideP3"> 隐藏低值</label>
+        </div>
+        <details class="card vb-fold reco-filter" :open="recoOpen" style="margin-bottom:10px">
+          <summary class="vb-sum">筛选 <span v-if="xfFilterCount" class="badge blue">{{ xfFilterCount }}</span></summary>
           <div class="frow"><span class="lab">市场</span>
             <span v-for="m in marketChips" :key="m" class="chip" :class="{on: xf.markets.includes(m)}"
                   @click="toggleXFChip('markets', m)">{{ m }}</span></div>
@@ -524,16 +562,7 @@ const app = Vue.createApp({
             <span class="chip" :class="{on: xf.golden}" @click="toggleXFFlag('golden')">仅黄金窗口(≤2h)</span>
             <span class="chip" :class="{on: xf.bigOnly}" @click="toggleXFFlag('bigOnly')">粉丝≥10万</span>
             <span class="chip" :class="{on: xf.finance}" @click="toggleXFFlag('finance')">仅投资金融</span></div>
-        </div>
-        <p class="surge-meta">
-          <template v-if="xf.loading">快照计算中…(首轮要几秒)</template>
-          <template v-else-if="xf.meta.updated_at">快照 {{ xf.meta.updated_at }} ·
-            {{ xf.meta.data_age_min }} 分钟前 · 在跟踪 {{ xf.meta.tracked }} 帖 · X 条目 {{ xf.total }}</template>
-          <template v-else>暂无快照</template>
-          <span v-if="xf.meta.err" class="badge red" style="margin-left:8px">{{ xf.meta.err }}</span>
-        </p>
-        <p v-if="xf.sort === 'fv' && xf.items.length" class="surge-meta">
-          <label style="cursor:pointer"><input type="checkbox" v-model="hideP3"> 隐藏低值(P3 归档)</label></p>
+        </details>
         <div v-if="!xf.items.length && !xf.loading" class="empty">窗口内暂无 X 内容</div>
         <div class="feed">
           <template v-for="g in recoGroups" :key="g.key">
@@ -598,20 +627,16 @@ const app = Vue.createApp({
 
       <!-- ═══ 3 X热门帖 ═══ -->
       <div v-show="tab==='surge'">
-        <div class="feed-toolbar">
-          <div class="radio-group">
-            <label v-for="[v, t] in rssSortOpts" :key="v">
-              <input type="radio" :value="v" v-model="rs.sort" @change="loadRss()"> {{ t }}</label>
-          </div>
-          <span class="muted">数据源: SoPilot 今日热帖公开 RSS</span>
-          <span style="flex:1"></span>
-          <button class="btn" @click="loadRss()">{{ rs.loading ? '刷新中…' : '刷新' }}</button>
+        <div class="feed-toolbar vb-tight">
+          <span v-if="rs.loading" class="muted vb-meta">加载中…</span>
+          <span v-else-if="rs.meta.updated_at" class="muted vb-meta">SoPilot RSS · 抓取 {{ rs.meta.updated_at }} · 在榜 {{ rs.total }} 帖(48h 保留)</span>
+          <span v-else class="muted vb-meta">暂无数据</span>
+          <span v-if="rs.meta.err" class="badge red">{{ rs.meta.err }}</span>
         </div>
-        <p class="surge-meta">
-          <template v-if="rs.meta.updated_at">RSS 抓取 {{ rs.meta.updated_at }} · 在榜 {{ rs.total }} 帖(48h 保留)</template>
-          <template v-else>暂无数据</template>
-          <span v-if="rs.meta.err" class="badge red" style="margin-left:8px">{{ rs.meta.err }}</span>
-        </p>
+        <div class="sort-strip">
+          <span v-for="[v, t] in rssSortOpts" :key="v" class="schip" :class="{on: rs.sort===v}"
+                @click="rs.sort = v; loadRss()">{{ t }}</span>
+        </div>
         <div v-if="!rs.items.length && !rs.loading" class="empty">暂无数据</div>
         <div class="feed">
           <div v-for="(r, i) in rs.items" :key="r.status_id" class="news-card">
@@ -647,64 +672,54 @@ const app = Vue.createApp({
         </div>
       </div>
 
-      <!-- ═══ 4 YTB追踪 ═══ -->
+      <!-- ═══ 4 YTB追踪: 浅色筛选卡(看齐X推荐) + 深色视频模块流 ═══ -->
       <div v-show="tab==='yt'">
         <div class="notice" v-if="yMeta && !yMeta.configured">
           未配置 YouTube Data API Key —— 管理员在云端配置后, 下一轮采集(每天一次)自动出数</div>
         <div class="notice" v-else-if="yMeta && yMeta.cold_start">
           快照冷启动中: 增量需第 2 轮采集后才有, 当前先按累计播放排序参考</div>
-        <div class="card">
-          <h3>近期视频
-            <span v-if="yMeta && yMeta.last_collect_at" class="muted" style="margin-left:10px;font-weight:400">
-              采集于 {{ yMeta.last_collect_at }}</span>
-            <span style="float:right"><button class="btn" :disabled="yLoading" @click="loadYt()">
-              {{ yLoading ? '刷新中…' : '刷新' }}</button></span></h3>
-          <div class="form-row" style="gap:8px;flex-wrap:wrap">
-            <select v-model="yf.range" @change="loadYt()" style="width:auto">
+        <div class="card reco-filter vb-ytf" style="margin-bottom:10px">
+          <div class="frow"><span class="lab">窗口</span>
+            <select v-model="yf.range" @change="loadYt()">
               <option value="24h">近 24h</option><option value="48h">近 48h</option>
               <option value="7d">近 7 天</option><option value="28d">近 28 天</option>
               <option value="all">全部</option></select>
-            <select v-model="yf.kind" @change="loadYt()" style="width:auto">
+            <select v-model="yf.kind" @change="loadYt()">
               <option value="all">全部类型</option><option value="long">长视频</option>
               <option value="short">Shorts</option></select>
-            <select v-model="yf.channel" @change="loadYt()" style="width:auto">
-              <option value="">全部频道</option>
-              <option v-for="c in enabledChannels" :key="c.channel_id" :value="c.channel_id">{{ c.title }}</option></select>
-            <select v-model="yf.sort" @change="loadYt()" style="width:auto">
-              <option value="views">按播放量</option><option value="delta24h">按 Δ24h 增量</option>
-              <option value="delta7d">按 Δ7d 增量</option><option value="rate">按折合日速</option>
-              <option value="newest">按最新发布</option></select>
-            <input type="text" v-model="yf.q" placeholder="标题搜索…" style="width:160px" @keyup.enter="loadYt()">
-            <button class="btn" @click="loadYt()">筛选</button>
-            <span class="muted" v-if="yTotal">{{ yTotal }} 条</span>
+            <input type="text" v-model="yf.q" placeholder="标题搜索…" class="ytq" @keyup.enter="loadYt()">
+            <span class="muted" v-if="yLoading">加载中…</span>
+            <span class="muted ytf-status" v-else-if="yMeta && yMeta.last_collect_at">采集于 {{ yMeta.last_collect_at }}</span>
+            <span class="muted ytf-status" v-else>尚未采集</span>
           </div>
-          <div v-if="yErr" class="err-box">{{ yErr.error || yErr }}</div>
-          <div v-else-if="!yLoading && !yItems.length" class="empty">
-            {{ yMeta && yMeta.configured ? '该时间窗口内追踪频道没有新发布视频 —— 把时间范围切到「近 7 天/28 天」即可看到' : '管理员配置 Key 并完成首轮采集后, 这里是追踪频道的热播榜' }}</div>
-          <div v-else class="tbl-scroll"><table class="tbl">
-            <thead><tr>
-              <th>视频</th><th>频道</th><th>类型</th><th>发布</th>
-              <th>播放</th><th>Δ24h</th><th>Δ7d</th><th>日速</th><th>赞</th><th>评</th>
-            </tr></thead>
-            <tbody>
-              <tr v-for="r in yItems" :key="r.video_id" :class="{stale: r.cold}">
-                <td style="max-width:260px">
-                  <a :href="r.url" target="_blank" rel="noopener"
-                     :title="r.channel_title + ' · ' + r.title">{{ cut(r.title, 26) }}</a></td>
-                <td class="muted">{{ r.channel_title }}</td>
-                <td><span class="badge" :class="r.is_short ? 'yellow' : ''">{{ r.is_short ? 'Shorts' : '长视频' }}</span></td>
-                <td class="mono" :title="'发布已 ' + r.age_h + 'h'">{{ r.published_at }}</td>
-                <td class="mono">{{ fmtNum(r.views) }}</td>
-                <td class="mono">{{ deltaText(r, 'delta_24h', 'delta_24h_basis') }}</td>
-                <td class="mono">{{ deltaText(r, 'delta_7d') }}</td>
-                <td class="mono">{{ r.rate_per_day != null ? '+' + fmtNum(r.rate_per_day) : '—' }}</td>
-                <td class="mono muted">{{ fmtNum(r.likes) }}</td>
-                <td class="mono muted">{{ fmtNum(r.comments) }}</td>
-              </tr>
-            </tbody>
-          </table></div>
-          <p class="muted" style="margin-top:8px" v-if="yMeta">{{ yMeta.rule }}</p>
+          <div class="frow"><span class="lab">排序</span>
+            <span v-for="[v, t] in ytSortOpts" :key="v" class="schip" :class="{on: yf.sort===v}"
+                  @click="yf.sort = v; loadYt()">{{ t }}</span>
+            <span v-if="yTotal" class="muted" style="margin-left:auto">{{ yTotal }} 条</span>
+          </div>
         </div>
+        <div v-if="yErr" class="err-box">{{ yErr.error || yErr }}</div>
+        <div v-else-if="!yLoading && !yItems.length" class="empty">
+          {{ yMeta && yMeta.configured ? '该时间窗口内追踪频道没有新发布视频 —— 把时间范围切到「近 7 天/28 天」即可看到' : '管理员配置 Key 并完成首轮采集后, 这里是追踪频道的热播榜' }}</div>
+        <div v-else class="yt-dark">
+          <a v-for="r in yItems" :key="r.video_id" class="yt-mod" :class="{stale: r.cold}"
+             :href="r.url" target="_blank" rel="noopener">
+            <div class="ym-title" :title="r.channel_title + ' · ' + r.title">{{ r.title }}</div>
+            <div class="ym-row">
+              <span class="ym-ch">{{ r.channel_title }}</span>
+              <span class="badge" :class="r.is_short ? 'yellow' : ''">{{ r.is_short ? 'Shorts' : '长视频' }}</span>
+              <span class="muted">{{ r.published_at }}</span>
+              <span class="ym-views">▶ {{ fmtNum(r.views) }}</span>
+            </div>
+            <div class="ym-row ym-dims" style="margin-top:3px">
+              <span>1日增量 {{ deltaText(r, 'delta_24h', 'delta_24h_basis') }}</span>
+              <span>7日增量 {{ deltaText(r, 'delta_7d') }}</span>
+              <span>👍 {{ fmtNum(r.likes) }}</span>
+              <span>💬 {{ fmtNum(r.comments) }}</span>
+            </div>
+          </a>
+        </div>
+        <p class="muted" style="margin-top:8px;font-size:11.5px" v-if="yMeta">{{ yMeta.rule }}</p>
       </div>
 
       <p class="foot-note">只读看板 · 数据每 15 分钟自动更新(YouTube 每日一轮) · 想要完整工作台请联系管理员</p>
