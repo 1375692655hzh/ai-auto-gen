@@ -1,0 +1,10 @@
+[Unit]
+Description=aag board YouTube track collect (Data API v3, needs yt key in workbench settings)
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=ubuntu
+WorkingDirectory=@REPO@
+ExecStart=@REPO@/.venv/bin/python cli.py workbench refresh-yt-track
+TimeoutStartSec=900

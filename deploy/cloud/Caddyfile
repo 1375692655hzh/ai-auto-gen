@@ -1,5 +1,5 @@
-# /etc/caddy/Caddyfile — 数据站 HTTPS 反代(Caddy 自动签发/续期证书)
-# 用法: 把 data.example.com 换成你的域名(A 记录指到本机公网 IP), 然后
+# /etc/caddy/Caddyfile — 数据站 + 只看看板 HTTPS 反代(Caddy 自动签发/续期证书)
+# 用法: 把 data/board.example.com 换成你的域名(A 记录指到本机公网 IP), 然后
 #   sudo cp deploy/cloud/Caddyfile /etc/caddy/Caddyfile && sudo systemctl reload caddy
 data.example.com {
     encode gzip
@@ -7,4 +7,10 @@ data.example.com {
     # 可选加固: 公司固定出口 IP 白名单(不开则全球可达, 由 Bearer key 把门)
     # @notfrom not client_ip 203.0.113.0/24
     # respond @notfrom 403
+}
+
+# 只看看板(轻量只读对外视图: 资讯总览/X推荐/X热门帖/YTB追踪)
+board.example.com {
+    encode gzip
+    reverse_proxy 127.0.0.1:8790
 }

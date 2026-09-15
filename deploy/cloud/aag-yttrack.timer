@@ -1,0 +1,9 @@
+[Unit]
+Description=aag board YouTube track collect timer (daily, viewer 24h cadence)
+
+[Timer]
+OnCalendar=*-*-* 09:17:00
+Persistent=true
+
+[Install]
+WantedBy=timers.target

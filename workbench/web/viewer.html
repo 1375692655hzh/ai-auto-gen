@@ -1,0 +1,688 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>热点看板</title>
+<link rel="stylesheet" href="/css/app.css">
+<style>
+  /* 看板自 有布局(复用 app.css tokens/卡片/徽章, 顶层改单列宽幅) */
+  body { min-height: 100vh; }
+  .vb-wrap { max-width: 1180px; margin: 0 auto; padding: 0 16px 48px; }
+  .vb-nav { display: flex; gap: 4px; flex: 1; }
+  .vb-nav .nav-item { font-size: 13.5px; }
+  .vb-title { font-weight: 700; font-size: 15px; color: var(--accent);
+              letter-spacing: .5px; padding-right: 14px; border-right: 1px solid var(--border); }
+  .news-cols { display: grid; grid-template-columns: 264px 1fr; gap: 14px; align-items: start; }
+  @media (max-width: 900px) { .news-cols { grid-template-columns: 1fr; } }
+  .gate-mask { position: fixed; inset: 0; background: var(--bg); z-index: 200;
+               display: flex; align-items: center; justify-content: center; }
+  .gate-box { width: 320px; }
+  .vb-toast { position: fixed; left: 50%; bottom: 34px; transform: translateX(-50%);
+              background: var(--bg-card); border: 1px solid var(--border-light);
+              color: var(--text); padding: 8px 18px; border-radius: var(--r-pill);
+              font-size: 13px; z-index: 300; opacity: 0; transition: opacity .25s; pointer-events: none; }
+  .vb-toast.show { opacity: 1; }
+  .foot-note { text-align: center; color: var(--text-mute); font-size: 11.5px; margin-top: 28px; }
+</style>
+</head>
+<body>
+<div id="app"></div>
+<script src="/vendor/vue.global.prod.js"></script>
+<script>
+/* ══ 只看看板: 资讯总览 / X推荐 / X热门帖 / YTB追踪 ══
+   工作台对应页面的只读裁剪版——无生成/采集/设置能力;
+   访问口令存 localStorage(vb_key), 管理员链接可带 #k=xxx 自动落钥。 */
+window.VB = {
+  key() { try { return localStorage.getItem("vb_key") || ""; } catch (e) { return ""; } },
+  async api(path) {
+    const h = {};
+    if (VB.key()) h["X-View-Key"] = VB.key();
+    const r = await fetch(path, { headers: h });
+    if (r.status === 401) { app.gateOpen = true; throw { error: "需要访问口令" }; }
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok) throw d;
+    return d;
+  },
+  async copyText(t) {
+    try { await navigator.clipboard.writeText(t || ""); VB.toast("已复制到剪贴板"); }
+    catch (e) {
+      const ta = document.createElement("textarea");
+      ta.value = t || ""; ta.style.cssText = "position:fixed;opacity:0";
+      document.body.appendChild(ta); ta.select();
+      try { document.execCommand("copy"); VB.toast("已复制到剪贴板"); }
+      catch (e2) { VB.toast("复制失败, 请手动选择文本"); }
+      ta.remove();
+    }
+  },
+  _toastT: null,
+  toast(msg) {
+    const el = document.getElementById("vb-toast");
+    if (!el) return;
+    el.textContent = msg; el.classList.add("show");
+    clearTimeout(VB._toastT);
+    VB._toastT = setTimeout(() => el.classList.remove("show"), 2200);
+  },
+};
+
+const app = Vue.createApp({
+  data() {
+    return {
+      tab: "news", gateOpen: false, gateInput: "", gateNeed: false,
+      loaded: {},                       /* 各页首访懒加载标记 */
+      /* ── 资讯总览 ── */
+      dict: { markets: [], sources: [] },
+      enums: {
+        item_types: ["聚合", "快讯", "资讯", "分析"],
+        sentiments: [["bull", "利好"], ["bear", "利空"], ["neutral", "中性"]],
+        positionings: ["官方", "机构", "大V", "快讯源", "新闻源"],
+      },
+      f: { markets: [], positionings: [], item_types: [], sentiments: [],
+           sectors: [], q: "", tickers: "", since: "24h", dedup: true, display: true },
+      sinceOpts: [["1h", "近1小时"], ["4h", "近4小时"], ["24h", "近24小时"],
+                  ["48h", "近48小时"], ["3d", "近3天"], ["", "全部"]],
+      items: [], total: 0, nextCursor: "", loading: false, error: null,
+      bodyExpanded: {}, showAllSectors: false, stats: null,
+      /* ── X推荐 ── */
+      xfSinceOpts: [["1h", "近1小时"], ["6h", "近6小时"], ["12h", "近12小时"],
+                    ["24h", "近1天"], ["48h", "近2天"]],
+      sortOpts: [["fv", "金融价值"], ["time", "时间顺序"], ["growth", "增速"],
+                 ["pred", "预测浏览"], ["exposure", "评论曝光"]],
+      xf: { since: "12h", sort: "fv", markets: [], sectors: [], golden: false,
+            bigOnly: false, finance: false, items: [], total: 0, meta: {}, loading: false },
+      hideP3: false, xExpanded: {},
+      marketChips: ["美股", "A股", "港股", "台股", "日本", "韩国", "全球", "加密货币"],
+      /* ── X热门帖 ── */
+      rssSortOpts: [["prob", "爆火概率"], ["views", "浏览量"], ["exposure", "评论曝光"], ["time", "时间"]],
+      rs: { sort: "prob", items: [], total: 0, meta: {}, loading: false },
+      /* ── YTB追踪 ── */
+      yf: { range: "7d", kind: "all", channel: "", sort: "views", q: "" },
+      yItems: [], yTotal: 0, yMeta: null, yLoading: false, yErr: null,
+      yChannels: [], yChannelsMeta: {},
+    };
+  },
+  computed: {
+    activeCount() {
+      return ["markets", "positionings", "item_types", "sentiments", "sectors"]
+        .reduce((n, k) => n + this.f[k].length, 0) + (this.f.q ? 1 : 0) + (this.f.tickers ? 1 : 0);
+    },
+    sector48() { return (this.stats && this.stats.sectors_48h) || []; },
+    sector48Top() { return this.sector48.slice(0, 8); },
+    sector48Rest() { return this.showAllSectors ? this.sector48.slice(8) : []; },
+    recoGroups() {
+      const items = this.xf.items || [];
+      if (this.xf.sort !== "fv") return [{ key: "all", label: "", cls: "", items }];
+      const g = { P0: [], P1: [], rest: [] };
+      items.forEach((r) => g[r.fv_tier === "P0" || r.fv_tier === "P1" ? r.fv_tier : "rest"].push(r));
+      const rest = this.hideP3 ? g.rest.filter((r) => r.fv_tier !== "P3") : g.rest;
+      const out = [];
+      if (g.P0.length) out.push({ key: "p0", label: "打断级 P0", cls: "red", items: g.P0 });
+      if (g.P1.length) out.push({ key: "p1", label: "今日必读 P1", cls: "yellow", items: g.P1 });
+      if (rest.length) out.push({ key: "rest", label: "简报候选与归档", cls: "", items: rest });
+      return out;
+    },
+    enabledChannels() { return this.yChannels.filter((c) => c.enabled); },
+  },
+  methods: {
+    /* ── 门禁 ── */
+    async checkGate() {
+      try { this.gateNeed = (await VB.api("/vb-api/gate")).need; } catch (e) { this.gateNeed = true; }
+      if (!this.gateNeed || VB.key()) this.gateOpen = false;
+      else this.gateOpen = true;
+    },
+    submitGate() {
+      const k = this.gateInput.trim();
+      if (!k) return;
+      localStorage.setItem("vb_key", k);
+      VB.api("/vb-api/gate").then((d) => {
+        if (d.need) { this.gateInput = ""; VB.toast("口令不对, 再试一次"); localStorage.removeItem("vb_key"); }
+        else { this.gateOpen = false; VB.toast("已解锁"); this.enter(); }
+      }).catch(() => { this.gateInput = ""; VB.toast("口令不对, 再试一次"); localStorage.removeItem("vb_key"); });
+    },
+    enter() {
+      this.checkGate();
+      if (this.tab === "news") this.initNews();
+      if (this.tab === "reco") this.loadXF();
+      if (this.tab === "surge") this.loadRss();
+      if (this.tab === "yt") this.initYt();
+    },
+    pickTab(t) {
+      this.tab = t;
+      if (this.gateOpen) return;
+      if (t === "news" && !this.loaded.news) this.initNews();
+      if (t === "reco" && !this.loaded.reco) this.loadXF();
+      if (t === "surge" && !this.loaded.surge) this.loadRss();
+      if (t === "yt" && !this.loaded.yt) this.initYt();
+    },
+    /* ── 资讯总览(资讯页·信息筛选同款) ── */
+    async initNews() { this.loaded.news = true; this.loadDict(); this.loadStats(); this.loadNews(); },
+    async loadDict() {
+      try {
+        const d = await VB.api("/vb-api/v1/sources");
+        const mk = new Set();
+        for (const s of d.sources) (s.markets || []).forEach((m) => mk.add(m));
+        this.dict = { markets: [...mk].sort(), sources: d.sources };
+      } catch (e) {}
+    },
+    async loadStats() { try { this.stats = await VB.api("/vb-api/stats"); } catch (e) {} },
+    sinceValue() {
+      const now = new Date();
+      const fmt = (d) => d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" +
+        String(d.getDate()).padStart(2, "0") + " " + String(d.getHours()).padStart(2, "0") + ":" +
+        String(d.getMinutes()).padStart(2, "0");
+      if (this.f.since === "1h") return fmt(new Date(now - 3600e3));
+      if (this.f.since === "4h") return fmt(new Date(now - 4 * 3600e3));
+      if (this.f.since === "24h") return fmt(new Date(now - 24 * 3600e3));
+      if (this.f.since === "48h") return fmt(new Date(now - 48 * 3600e3));
+      if (this.f.since === "3d") return fmt(new Date(now - 3 * 86400e3));
+      return "";
+    },
+    buildQuery(cursor) {
+      const p = new URLSearchParams();
+      for (const k of ["markets", "positionings", "item_types", "sentiments", "sectors"])
+        if (this.f[k].length) p.set(k, this.f[k].join(","));
+      if (this.f.q) p.set("q", this.f.q);
+      if (this.f.tickers) p.set("tickers", this.f.tickers);
+      const s = this.sinceValue();
+      if (s) p.set("since", s);
+      p.set("limit", "100");
+      p.set("dedup", this.f.dedup ? "1" : "0");
+      p.set("display", this.f.display ? "1" : "0");
+      if (cursor) p.set("cursor", cursor);
+      return p.toString();
+    },
+    async loadNews(cursor) {
+      this.loading = true; this.error = null;
+      try {
+        const d = await VB.api("/vb-api/v1/items?" + this.buildQuery(cursor));
+        this.items = cursor ? this.items.concat(d.items) : d.items;
+        this.total = d.total; this.nextCursor = d.next_cursor || "";
+      } catch (e) { this.error = e; }
+      this.loading = false;
+    },
+    reloadNews() { this.items = []; this.nextCursor = ""; this.loadNews(); },
+    toggle(group, val) {
+      const arr = this.f[group];
+      const i = arr.indexOf(val);
+      i >= 0 ? arr.splice(i, 1) : arr.push(val);
+      this.reloadNews();
+    },
+    toggleXFChip(group, val) {
+      const arr = this.xf[group];
+      const i = arr.indexOf(val);
+      i >= 0 ? arr.splice(i, 1) : arr.push(val);
+      this.loadXF();
+    },
+    toggleXFFlag(k) { this.xf[k] = !this.xf[k]; this.loadXF(); },
+    clearAll() {
+      for (const k of ["markets", "positionings", "item_types", "sentiments", "sectors"]) this.f[k] = [];
+      this.f.q = ""; this.f.tickers = "";
+      this.reloadNews();
+    },
+    sourceTitle(sid) {
+      const s = this.dict.sources.find((x) => x.id === sid);
+      return (s && s.title) || sid;
+    },
+    sourceInfo(sid) { return this.dict.sources.find((x) => x.id === sid) || null; },
+    isX(it) { return !!it.author_handle; },
+    /* ── X推荐 / X热门帖(图文页同款) ── */
+    async loadXF() {
+      const st = this.xf; this.loaded.reco = true;
+      st.loading = true;
+      try {
+        const p = new URLSearchParams({ range: st.since, sort: st.sort, limit: "100" });
+        if (st.golden) p.set("golden", "1");
+        if (st.bigOnly) p.set("min_followers", "100000");
+        if (st.finance) p.set("finance", "1");
+        if (st.markets.length) p.set("market", st.markets.join(","));
+        if (st.sectors.length) p.set("sector", st.sectors[0]);
+        const d = await VB.api("/vb-api/x-surge?" + p.toString());
+        (d.items || []).forEach((r, i) => { r.rank = i + 1; });
+        st.items = d.items; st.total = d.total;
+        st.meta = { ...(d.meta || {}), golden_n: d.golden_n, err: "" };
+      } catch (e) { st.items = []; st.meta = { ...(st.meta || {}), err: (e && e.error) || "接口不可用" }; }
+      st.loading = false;
+    },
+    async loadRss() {
+      const st = this.rs; this.loaded.surge = true;
+      st.loading = true;
+      try {
+        const d = await VB.api("/vb-api/x-surge-rss?sort=" + st.sort);
+        st.items = d.items; st.total = d.total; st.meta = d.meta || {};
+      } catch (e) { st.items = []; st.meta = { ...(st.meta || {}), err: (e && e.error) || "接口不可用" }; }
+      st.loading = false;
+    },
+    dispText(r) { return r.text_zh || r.text; },
+    xLong(r) { return (this.dispText(r) || "").length > 200; },
+    xToggle(r) { this.xExpanded[r.status_id] = !this.xExpanded[r.status_id]; },
+    copyPostLink(r) { VB.copyText(r.reply_url); },
+    xfCopy(r) { VB.copyText(this.dispText(r)); },
+    /* ── YTB追踪(视频页·热点追踪同款) ── */
+    async initYt() { this.loaded.yt = true; this.loadYtChannels(); this.loadYt(); },
+    async loadYtChannels() {
+      try {
+        const d = await VB.api("/vb-api/yt/channels");
+        this.yChannels = d.channels || []; this.yChannelsMeta = d.meta || {};
+      } catch (e) {}
+    },
+    async loadYt() {
+      this.yLoading = true; this.yErr = null;
+      try {
+        const p = new URLSearchParams({ range: this.yf.range, sort: this.yf.sort,
+                                        kind: this.yf.kind, limit: "100" });
+        if (this.yf.channel) p.set("channel", this.yf.channel);
+        if (this.yf.q) p.set("q", this.yf.q);
+        const d = await VB.api("/vb-api/yt/hot?" + p.toString());
+        this.yItems = d.items || []; this.yTotal = d.total || 0; this.yMeta = d.meta || {};
+      } catch (e) { this.yErr = e; }
+      this.yLoading = false;
+      try { this.yMeta = { ...(await VB.api("/vb-api/yt/status")), ...this.yMeta }; } catch (e) {}
+    },
+    /* ── 通用展示辅助(与工作台同实现) ── */
+    fmtN(n) {
+      if (n == null) return "—";
+      if (n >= 1e8) return (n / 1e8).toFixed(1).replace(/\.0$/, "") + "亿";
+      if (n >= 1e4) return (n / 1e4).toFixed(1).replace(/\.0$/, "") + "万";
+      return String(Math.round(n));
+    },
+    fmtFol(n) { return n >= 1e4 ? (n / 1e4).toFixed(1).replace(/\.0$/, "") + "万" : String(n); },
+    tierBadge(t) { return { P0: "red", P1: "yellow", P2: "blue", P3: "" }[t] || ""; },
+    fvTitle(r) {
+      const p = r.fv_parts || {};
+      return "事件" + (p.event ?? 0) + " · 主体" + (p.entity ?? 0) + " · 信源" + (p.source ?? 0) +
+        " · 影响面" + (p.impact ?? 0) + " · 意外度" + (p.surprise ?? 5) + "(缺省) · 印证时效" + (p.proof ?? 0) +
+        " — 阈值 P0≥75 / P1≥60 / P2≥40";
+    },
+    sectorParts(sec) {
+      const p = String(sec).split(">");
+      return [p[0] || "", p.slice(1).join(">")];
+    },
+    visibleSectors(r) { return (r.sectors || []).slice(0, 2); },
+    sectorsRest(r) { return Math.max((r.sectors || []).length - 2, 0); },
+    sentimentBadge(s) {
+      return (s === "bullish" || s === "bull") ? "green"
+        : (s === "bearish" || s === "bear") ? "red" : s === "neutral" ? "yellow" : "";
+    },
+    sentimentText(s) { return { bull: "利好", bear: "利空", neutral: "中性", bullish: "利好", bearish: "利空" }[s] || s; },
+    fmtNum(n) {
+      if (n == null) return "—";
+      if (Math.abs(n) >= 1e8) return (n / 1e8).toFixed(2).replace(/\.?0+$/, "") + " 亿";
+      if (Math.abs(n) >= 1e4) return (n / 1e4).toFixed(1).replace(/\.0$/, "") + " 万";
+      return String(n);
+    },
+    cut(s, n) {
+      const a = [...String(s || "")];
+      return a.length > n ? a.slice(0, n).join("") + "…" : a.join("");
+    },
+    deltaText(r, key, basisKey) {
+      const v = r[key];
+      if (v == null) return "—";
+      const sign = v < 0 ? "-" : "+";
+      const b = basisKey ? r[basisKey] : undefined;
+      const star = (b === "first_seen" || b === false) ? "*" : "";
+      return sign + this.fmtNum(Math.abs(v)) + star + (v < 0 ? "↓" : "");
+    },
+  },
+  mounted() {
+    /* 管理员发的链接可带 #k=口令 → 自动落钥免手输 */
+    const m = location.hash.match(/^#k=(.+)$/);
+    if (m) { localStorage.setItem("vb_key", m[1].trim()); history.replaceState(null, "", location.pathname); }
+    this.checkGate();
+    this.initNews();
+  },
+  template: `
+  <div>
+    <header class="topbar">
+      <span class="vb-title">热点看板</span>
+      <nav class="vb-nav">
+        <span class="nav-item" :class="{active: tab==='news'}" @click="pickTab('news')">资讯总览</span>
+        <span class="nav-item" :class="{active: tab==='reco'}" @click="pickTab('reco')">X推荐</span>
+        <span class="nav-item" :class="{active: tab==='surge'}" @click="pickTab('surge')">X热门帖</span>
+        <span class="nav-item" :class="{active: tab==='yt'}" @click="pickTab('yt')">YTB追踪</span>
+      </nav>
+    </header>
+    <div class="vb-wrap">
+
+      <!-- ═══ 1 资讯总览 ═══ -->
+      <div v-show="tab==='news'" class="news-cols">
+        <div>
+          <div class="card">
+            <h3>筛选 <span v-if="activeCount" class="badge blue">{{ activeCount }}</span></h3>
+            <div class="filter-group">
+              <h4>市场 <span class="clear" v-if="f.markets.length" @click="f.markets=[]; reloadNews()">清空</span></h4>
+              <span v-for="m in dict.markets" :key="m" class="chip" :class="{on: f.markets.includes(m)}"
+                    @click="toggle('markets', m)">{{ m }}</span>
+              <div class="muted" v-if="!dict.markets.length">(数据站未连通)</div>
+            </div>
+            <div class="filter-group">
+              <h4>定位 <span class="clear" v-if="f.positionings.length" @click="f.positionings=[]; reloadNews()">清空</span></h4>
+              <span v-for="p in enums.positionings" :key="p" class="chip" :class="{on: f.positionings.includes(p)}"
+                    @click="toggle('positionings', p)">{{ p }}</span>
+            </div>
+            <div class="filter-group">
+              <h4>类型 <span class="clear" v-if="f.item_types.length" @click="f.item_types=[]; reloadNews()">清空</span></h4>
+              <span v-for="t in enums.item_types" :key="t" class="chip" :class="{on: f.item_types.includes(t)}"
+                    @click="toggle('item_types', t)">{{ t }}</span>
+            </div>
+            <div class="filter-group">
+              <h4>情绪 <span class="clear" v-if="f.sentiments.length" @click="f.sentiments=[]; reloadNews()">清空</span></h4>
+              <span v-for="[v, t] in enums.sentiments" :key="v" class="chip" :class="{on: f.sentiments.includes(v)}"
+                    @click="toggle('sentiments', v)">{{ t }}</span>
+            </div>
+            <button class="btn" style="width:100%;justify-content:center" @click="clearAll">清空全部筛选</button>
+          </div>
+          <div class="card">
+            <h3>赛道 <span class="muted" style="font-weight:normal">48h 实时</span>
+              <span v-if="f.sectors.length" class="badge blue">{{ f.sectors.length }}</span>
+              <span class="clear" v-if="f.sectors.length" @click="f.sectors=[]; reloadNews()">清空</span></h3>
+            <div class="filter-group">
+              <span v-for="[s, n] in sector48Top" :key="s" class="chip" :class="{on: f.sectors.includes(s)}"
+                    @click="toggle('sectors', s)" :title="'近48h ' + n + ' 条'">{{ s }} {{ n }}</span>
+              <span v-for="[s, n] in sector48Rest" :key="s" class="chip" :class="{on: f.sectors.includes(s)}"
+                    @click="toggle('sectors', s)" :title="'近48h ' + n + ' 条'">{{ s }} {{ n }}</span>
+              <span class="act" v-if="sector48.length > 8" @click="showAllSectors = !showAllSectors">
+                {{ showAllSectors ? '收起' : '展开全部(' + sector48.length + ')' }}</span>
+              <div class="muted" v-if="!sector48.length">48h 内无赛道标签</div>
+            </div>
+          </div>
+        </div>
+        <div>
+          <div class="feed-toolbar">
+            <input type="text" v-model="f.q" placeholder="搜索(拆词 AND, 中英同检), 回车确认" @keyup.enter="reloadNews()">
+            <select v-model="f.since" @change="reloadNews()">
+              <option v-for="[v, t] in sinceOpts" :key="v" :value="v">{{ t }}</option>
+            </select>
+            <label class="muted"><input type="checkbox" v-model="f.dedup" @change="reloadNews()"> 折叠同事件</label>
+            <label class="muted"><input type="checkbox" v-model="f.display" @change="reloadNews()"> 中文优先</label>
+            <span style="flex:1"></span>
+            <span class="muted" v-if="total">{{ total }} 条</span>
+          </div>
+          <input type="text" v-model="f.tickers" placeholder="标的过滤(如 NVDA,TSLA), 回车确认"
+                 style="width:100%;margin-bottom:10px" @keyup.enter="reloadNews()">
+          <div v-if="error" class="err-box"><p>{{ error.error }}</p>
+            <p v-if="error.hint" style="margin-top:6px">{{ error.hint }}</p></div>
+          <div v-else-if="!items.length && !loading" class="empty">无匹配条目 —— 调整筛选条件试试</div>
+          <div class="feed">
+            <div v-for="it in items" :key="it.id" class="news-card">
+              <div class="nc-grid">
+                <div class="nc-src" v-if="isX(it)">
+                  <div class="name">{{ it.source }}</div>
+                  <div class="who"><a :href="'https://x.com/' + it.author_handle" target="_blank" rel="noopener"
+                      @click.stop>@{{ it.author_handle }}</a></div>
+                  <div class="nc-badges" style="margin-bottom:0">
+                    <span v-if="it.positioning" class="badge blue">{{ it.positioning }}</span>
+                    <span v-for="m in (it.markets || [])" :key="m" class="badge">{{ m }}</span>
+                  </div>
+                </div>
+                <div class="nc-src" v-else>
+                  <div class="name">{{ sourceTitle(it.source_id) }}</div>
+                  <div class="nc-badges" style="margin-bottom:0">
+                    <span v-if="it.positioning" class="badge blue">{{ it.positioning }}</span>
+                    <span v-for="m in ((sourceInfo(it.source_id) || {}).markets || it.markets || [])"
+                          :key="m" class="badge">{{ m }}</span>
+                  </div>
+                </div>
+                <div class="nc-body">
+                  <div class="nc-badges">
+                    <span class="nc-time">{{ it.time }}</span>
+                    <span v-if="it.item_type" class="badge blue">{{ it.item_type }}</span>
+                    <template v-for="sec in visibleSectors(it)" :key="sec">
+                      <span class="badge yellow" :title="sec">{{ sectorParts(sec)[0] }}</span>
+                      <span v-if="sectorParts(sec)[1]" class="badge" :title="sec">{{ sectorParts(sec)[1] }}</span>
+                    </template>
+                    <span v-if="sectorsRest(it)" class="badge" :title="(it.sectors || []).join('\\n')">+{{ sectorsRest(it) }}</span>
+                    <span v-if="it.sentiment" class="badge" :class="sentimentBadge(it.sentiment)">{{ sentimentText(it.sentiment) }}</span>
+                    <span v-for="t in it.tickers" :key="t" class="badge">{{ t }}</span>
+                    <span v-if="it.event_type" class="badge">{{ it.event_type }}</span>
+                    <span v-if="it.dup_count > 1" class="badge yellow">同事件 ×{{ it.dup_count }}</span>
+                  </div>
+                  <div class="news-text" :class="{expanded: bodyExpanded[it.id]}">
+                    {{ it.title ? it.title + ' — ' : '' }}{{ it.text }}</div>
+                  <div class="news-src-text" v-if="bodyExpanded[it.id] && it.text_src">{{ it.text_src }}</div>
+                  <div class="news-actions">
+                    <a v-if="it.url" :href="it.url" target="_blank" rel="noopener">原文链接 ↗</a>
+                    <span class="act" v-if="(it.text || '').length > 280"
+                          @click="bodyExpanded[it.id] = !bodyExpanded[it.id]">
+                      {{ bodyExpanded[it.id] ? '收起' : '展开全文' }}</span>
+                    <span class="act" v-if="it.text_src" @click="bodyExpanded[it.id] = !bodyExpanded[it.id]">
+                      {{ bodyExpanded[it.id] ? '收起原文' : '查看原文(译前)' }}</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="load-more">
+            <button v-if="nextCursor" class="btn" :disabled="loading" @click="loadNews(nextCursor)">
+              {{ loading ? '加载中…' : '加载更多' }}</button>
+            <span v-else-if="items.length" class="muted">—— 已加载全部 {{ items.length }} 条 ——</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- ═══ 2 X推荐 ═══ -->
+      <div v-show="tab==='reco'">
+        <div class="feed-toolbar">
+          <select v-model="xf.since" @change="loadXF()">
+            <option v-for="[v, t] in xfSinceOpts" :key="v" :value="v">{{ t }}</option>
+          </select>
+          <div class="radio-group">
+            <label v-for="[v, t] in sortOpts" :key="v">
+              <input type="radio" :value="v" v-model="xf.sort" @change="loadXF()"> {{ t }}</label>
+          </div>
+          <span style="flex:1"></span>
+          <button class="btn" @click="loadXF()">{{ xf.loading ? '刷新中…' : '刷新' }}</button>
+        </div>
+        <div class="card reco-filter" style="margin-bottom:10px">
+          <div class="frow"><span class="lab">市场</span>
+            <span v-for="m in marketChips" :key="m" class="chip" :class="{on: xf.markets.includes(m)}"
+                  @click="toggleXFChip('markets', m)">{{ m }}</span></div>
+          <div class="frow"><span class="lab">赛道</span>
+            <span v-for="[sl, n] in (xf.meta.sectors_l1 || [])" :key="sl" class="chip"
+                  :class="{on: xf.sectors.includes(sl)}" @click="toggleXFChip('sectors', sl)">
+              {{ sl }}<template v-if="n"> {{ n }}</template></span>
+            <span v-if="!((xf.meta.sectors_l1 || []).length)" class="muted">窗口内暂无赛道打标</span></div>
+          <div class="frow"><span class="lab">条件</span>
+            <span class="chip" :class="{on: xf.golden}" @click="toggleXFFlag('golden')">仅黄金窗口(≤2h)</span>
+            <span class="chip" :class="{on: xf.bigOnly}" @click="toggleXFFlag('bigOnly')">粉丝≥10万</span>
+            <span class="chip" :class="{on: xf.finance}" @click="toggleXFFlag('finance')">仅投资金融</span></div>
+        </div>
+        <p class="surge-meta">
+          <template v-if="xf.meta.updated_at">快照 {{ xf.meta.updated_at }} ·
+            {{ xf.meta.data_age_min }} 分钟前 · 在跟踪 {{ xf.meta.tracked }} 帖 · X 条目 {{ xf.total }}</template>
+          <template v-else>暂无快照</template>
+          <span v-if="xf.meta.err" class="badge red" style="margin-left:8px">{{ xf.meta.err }}</span>
+        </p>
+        <p v-if="xf.sort === 'fv' && xf.items.length" class="surge-meta">
+          <label style="cursor:pointer"><input type="checkbox" v-model="hideP3"> 隐藏低值(P3 归档)</label></p>
+        <div v-if="!xf.items.length && !xf.loading" class="empty">窗口内暂无 X 内容</div>
+        <div class="feed">
+          <template v-for="g in recoGroups" :key="g.key">
+            <div v-if="g.label" class="group-head">
+              <span class="badge" :class="g.cls">{{ g.label }}</span>
+              <span class="muted">{{ g.items.length }} 条</span></div>
+            <div v-for="r in g.items" :key="r.status_id" class="news-card"
+                 :class="{ 'tier-p0': g.key === 'p0', 'tier-p1': g.key === 'p1' }">
+              <div class="surge-grid">
+                <div class="surge-rank">
+                  <div class="prob">{{ r.fv_score }}<span>分</span></div>
+                  <div class="prob-lab">金融价值</div>
+                  <div class="prob growth" :title="r.growth_views_h != null ? '浏览增速 ' + fmtN(r.growth_views_h) + '/时' : '增速基线攒集中'">
+                    {{ r.growth_views_h != null ? fmtN(r.growth_views_h) : '—' }}<span v-if="r.growth_views_h != null">/时</span></div>
+                  <div class="prob-lab">增速</div>
+                  <span class="badge" :class="tierBadge(r.fv_tier)" :title="fvTitle(r)">{{ r.fv_tier }}</span>
+                  <span v-if="r.golden" class="badge golden" style="margin-top:4px">黄金窗口</span>
+                </div>
+                <div class="surge-body">
+                  <div class="surge-top">
+                    <span class="rank-no">#{{ r.rank }}</span><b>{{ r.name }}</b>
+                    <span class="muted">@{{ r.handle }}</span>
+                    <span v-if="r.positioning" class="badge blue">{{ r.positioning }}</span>
+                    <span v-if="r.followers" class="xhot-fol">粉 {{ fmtFol(r.followers) }}</span>
+                    <span class="muted" style="margin-left:auto">{{ r.time }}</span>
+                  </div>
+                  <div class="nc-badges" style="margin-bottom:0">
+                    <span v-for="m in r.markets" :key="m" class="badge">{{ m }}</span>
+                    <template v-for="sec in visibleSectors(r)" :key="sec">
+                      <span class="badge yellow" :title="sec">{{ sectorParts(sec)[0] }}</span>
+                      <span v-if="sectorParts(sec)[1]" class="badge" :title="sec">{{ sectorParts(sec)[1] }}</span>
+                    </template>
+                    <span v-if="sectorsRest(r)" class="badge" :title="(r.sectors || []).join('\\n')">+{{ sectorsRest(r) }}</span>
+                    <span v-if="r.event_type" class="badge">{{ r.event_type }}</span>
+                    <span v-if="r.sentiment" class="badge" :class="sentimentBadge(r.sentiment)">{{ sentimentText(r.sentiment) }}</span>
+                    <span v-for="t in r.tickers" :key="t" class="badge">{{ t }}</span>
+                    <span v-if="r.dup_count > 1" class="badge yellow">同事件 ×{{ r.dup_count }}</span>
+                  </div>
+                  <a class="xhot-text" :class="{ expanded: xExpanded[r.status_id] }"
+                     :href="r.reply_url" target="_blank" rel="noopener"
+                     :title="r.text_zh ? '原文: ' + r.text : ''">{{ dispText(r) }}</a>
+                  <div v-if="xLong(r)" class="x-expand">
+                    <span class="act" @click="xToggle(r)">{{ xExpanded[r.status_id] ? '收起' : '展开全文' }}</span></div>
+                  <div class="surge-stats">
+                    <span>👍 {{ fmtN(r.likes) }}</span><span>🔁 {{ fmtN(r.retweets) }}</span>
+                    <span>💬 {{ fmtN(r.replies) }}</span><span>👁 {{ fmtN(r.views) }}</span>
+                  </div>
+                  <div class="surge-parts muted">
+                    参考: <template v-if="r.views_pred != null">预测浏览 {{ fmtN(r.views_pred) }}</template><template v-if="r.reply_exposure != null"> · 评论可蹭 ~{{ fmtN(r.reply_exposure) }} 曝光</template> · {{ r.age_h }}h 前</div>
+                  <div class="news-actions blocks">
+                    <a :href="r.reply_url" target="_blank" rel="noopener">去评论 ↗</a>
+                    <span class="act" @click="copyPostLink(r)">复制链接</span>
+                    <span class="act" @click="xfCopy(r)">复制原帖</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </template>
+        </div>
+      </div>
+
+      <!-- ═══ 3 X热门帖 ═══ -->
+      <div v-show="tab==='surge'">
+        <div class="feed-toolbar">
+          <div class="radio-group">
+            <label v-for="[v, t] in rssSortOpts" :key="v">
+              <input type="radio" :value="v" v-model="rs.sort" @change="loadRss()"> {{ t }}</label>
+          </div>
+          <span class="muted">数据源: SoPilot 今日热帖公开 RSS</span>
+          <span style="flex:1"></span>
+          <button class="btn" @click="loadRss()">{{ rs.loading ? '刷新中…' : '刷新' }}</button>
+        </div>
+        <p class="surge-meta">
+          <template v-if="rs.meta.updated_at">RSS 抓取 {{ rs.meta.updated_at }} · 在榜 {{ rs.total }} 帖(48h 保留)</template>
+          <template v-else>暂无数据</template>
+          <span v-if="rs.meta.err" class="badge red" style="margin-left:8px">{{ rs.meta.err }}</span>
+        </p>
+        <div v-if="!rs.items.length && !rs.loading" class="empty">暂无数据</div>
+        <div class="feed">
+          <div v-for="(r, i) in rs.items" :key="r.status_id" class="news-card">
+            <div class="surge-grid">
+              <div class="surge-rank">
+                <div class="prob">{{ r.prob == null ? '—' : r.prob }}<span>%</span></div>
+                <div class="prob-lab">爆火概率</div>
+              </div>
+              <div class="surge-body">
+                <div class="surge-top">
+                  <span class="rank-no">#{{ i + 1 }}</span><b>{{ r.name }}</b>
+                  <span class="muted">@{{ r.handle }}</span>
+                  <span class="muted" style="margin-left:auto">{{ r.time }}</span>
+                </div>
+                <a class="xhot-text" :class="{ expanded: xExpanded[r.status_id] }"
+                   :href="r.reply_url" target="_blank" rel="noopener"
+                   :title="r.text_zh ? '原文: ' + r.text : ''">{{ dispText(r) }}</a>
+                <div v-if="xLong(r)" class="x-expand">
+                  <span class="act" @click="xToggle(r)">{{ xExpanded[r.status_id] ? '收起' : '展开全文' }}</span></div>
+                <div class="surge-stats">
+                  <span>👍 {{ fmtN(r.likes) }}</span><span>🔁 {{ fmtN(r.retweets) }}</span>
+                  <span>💬 {{ fmtN(r.replies) }}</span><span>👁 {{ fmtN(r.views) }}</span>
+                </div>
+                <div class="news-actions blocks">
+                  <a :href="r.reply_url" target="_blank" rel="noopener">去评论 ↗</a>
+                  <span class="act" @click="copyPostLink(r)">复制链接</span>
+                  <span class="act" @click="xfCopy(r)">复制原帖</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ═══ 4 YTB追踪 ═══ -->
+      <div v-show="tab==='yt'">
+        <div class="notice" v-if="yMeta && !yMeta.configured">
+          未配置 YouTube Data API Key —— 管理员在云端配置后, 下一轮采集(每天一次)自动出数</div>
+        <div class="notice" v-else-if="yMeta && yMeta.cold_start">
+          快照冷启动中: 增量需第 2 轮采集后才有, 当前先按累计播放排序参考</div>
+        <div class="card">
+          <h3>近期视频
+            <span v-if="yMeta && yMeta.last_collect_at" class="muted" style="margin-left:10px;font-weight:400">
+              采集于 {{ yMeta.last_collect_at }}</span>
+            <span style="float:right"><button class="btn" :disabled="yLoading" @click="loadYt()">
+              {{ yLoading ? '刷新中…' : '刷新' }}</button></span></h3>
+          <div class="form-row" style="gap:8px;flex-wrap:wrap">
+            <select v-model="yf.range" @change="loadYt()" style="width:auto">
+              <option value="24h">近 24h</option><option value="48h">近 48h</option>
+              <option value="7d">近 7 天</option><option value="28d">近 28 天</option>
+              <option value="all">全部</option></select>
+            <select v-model="yf.kind" @change="loadYt()" style="width:auto">
+              <option value="all">全部类型</option><option value="long">长视频</option>
+              <option value="short">Shorts</option></select>
+            <select v-model="yf.channel" @change="loadYt()" style="width:auto">
+              <option value="">全部频道</option>
+              <option v-for="c in enabledChannels" :key="c.channel_id" :value="c.channel_id">{{ c.title }}</option></select>
+            <select v-model="yf.sort" @change="loadYt()" style="width:auto">
+              <option value="views">按播放量</option><option value="delta24h">按 Δ24h 增量</option>
+              <option value="delta7d">按 Δ7d 增量</option><option value="rate">按折合日速</option>
+              <option value="newest">按最新发布</option></select>
+            <input type="text" v-model="yf.q" placeholder="标题搜索…" style="width:160px" @keyup.enter="loadYt()">
+            <button class="btn" @click="loadYt()">筛选</button>
+            <span class="muted" v-if="yTotal">{{ yTotal }} 条</span>
+          </div>
+          <div v-if="yErr" class="err-box">{{ yErr.error || yErr }}</div>
+          <div v-else-if="!yLoading && !yItems.length" class="empty">
+            {{ yMeta && yMeta.configured ? '该时间窗口内追踪频道没有新发布视频 —— 把时间范围切到「近 7 天/28 天」即可看到' : '管理员配置 Key 并完成首轮采集后, 这里是追踪频道的热播榜' }}</div>
+          <table v-else class="tbl">
+            <thead><tr>
+              <th>视频</th><th>频道</th><th>类型</th><th>发布</th>
+              <th>播放</th><th>Δ24h</th><th>Δ7d</th><th>日速</th><th>赞</th><th>评</th>
+            </tr></thead>
+            <tbody>
+              <tr v-for="r in yItems" :key="r.video_id" :class="{stale: r.cold}">
+                <td style="max-width:260px">
+                  <a :href="r.url" target="_blank" rel="noopener"
+                     :title="r.channel_title + ' · ' + r.title">{{ cut(r.title, 26) }}</a></td>
+                <td class="muted">{{ r.channel_title }}</td>
+                <td><span class="badge" :class="r.is_short ? 'yellow' : ''">{{ r.is_short ? 'Shorts' : '长视频' }}</span></td>
+                <td class="mono" :title="'发布已 ' + r.age_h + 'h'">{{ r.published_at }}</td>
+                <td class="mono">{{ fmtNum(r.views) }}</td>
+                <td class="mono">{{ deltaText(r, 'delta_24h', 'delta_24h_basis') }}</td>
+                <td class="mono">{{ deltaText(r, 'delta_7d') }}</td>
+                <td class="mono">{{ r.rate_per_day != null ? '+' + fmtNum(r.rate_per_day) : '—' }}</td>
+                <td class="mono muted">{{ fmtNum(r.likes) }}</td>
+                <td class="mono muted">{{ fmtNum(r.comments) }}</td>
+              </tr>
+            </tbody>
+          </table>
+          <p class="muted" style="margin-top:8px" v-if="yMeta">{{ yMeta.rule }}</p>
+        </div>
+      </div>
+
+      <p class="foot-note">只读看板 · 数据每 15 分钟自动更新(YouTube 每日一轮) · 想要完整工作台请联系管理员</p>
+    </div>
+
+    <!-- 访问口令门 -->
+    <div v-if="gateOpen" class="gate-mask">
+      <div class="gate-box card" style="padding:22px">
+        <h3>访问口令</h3>
+        <p class="muted" style="margin:8px 0 14px">本看板需口令访问, 向管理员索取</p>
+        <div class="form-row">
+          <input type="password" v-model="gateInput" placeholder="输入口令…"
+                 @keyup.enter="submitGate" style="flex:1" autofocus>
+        </div>
+        <button class="btn primary" style="width:100%;justify-content:center;margin-top:10px"
+                @click="submitGate">进入</button>
+      </div>
+    </div>
+    <div id="vb-toast" class="vb-toast"></div>
+  </div>`,
+}).mount("#app");
+</script>
+</html>

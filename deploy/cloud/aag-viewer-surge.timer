@@ -1,0 +1,9 @@
+[Unit]
+Description=aag board x-surge collect timer (every 15 min at :07 offset)
+
+[Timer]
+OnCalendar=*:07/15
+Persistent=true
+
+[Install]
+WantedBy=timers.target

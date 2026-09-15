@@ -519,6 +519,18 @@ def workbench_cmd(args) -> int:
         sys.path.insert(0, str(WB))
         from server import x_reply
         return x_reply.run_reply_cli(args)
+    if args.sub == "run-auto":                     # 自动化任务到点/手动执行(CLI 进程跑编排)
+        sys.path.insert(0, str(WB))
+        from server import autoops
+        out, code = autoops.run_one(str(getattr(args, "id", "") or ""))
+        print(json.dumps(out, ensure_ascii=False))
+        return code
+    if args.sub == "enqueue":                      # 草稿箱一篇 → 发布仓待发队列 md
+        sys.path.insert(0, str(WB))
+        from server import autoops
+        out, code = autoops.enqueue_draft(str(getattr(args, "draft_id", "") or ""))
+        print(json.dumps(out, ensure_ascii=False))
+        return code
     if args.sub == "refresh-x-surge":
         sys.path.insert(0, str(WB))
         from server import x_surge
@@ -850,6 +862,18 @@ def main() -> int:
     pw_gr.add_argument("--persona-custom", default=None, help="自定义人设文本(≤200字, 作为所选预设的补充)")
     pw_gr.add_argument("--json", action="store_true", help="输出单行 JSON(本就是, 习惯兼容)")
 
+    pw_ra = wsub.add_parser("run-auto", help="自动化任务执行(schtasks 到点拉起; 种子=数据站/SoPilot→成稿→草稿或待发队列)")
+    pw_ra.add_argument("--id", required=True, help="任务 id(data/workbench/automation.json)")
+    pw_en = wsub.add_parser("enqueue", help="草稿箱一篇推入发布仓待发队列(autopub/articles/ md)")
+    pw_en.add_argument("--draft-id", required=True, help="草稿 id")
+
+    p_bd = sub.add_parser("viewer", help="只看看板(轻量只读对外视图: 资讯总览/X推荐/X热门帖/YTB追踪)")
+    bdsub = p_bd.add_subparsers(dest="sub", required=True)
+    pb_s = bdsub.add_parser("serve", help="启动只看看板(默认 127.0.0.1:8790)")
+    pb_s.add_argument("--host", default="127.0.0.1")
+    pb_s.add_argument("--port", type=int, default=8790)
+    pb_s.add_argument("--bind", default=None, help="显式绑定地址(如 0.0.0.0, 覆盖 --host)")
+
     p_k = sub.add_parser("skills", help="把 skills/ 安装到本机 agent 技能目录")
     ksub = p_k.add_subparsers(dest="sub", required=True)
     ksub.add_parser("install", help="复制到 ~/.agents/skills 与 ~/.claude/skills(存在才装)")
@@ -880,6 +904,12 @@ def main() -> int:
         return sources_cmd(args)
     if args.cmd == "workbench":
         return workbench_cmd(args)
+    if args.cmd == "viewer":
+        if args.sub == "serve":
+            sys.path.insert(0, str(WB))
+            from server import viewer
+            return viewer.run(host=args.bind or args.host, port=args.port)
+        return EXIT_FAIL
     if args.cmd == "flows":
         return flows_cmd(args)
     if args.cmd == "gen":

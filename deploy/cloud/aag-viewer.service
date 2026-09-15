@@ -1,0 +1,14 @@
+[Unit]
+Description=aag board viewer (read-only viewer, loopback 8790 behind Caddy)
+After=network-online.target aag-serve.service
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=@REPO@
+ExecStart=@REPO@/.venv/bin/python cli.py viewer serve --host 127.0.0.1 --port 8790
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
