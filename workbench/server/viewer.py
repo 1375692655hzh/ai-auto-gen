@@ -7,7 +7,8 @@
   YTB追踪  = 视频页·热点追踪(yt_track.build_view, YouTube 快照)
 
 安全模型:
-  - 全 GET 零写端点(相对工作台砍掉全部生成/采集/设置接口);
+  - 全 GET 零写端点, 唯一例外 POST /vb-api/translate(浏览层按需翻译, 同工作台
+    /wb-api/translate: 免费模型链+哈希缓存, 写面仅 data/workbench/translate_ondemand.json);
   - 访问口令 = data/workbench/viewer_access.key(管理员直写文件, 空/缺省=不设防),
     /vb-api/* 要求 X-View-Key 头或 ?k= 查询参数, 静态页首次输入存 localStorage;
   - 数据站 Key 沿用 proxy 契约: 仅存服务端 settings.json, 永不下发浏览器。
@@ -17,12 +18,12 @@
 
 import threading
 
-from fastapi import FastAPI, Request
+from fastapi import Body, FastAPI, Request
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pathlib import Path
 
-from . import proxy, stats, x_surge, yt_track, config
+from . import ondemand_translate, proxy, stats, x_surge, yt_track, config
 
 WEB = Path(__file__).resolve().parents[1] / "web"
 _KEY_CACHE = {"at": 0.0, "val": "", "lock": threading.Lock()}
@@ -117,6 +118,15 @@ def create_app() -> FastAPI:
         return {"channels": rows,
                 "meta": {"configured": bool(yt_track.api_key()),
                          "enabled": sum(1 for r in rows if r["enabled"])}}
+
+    # 浏览层按需翻译(同工作台 /wb-api/translate: 视口内缺译文卡片批量翻,
+    # 免费链+服务端哈希缓存; 同事场景唯一读英文出口, 翻译在看板侧接住)
+    @app.post("/vb-api/translate")
+    def vb_translate(body: dict = Body(default=None)):
+        try:
+            return ondemand_translate.translate_batch((body or {}).get("items") or [])
+        except Exception as e:
+            return JSONResponse({"error": f"translate_failed: {e}"}, status_code=500)
 
     @app.get("/")
     def index():

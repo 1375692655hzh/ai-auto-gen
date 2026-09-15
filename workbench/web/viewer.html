@@ -109,6 +109,95 @@ window.VB = {
   },
 };
 
+/* 浏览层按需翻译(移植自工作台 WB.trans, 2026-09-15): 视口内缺译文卡片自动批量翻。
+   两层缓存: localStorage(前端零请求) + 服务端哈希缓存(跨会话/跨同事复用); 走 settings.json translate 免费链。
+   用法: 卡片文本元素挂 :ref="el => xTrRef(el, item)", 渲染后调 VB.trans.scan(根元素);
+   默认回填 item.text_zh(Vue 响应式, dispText 展示/复制全链路自动吃译文); 资讯卡用 newsTrRef 定制回填。 */
+VB.trans = (function () {
+  const LS_KEY = "vb_trans_cache_v1";
+  let cache = null, seq = 0;
+  const seen = new WeakSet();
+  let io = null, timer = 0;
+  let pending = [];                    // [{i, el, text}]
+
+  function load() {
+    if (cache) return cache;
+    try { cache = JSON.parse(localStorage.getItem(LS_KEY) || "{}"); } catch (e) { cache = {}; }
+    return cache;
+  }
+  function persist() {
+    try {
+      const keys = Object.keys(load());
+      if (keys.length > 2000)
+        keys.slice(0, keys.length - 2000).forEach((k) => delete cache[k]);
+      localStorage.setItem(LS_KEY, JSON.stringify(cache));
+    } catch (e) {}
+  }
+  function zh(text) {
+    if (!text) return "";
+    const z = load()[text];
+    return typeof z === "string" && z ? z : "";
+  }
+  function put(text, zhText) {
+    if (text && zhText) { load()[text] = zhText; persist(); }
+  }
+  function flush() {
+    if (!pending.length) return;
+    const batch = pending; pending = [];
+    const h = { "Content-Type": "application/json" };
+    if (VB.key()) h["X-View-Key"] = VB.key();
+    fetch("/vb-api/translate", {
+      method: "POST", headers: h,
+      body: JSON.stringify({ items: batch.map((b) => ({ i: b.i, text: b.text })) }),
+    }).then((r) => r.json()).then((d) => {
+      if (d.unconfigured && !sessionStorage.getItem("vb_tr_warned")) {
+        sessionStorage.setItem("vb_tr_warned", "1");
+        VB.toast("翻译服务暂不可用, 先显示原文");
+      }
+      (d.results || []).forEach((res) => {
+        const b = batch.find((x) => x.i === res.i);
+        if (!b) return;
+        if (!res.native) put(b.text, res.zh);
+        const it = b.el.__trItem;
+        if (it && res.zh && !res.native) {
+          const cb = b.el.__trOnDone || ((e, item, z) => { if (!item.text_zh) item.text_zh = z; });
+          cb(b.el, it, res.zh);
+        }
+      });
+    }).catch(() => {});
+  }
+  function schedule(el) {
+    pending.push({ i: seq++, el, text: el.__trText });
+    clearTimeout(timer);
+    timer = setTimeout(flush, 350);     // 去抖: 一屏卡片合成一批
+  }
+  function observe(el) {
+    if (!("IntersectionObserver" in window)) { schedule(el); return; }
+    if (!io) io = new IntersectionObserver((entries) => {
+      entries.forEach((en) => {
+        if (!en.isIntersecting) return;
+        io.unobserve(en.target);
+        schedule(en.target);
+      });
+    }, { rootMargin: "240px" });        // 预取: 快进视口即翻
+    io.observe(el);
+  }
+  function scan(root) {                 // 幂等: 渲染后调用, 新元素进观察队列
+    if (!root || !root.querySelectorAll) return;
+    root.querySelectorAll("[data-tr]").forEach((el) => {
+      if (seen.has(el) || !el.__trItem || !el.__trText) return;
+      seen.add(el);
+      const cached = zh(el.__trText);
+      if (cached) {
+        (el.__trOnDone || ((e, it, z) => { if (!it.text_zh) it.text_zh = z; }))(el, el.__trItem, cached);
+        return;
+      }
+      observe(el);
+    });
+  }
+  return { scan, zh };
+})();
+
 const app = Vue.createApp({
   data() {
     return {
@@ -244,6 +333,7 @@ const app = Vue.createApp({
         this.total = d.total; this.nextCursor = d.next_cursor || "";
       } catch (e) { this.error = e; }
       this.loading = false;
+      this.$nextTick(() => VB.trans.scan(this.$el));   // 视口自动翻译未译条目
     },
     reloadNews() { this.items = []; this.nextCursor = ""; this.loadNews(); },
     toggle(group, val) {
@@ -287,6 +377,7 @@ const app = Vue.createApp({
         st.meta = { ...(d.meta || {}), golden_n: d.golden_n, err: "" };
       } catch (e) { st.items = []; st.meta = { ...(st.meta || {}), err: (e && e.error) || "接口不可用" }; }
       st.loading = false;
+      this.$nextTick(() => VB.trans.scan(this.$el));   // 视口自动翻译未译帖子
     },
     async loadRss() {
       const st = this.rs; this.loaded.surge = true;
@@ -296,8 +387,23 @@ const app = Vue.createApp({
         st.items = d.items; st.total = d.total; st.meta = d.meta || {};
       } catch (e) { st.items = []; st.meta = { ...(st.meta || {}), err: (e && e.error) || "接口不可用" }; }
       st.loading = false;
+      this.$nextTick(() => VB.trans.scan(this.$el));   // 视口自动翻译未译帖子
     },
-    dispText(r) { return r.text_zh || r.text; },
+    dispText(r) { return r.text_zh || VB.trans.zh(r.text) || r.text; },
+    /* ── 浏览层按需翻译: 展示回退链 text_zh(服务端) → VB.trans 本地缓存 → 原文;
+       trRef 给卡片文本元素挂 {__trItem, __trText, __trOnDone}, VB.trans.scan 视口自动批量翻 ── */
+    xTrRef(el, r) {
+      if (el) { el.__trItem = r; el.__trText = r.text || ""; el.setAttribute("data-tr", "1"); }
+    },
+    newsTrRef(el, it) {
+      if (el) {
+        el.__trItem = it;
+        el.__trText = (it.title ? it.title + " — " : "") + (it.text || "");
+        el.__trOnDone = (e, item, z) => this.newsTranslated(e, item, z);
+        el.setAttribute("data-tr", "1");
+      }
+    },
+    newsTranslated(el, it, zhText) { it.text = zhText; it.title = ""; },
     xLong(r) { return (this.dispText(r) || "").length > 200; },
     xToggle(r) { this.xExpanded[r.status_id] = !this.xExpanded[r.status_id]; },
     copyPostLink(r) { VB.copyText(r.reply_url); },
@@ -483,7 +589,8 @@ const app = Vue.createApp({
                     <span v-if="it.event_type" class="badge">{{ it.event_type }}</span>
                     <span v-if="it.dup_count > 1" class="badge yellow">同事件 ×{{ it.dup_count }}</span>
                   </div>
-                  <div class="news-text" :class="{expanded: bodyExpanded[it.id]}">
+                  <div class="news-text" :class="{expanded: bodyExpanded[it.id]}"
+                       :ref="el => newsTrRef(el, it)">
                     {{ it.title ? it.title + ' — ' : '' }}{{ it.text }}</div>
                   <div class="news-src-text" v-if="bodyExpanded[it.id] && it.text_src">{{ it.text_src }}</div>
                   <div class="news-actions">
@@ -582,6 +689,7 @@ const app = Vue.createApp({
                   </div>
                   <a class="xhot-text" :class="{ expanded: xExpanded[r.status_id] }"
                      :href="r.reply_url" target="_blank" rel="noopener"
+                     :ref="el => xTrRef(el, r)"
                      :title="r.text_zh ? '原文: ' + r.text : ''">{{ dispText(r) }}</a>
                   <div v-if="xLong(r)" class="x-expand">
                     <span class="act" @click="xToggle(r)">{{ xExpanded[r.status_id] ? '收起' : '展开全文' }}</span></div>
@@ -635,6 +743,7 @@ const app = Vue.createApp({
                 </div>
                 <a class="xhot-text" :class="{ expanded: xExpanded[r.status_id] }"
                    :href="r.reply_url" target="_blank" rel="noopener"
+                   :ref="el => xTrRef(el, r)"
                    :title="r.text_zh ? '原文: ' + r.text : ''">{{ dispText(r) }}</a>
                 <div v-if="xLong(r)" class="x-expand">
                   <span class="act" @click="xToggle(r)">{{ xExpanded[r.status_id] ? '收起' : '展开全文' }}</span></div>
