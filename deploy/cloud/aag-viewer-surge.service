@@ -7,4 +7,6 @@ Type=oneshot
 User=ubuntu
 WorkingDirectory=@REPO@
 ExecStart=@REPO@/.venv/bin/python cli.py workbench refresh-x-surge --range 24h --limit 300
-TimeoutStartSec=600
+TimeoutStartSec=2400
+# 2400s: 配置翻译链后, 单轮含至多 60 条 × mimo(推理模型 10-20s/条)串行补翻,
+# 600s 会被 systemd 当挂起杀掉(2026-09-15 实测); 稳态仅增量新帖, 常态几分钟。
