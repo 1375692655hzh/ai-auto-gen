@@ -191,7 +191,8 @@ class MakeTests(unittest.TestCase):
             (out / "_result.json").write_text(json.dumps({"items": {"b1": {"hash": "abc"}}}))
             return 0
         proc.wait.side_effect = finish
-        with patch.object(vstudio.subprocess, "Popen", return_value=proc) as spawn:
+        with (patch.object(vstudio, "node_env_check", return_value=(True, "")),
+              patch.object(vstudio.subprocess, "Popen", return_value=proc)) as spawn:
             items, err = vstudio._tts_node(scenes, out, provider, "longanlufeng", True)
         self.assertIsNone(err)
         self.assertEqual(items["b1"]["hash"], "abc")
@@ -201,7 +202,8 @@ class MakeTests(unittest.TestCase):
         self.assertEqual(spawn.call_args.kwargs["env"]["DASHSCOPE_API_KEY"], "secret")
         proc = MagicMock(stdout=io.StringIO(""))
         proc.wait.return_value = 0
-        with patch.object(vstudio.subprocess, "Popen", return_value=proc):
+        with (patch.object(vstudio, "node_env_check", return_value=(True, "")),
+              patch.object(vstudio.subprocess, "Popen", return_value=proc)):
             self.assertEqual(vstudio._tts_node(scenes, out, provider, "longanlufeng")[1], "tts_result_missing")
 
     def test_probe_disabled_provider_and_fresh_audio(self):
@@ -275,6 +277,7 @@ class MakeTests(unittest.TestCase):
             vstudio.begin_job("build", {"make_id": row["id"], "project_id": pid, "mode": "build"})
             with (patch.object(vmake, "VIDEOS_DIR", self.tmp / "projects"),
                   patch.object(vstudio, "_run_build_process", return_value=(exit_code, "")),
+                  patch.object(vstudio, "node_env_check", return_value=(True, "")),
                   patch.object(vstudio, "_fill_collage_images"), redirect_stdout(io.StringIO())):
                 self.assertEqual(vstudio.run_build_cli(None), exit_code)
             proj = self.tmp / "projects" / pid
