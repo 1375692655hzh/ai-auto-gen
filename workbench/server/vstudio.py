@@ -1904,9 +1904,51 @@ def _tts_provider(provider_id: str, voice: str, allow_disabled: bool = False):
     return provider
 
 
+_NODE_MAJOR_CACHE: int | None = None     # 进程内缓存; 装/升 Node 需重启工作台才生效
+
+
+def _node_major() -> int | None:
+    """node 主版本号; 探测失败返回 None(不拦路, 真不兼容会有更具体的构建报错)。"""
+    global _NODE_MAJOR_CACHE
+    if _NODE_MAJOR_CACHE is None:
+        try:
+            ver = subprocess.run(["node", "--version"], capture_output=True, text=True,
+                                 timeout=15, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+            match = re.match(r"v?(\d+)", (ver.stdout or "").strip())
+            _NODE_MAJOR_CACHE = int(match.group(1)) if match else -1
+        except (OSError, subprocess.SubprocessError, ValueError):
+            _NODE_MAJOR_CACHE = -1
+    return _NODE_MAJOR_CACHE if _NODE_MAJOR_CACHE and _NODE_MAJOR_CACHE > 0 else None
+
+
+def node_env_check(script: str = "") -> tuple[bool, str]:
+    """视频板块外部依赖前置检查（2026-09-15 分发用户配 TTS 案）。
+
+    node 缺失/版本过低/板块二脚本不在位时，返回带补救指引的文案直接示人，
+    不再把裸 FileNotFoundError / MODULE_NOT_FOUND 甩给用户。
+    script 传相对 ai-workflow/video/scripts/ 的文件名则一并校验在位。"""
+    from . import vmake
+    if not shutil.which("node"):
+        return False, ("未检测到 Node.js：视频配音/制作/封面渲染需要 Node ≥ 20。"
+                       "到 https://nodejs.org 下载 LTS 版安装（默认下一步即可），"
+                       "装完重启工作台再试；资讯/图文等其他功能不受影响。")
+    major = _node_major()
+    if major is not None and major < 20:
+        return False, (f"Node.js 版本过低（v{major}.x，视频功能需 ≥ 20）。"
+                       "请到 https://nodejs.org 升级到 LTS 版后重启工作台再试。")
+    if script and not (vmake.VIDEO_DIR / "scripts" / script).is_file():
+        return False, (f"本机仓库缺少视频板块文件 ai-workflow/video/scripts/{script}"
+                       "（疑似只拷贝了 workbench 等部分目录）。视频配音/制作/封面依赖板块二："
+                       "请完整克隆或同步 ai-gen-article-publish 仓库，补齐 ai-workflow/ 目录后重试。")
+    return True, ""
+
+
 def _tts_node(scenes: list, out_dir: Path, provider: dict, voice: str, progress: bool = False):
     """CLI 专用。job/result 均留在工作台自有语音目录，Node 仅接受该目录。"""
     from . import vmake
+    ok, env_err = node_env_check("tts-scenes.mjs")
+    if not ok:
+        return None, env_err
     out_dir.mkdir(parents=True, exist_ok=True)
     job_json = out_dir / "_job.json"
     result_json = out_dir / "_result.json"
@@ -2382,6 +2424,9 @@ def run_cover(project_id: str, payload: dict) -> dict:
             pass
     cover_dir = proj / "cover_assets"
     cover_dir.mkdir(parents=True, exist_ok=True)
+    ok, env_err = node_env_check("cover.mjs")
+    if not ok:
+        raise ValueError(env_err)
     for key, field in (("bg", "bg_asset_id"), ("person", "person_asset_id")):
         asset_id = str(payload.get(field) or "").strip()
         if not asset_id:
@@ -2447,6 +2492,10 @@ def run_build_cli(args) -> int:
     settings = request.get("settings") if isinstance(request.get("settings"), dict) else {}
     hook_index = request.get("hook_index")
     report, code, hint = {}, 3, ""
+    ok, env_err = node_env_check("build.mjs")       # 先于分镜转换(可能外呼 LLM)失败 fast
+    if not ok:
+        report, code = {"error": "env_missing", "hint": env_err}, 3
+        return code
     try:
         tick("build", "convert", 5, "口播脚本转换为分镜…")
         story, warnings = vmake.script_to_story(script, settings, hook_index=hook_index)
@@ -2516,6 +2565,10 @@ def _run_make_build_cli(request: dict) -> int:
             return code
         if not _safe_id(project_id):
             code, report = 4, {"error": "bad_project_id"}
+            return code
+        ok, env_err = node_env_check("build.mjs")   # 先于状态翻转/分镜转换失败 fast
+        if not ok:
+            report = {"error": "env_missing", "hint": env_err}
             return code
         row.update(status="rendering", project_id=project_id)
         _make_save(row)
@@ -2703,6 +2756,9 @@ def build_presets() -> dict:
                    for k, v in vmake.LAYOUTS.items()]
     # 视觉风格预设(2026-09-12 一个选择框): 三元组套餐+服务端派生 aspects/cost 下发
     from .generation_methods import style_presets_view
+    node_ok, node_err = node_env_check()
+    scripts_ok = all((vmake.VIDEO_DIR / "scripts" / name).is_file()
+                     for name in ("tts-scenes.mjs", "build.mjs", "cover.mjs"))
     return {"generation_methods": vmake.GENERATION_METHODS, "voices": voices,
             "tts": {"default": tts["default"], "providers": [
                 {k: p.get(k) for k in ("id", "name", "engine", "enabled", "voices")} for p in tts["providers"]]},
@@ -2717,6 +2773,7 @@ def build_presets() -> dict:
             "dashscope_key_ok": vmake.dashscope_key_ok(),
             "collage_ready": shutil_which("arkcli"),
             "llm_ready": bool(_translate_cfg(config.load())),
+            "node_ok": node_ok, "node_err": node_err, "video_scripts_ok": scripts_ok,
             "max_chars": 20000}
 
 

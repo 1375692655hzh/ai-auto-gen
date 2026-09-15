@@ -107,6 +107,12 @@ WB.pages.video = {
     narrationWords() { return [...String(this.curMake && this.curMake.narration.text || '').replace(/\s+/g, '')].length; },
     importScripts() { return this.scripts.filter((r) => r.kind === 'generated' && r.script && r.script.beats && r.script.beats.length); },
     ttsProviders() { return ((this.presets && this.presets.tts && this.presets.tts.providers) || []).filter((p) => p.enabled && (p.voices || []).length); },
+    videoEnvWarn() {
+      const p = this.presets; if (!p) return '';
+      if (p.node_ok !== false && p.video_scripts_ok !== false) return '';
+      if (p.node_ok === false) return p.node_err || '未检测到 Node.js：视频配音/制作需 Node ≥ 20（nodejs.org 装完重启工作台）';
+      return '本机仓库缺少视频板块 ai-workflow/video/scripts（疑似部分拷贝）：请完整克隆/同步仓库后再用配音/出片/封面';
+    },
     makeVoices() { const p = this.ttsProviders.find((p) => this.curMake && p.id === this.curMake.voice.profile_id); return p ? p.voices || [] : []; },
     makeTheme() { return ((this.presets && this.presets.themes) || []).find((t) => this.curMake && t.id === this.curMake.video.theme); },
     makeSteps() {
@@ -1795,6 +1801,7 @@ WB.pages.video = {
               </aside>
             <div class="make-stage">
               <div class="make-step-main">
+            <div class="notice" v-if="videoEnvWarn" style="margin:0 0 var(--s3)">⚠ {{ videoEnvWarn }}</div>
             <div class="card" v-if="makeSeen[1]" v-show="makeStep===1">
               <h3>项目名称</h3>
               <div class="form-row">

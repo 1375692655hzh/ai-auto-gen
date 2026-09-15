@@ -290,6 +290,39 @@ class MakeTests(unittest.TestCase):
             self.assertEqual(saved["status"], "built" if exit_code == 0 else "voice_ready")
             self.assertEqual(saved["last_build"]["project_id"], pid)
 
+    def test_node_env_check_and_preflight_wiring(self):
+        """2026-09-15 分发用户案: node/板块二缺失要给补救指引, 不裸抛 FileNotFoundError。"""
+        # ① node 未安装 → 安装指引
+        with patch.object(vstudio.shutil, "which", return_value=None), \
+             patch.object(vstudio, "_node_major", return_value=None):
+            ok, msg = vstudio.node_env_check("tts-scenes.mjs")
+            self.assertFalse(ok)
+            self.assertIn("Node.js", msg); self.assertIn("nodejs.org", msg)
+        # ② node 版本过低 → 升级指引
+        with patch.object(vstudio.shutil, "which", return_value="C:/node.exe"), \
+             patch.object(vstudio, "_node_major", return_value=18):
+            ok, msg = vstudio.node_env_check("tts-scenes.mjs")
+            self.assertFalse(ok); self.assertIn("版本过低", msg)
+        # ③ 板块二脚本不在位(部分拷贝部署) → 补目录指引
+        with patch.object(vstudio.shutil, "which", return_value="C:/node.exe"), \
+             patch.object(vstudio, "_node_major", return_value=22), \
+             patch.object(vmake, "VIDEO_DIR", self.tmp / "no-video-dir"):
+            ok, msg = vstudio.node_env_check("tts-scenes.mjs")
+            self.assertFalse(ok); self.assertIn("ai-workflow/video/scripts", msg)
+        # ④ 一切就绪 → 放行(仓内真实脚本名)
+        with patch.object(vstudio.shutil, "which", return_value="C:/node.exe"), \
+             patch.object(vstudio, "_node_major", return_value=22):
+            self.assertEqual(vstudio.node_env_check("tts-scenes.mjs"), (True, ""))
+        # ⑤ 接线: _tts_node 前置失败直接回错误文案
+        with patch.object(vstudio, "node_env_check", return_value=(False, "未检测到 Node.js")):
+            self.assertEqual(vstudio._tts_node([{"id": "p", "narration": "x"}],
+                                               self.tmp, {"engine": "edge"}, "v"),
+                             (None, "未检测到 Node.js"))
+        # ⑥ presets 下发环境标志, 前端可提前引导
+        presets = vstudio.build_presets()
+        self.assertIn("node_ok", presets); self.assertIn("node_err", presets)
+        self.assertIn("video_scripts_ok", presets)
+
 
 if __name__ == "__main__":
     unittest.main()

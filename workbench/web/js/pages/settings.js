@@ -868,7 +868,9 @@ WB.pages.settings = {
         <b>注册来源:</b> Edge TTS 免费免 Key · DashScope 走
         <a href="https://dashscope.console.aliyun.com/" target="_blank" rel="noopener">阿里云百炼</a>（API-KEY, sk- 开头）·
         其余三家看下方流程说明（<b>推荐顺序: mimo(免费) → 豆包 → MiniMax</b>）。可添加多套同引擎供应商。
-        <b>说明:</b> 只服务视频制作「语音」段; 配置仅存本工作台, key 不回显明文。
+        <b>说明:</b> 只服务视频制作「语音」段; 配置仅存本工作台, key 不回显明文。<br>
+        <b>环境依赖:</b> 测试/合成在本机跑 Node 脚本——需已安装 <b>Node.js ≥ 20</b>（<a href="https://nodejs.org" target="_blank" rel="noopener">nodejs.org</a> 装 LTS 版）
+        且仓库带 <code>ai-workflow/video/scripts/</code> 目录（完整克隆自带; 只拷 workbench 部分目录的机器配音/出片不可用）。报错会给具体补救指引。
       </div>
       <details class="key-guide" style="margin:8px 0">
         <summary style="cursor:pointer;font-weight:600">🥇 推荐 · mimo(小米) TTS —— 免费 · 约 3 分钟配好</summary>
