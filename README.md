@@ -12,7 +12,8 @@ AI 财经内容 **来源采集 → 生成 → 工作台呈现** 一体化工具�
 | 我想… | 需要下载 | 环境 | 上手 |
 |---|---|---|---|
 | 只跑**数据站**（108 源采集→SQLite→HTTP 供数+运维控制台，24/7 无人值守） | `cli.py` + `global-news-sources/` + `bin/` | Python ≥3.10，无 Node | [global-news-sources/README.md](global-news-sources/README.md) |
-| 只跑**工作台**（接别人/自己局域网的数据站，可视化资讯/图文/视频/追踪） | `cli.py` + `workbench/` | Python ≥3.10，无 Node | [workbench/README.md](workbench/README.md) |
+| **完整用工作台**（含视频配音/出片、图文成稿——**发给同事装这档**） | 全仓 `git clone` | Python ≥3.10 + Node ≥20 | 克隆后双击 `bin/setup-workbench.cmd` 一键配好，详见 [workbench/README.md](workbench/README.md) |
+| 只**轻量浏览**（接数据站看资讯，不做视频/成稿） | `cli.py` + `workbench/` | Python ≥3.10，无 Node | [workbench/README.md](workbench/README.md)「轻量档」 |
 | 全部三板块（采集+生成+工作台） | `git clone` 全仓 | 见下方快速开始 | `python cli.py doctor` |
 
 只取一部分（sparse checkout，git 自带能力，根目录文件 cli.py 自动包含）：
@@ -23,7 +24,7 @@ git clone --depth 1 --filter=blob:none --sparse https://github.com/1375692655hzh
 cd ai-auto-gen
 git sparse-checkout set global-news-sources bin
 
-# 工作台用户
+# 轻量档工作台用户（纯浏览；要视频配音/出片请勿走这档，直接全量 git clone）
 git clone --depth 1 --filter=blob:none --sparse https://github.com/1375692655hzh/ai-auto-gen.git
 cd ai-auto-gen
 git sparse-checkout set workbench
@@ -37,7 +38,7 @@ git sparse-checkout set workbench
 |---|---|---|---|
 | **来源·数据站** | [`global-news-sources/`](global-news-sources/) | 108 个金融信息源的注册表 + 抓取实现（快讯/公告/行情/同行文章/日历/X大V池），带 TTL 缓存、健康检查与四标签分类；含单机数据站（15min 调度刷新 → SQLite → 只读 HTTP 供数 8787 + 运维控制台 8786，见 global-news-sources/docs/供数服务.md） | ✅ 完全独立，配置走板块根 `config.yaml` 兜底 |
 | **工作流** | [`ai-workflow/`](ai-workflow/) | 生成引擎：`flows/` YAML 编排工作流（断点续跑/审核挂起）+ `generator/` 生成实现 + `video/` Remotion 出片 | ⚠️ 依赖板块一的 fetchers；成稿落点（待发队列/图片/视频）经 `AAG_AUTOPUB_ROOT` 解析到发布仓 |
-| **工作台** | [`workbench/`](workbench/) | 前端工作台：FastAPI + 免构建 Vue3 SPA（资讯/图文/视频/追踪/设置 5 页），对全仓全程只读，数据只认数据站 HTTP 供数（设置页填地址+Key） | ✅ 完全独立（缺板块一二时动作类按钮不可用，浏览类页面不受影响） |
+| **工作台** | [`workbench/`](workbench/) | 前端工作台：FastAPI + 免构建 Vue3 SPA（资讯/图文/视频/追踪/设置 5 页），对全仓全程只读，数据只认数据站 HTTP 供数（设置页填地址+Key） | ✅ 可独立（轻量档缺板块二/Node 时，视频配音出片等动作类功能会给出补救指引，浏览类页面不受影响） |
 
 统一入口是根目录的 [`cli.py`](cli.py)（或 `bin/aag.cmd`），它按子命令惰性挂载各板块的导入路径——只保留部分板块时，其余板块的命令不可用但互不干扰。
 

@@ -3,28 +3,38 @@
 接入数据站的可视化工作台：资讯聚合（标签筛选）→ 图文/视频制作（产物回显）→ 账号追踪 → 设置。
 方案定稿见 [docs/第四板块-前端工作台方案.md](../docs/第四板块-前端工作台方案.md)（MoA 四岗方案存档在 `docs/workbench-moa/`）。
 
-## 只装工作台（接别人的数据站）
+## 装工作台：两档口径（2026-09-15 起，发给同事默认发完整档）
 
-适用画像：数据站跑在别的机器（或局域网另一台），本机只要可视化界面。**不需要**下载本仓的采集/生成/发布板块。
+### 完整档（推荐 · 全功能，含视频配音/出片、图文成稿）
 
-**下载**（sparse checkout，根目录的 `cli.py` 会自动带上）：
+适用画像：本机要完整用工作台，包括视频制作（配音/出片/封面）。**发给同事就发这段。**
+
+```bash
+git clone https://github.com/1375692655hzh/ai-auto-gen.git
+cd ai-auto-gen
+bin\setup-workbench.cmd        # 一键配置: pip 依赖 + npm 依赖 + 环境体检(幂等, 可重跑)
+python cli.py workbench serve --open   # 启动, 浏览器自动打开 http://127.0.0.1:8788
+```
+
+- 需要两样环境：**Python ≥3.10**（推荐 3.11）+ **Node.js ≥ 20**（视频功能用，[nodejs.org](https://nodejs.org) 装 LTS；只看资讯可以不装，setup 脚本会说明）。
+- setup 脚本做完了所有环境活（pip 三件套、可选增强包、`ai-workflow/video` 里 `npm install`、doctor 体检）；失败重跑即可，每步都有指引。
+- 起来之后所有 key 配置都在网页**设置页**完成（每个卡位带注册来源引导：信息源连接/翻译/成稿/TTS/YouTube/Gemini）。
+
+### 轻量档（纯浏览，无 Node）
+
+适用画像：只接别人/局域网数据站**看资讯**，不做视频配音/出片、不做图文成稿。
 
 ```bash
 git clone --depth 1 --filter=blob:none --sparse https://github.com/1375692655hzh/ai-auto-gen.git
 cd ai-auto-gen
 git sparse-checkout set workbench
-```
-
-**安装与接入**：
-
-```bash
 pip install -r workbench/requirements.txt    # fastapi/uvicorn/pyyaml/requests, 无 Node 无构建
 python cli.py workbench serve --open         # 127.0.0.1:8788, 自动开浏览器
 ```
 
 然后进 **设置页** → 信息源连接选「局域网数据站」→ 填数据站地址（如 `http://192.168.x.x:8787`）+ Bearer Key → 「测试连接」通过即接入完成。
 
-**能力边界**（独立安装时）：资讯/追踪/设置页完全自给（数据全走远端数据站 HTTP）；图文成稿/视频工坊等**动作类**功能依赖本仓板块二/三在位（经 `python cli.py ...` 子进程驱动），缺失时相应按钮不可用——这是预期行为，不是 bug。X 账号档案/标签增强依赖板块一本地文件，独立安装时自动降级为空映射，不影响浏览。
+**能力边界**（轻量档）：资讯浏览/翻译/蹭蹭流量/追踪/视频分析(Gemini)可用；**视频配音/出片/封面、图文成稿需要板块二（`ai-workflow/`）+ Node ≥ 20 + 该目录 `npm install`**——点击这些功能时页面会直接给出补救指引（升完整档 = 全量克隆/补拉 `ai-workflow` + 装 Node + 跑 `bin/setup-workbench.cmd`）。X 账号档案/标签增强依赖板块一本地文件，轻量档自动降级为空映射，不影响浏览。
 
 ## 完整仓库内快速开始
 

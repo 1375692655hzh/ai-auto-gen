@@ -108,10 +108,8 @@ WB.pages.video = {
     importScripts() { return this.scripts.filter((r) => r.kind === 'generated' && r.script && r.script.beats && r.script.beats.length); },
     ttsProviders() { return ((this.presets && this.presets.tts && this.presets.tts.providers) || []).filter((p) => p.enabled && (p.voices || []).length); },
     videoEnvWarn() {
-      const p = this.presets; if (!p) return '';
-      if (p.node_ok !== false && p.video_scripts_ok !== false) return '';
-      if (p.node_ok === false) return p.node_err || '未检测到 Node.js：视频配音/制作需 Node ≥ 20（nodejs.org 装完重启工作台）';
-      return '本机仓库缺少视频板块 ai-workflow/video/scripts（疑似部分拷贝）：请完整克隆/同步仓库后再用配音/出片/封面';
+      const e = this.presets && this.presets.video_env;
+      return (e && e.ok === false) ? (e.err || '视频功能环境缺失（Node/板块二目录/npm 依赖）') : '';
     },
     makeVoices() { const p = this.ttsProviders.find((p) => this.curMake && p.id === this.curMake.voice.profile_id); return p ? p.voices || [] : []; },
     makeTheme() { return ((this.presets && this.presets.themes) || []).find((t) => this.curMake && t.id === this.curMake.video.theme); },

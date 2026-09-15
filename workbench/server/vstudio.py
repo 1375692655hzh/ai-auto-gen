@@ -1921,10 +1921,17 @@ def _node_major() -> int | None:
     return _NODE_MAJOR_CACHE if _NODE_MAJOR_CACHE and _NODE_MAJOR_CACHE > 0 else None
 
 
+def _video_node_modules_ok() -> bool:
+    """npm 依赖在位: msedge-tts(免费 Edge 音色) + @remotion/compositor(ffprobe 时长探测)。"""
+    from . import vmake
+    nm = vmake.VIDEO_DIR / "node_modules"
+    return (nm / "msedge-tts").is_dir() and any(nm.glob("@remotion/compositor-*"))
+
+
 def node_env_check(script: str = "") -> tuple[bool, str]:
     """视频板块外部依赖前置检查（2026-09-15 分发用户配 TTS 案）。
 
-    node 缺失/版本过低/板块二脚本不在位时，返回带补救指引的文案直接示人，
+    node 缺失/版本过低/板块二脚本不在位/npm 依赖未装时，返回带补救指引的文案直接示人，
     不再把裸 FileNotFoundError / MODULE_NOT_FOUND 甩给用户。
     script 传相对 ai-workflow/video/scripts/ 的文件名则一并校验在位。"""
     from . import vmake
@@ -1940,7 +1947,17 @@ def node_env_check(script: str = "") -> tuple[bool, str]:
         return False, (f"本机仓库缺少视频板块文件 ai-workflow/video/scripts/{script}"
                        "（疑似只拷贝了 workbench 等部分目录）。视频配音/制作/封面依赖板块二："
                        "请完整克隆或同步 ai-gen-article-publish 仓库，补齐 ai-workflow/ 目录后重试。")
+    if not _video_node_modules_ok():
+        return False, ("视频板块 npm 依赖未安装（免费 Edge 音色与 ffprobe 时长探测都在 node_modules）："
+                       "请在 ai-workflow/video 目录执行 npm install（首次约几分钟；国内网络可先执行 "
+                       "npm config set registry https://registry.npmmirror.com 提速）后重试。")
     return True, ""
+
+
+def video_env_summary() -> dict:
+    """presets 下发用：node/板块二脚本/npm 依赖三合一，err 直接展示给用户。"""
+    ok, err = node_env_check("tts-scenes.mjs")
+    return {"ok": ok, "err": err}
 
 
 def _tts_node(scenes: list, out_dir: Path, provider: dict, voice: str, progress: bool = False):
@@ -2756,9 +2773,6 @@ def build_presets() -> dict:
                    for k, v in vmake.LAYOUTS.items()]
     # 视觉风格预设(2026-09-12 一个选择框): 三元组套餐+服务端派生 aspects/cost 下发
     from .generation_methods import style_presets_view
-    node_ok, node_err = node_env_check()
-    scripts_ok = all((vmake.VIDEO_DIR / "scripts" / name).is_file()
-                     for name in ("tts-scenes.mjs", "build.mjs", "cover.mjs"))
     return {"generation_methods": vmake.GENERATION_METHODS, "voices": voices,
             "tts": {"default": tts["default"], "providers": [
                 {k: p.get(k) for k in ("id", "name", "engine", "enabled", "voices")} for p in tts["providers"]]},
@@ -2773,7 +2787,7 @@ def build_presets() -> dict:
             "dashscope_key_ok": vmake.dashscope_key_ok(),
             "collage_ready": shutil_which("arkcli"),
             "llm_ready": bool(_translate_cfg(config.load())),
-            "node_ok": node_ok, "node_err": node_err, "video_scripts_ok": scripts_ok,
+            "video_env": video_env_summary(),
             "max_chars": 20000}
 
 

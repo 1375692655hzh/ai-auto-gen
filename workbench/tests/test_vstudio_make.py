@@ -309,19 +309,26 @@ class MakeTests(unittest.TestCase):
              patch.object(vmake, "VIDEO_DIR", self.tmp / "no-video-dir"):
             ok, msg = vstudio.node_env_check("tts-scenes.mjs")
             self.assertFalse(ok); self.assertIn("ai-workflow/video/scripts", msg)
-        # ④ 一切就绪 → 放行(仓内真实脚本名)
+        # ④ 一切就绪 → 放行(仓内真实脚本名; npm 依赖在位性单测见 ⑦, 这里显式打桩防裸克隆跑挂)
         with patch.object(vstudio.shutil, "which", return_value="C:/node.exe"), \
-             patch.object(vstudio, "_node_major", return_value=22):
+             patch.object(vstudio, "_node_major", return_value=22), \
+             patch.object(vstudio, "_video_node_modules_ok", return_value=True):
             self.assertEqual(vstudio.node_env_check("tts-scenes.mjs"), (True, ""))
+        # ④b npm 依赖未装(克隆了但没跑 npm install) → npm install 指引
+        with patch.object(vstudio.shutil, "which", return_value="C:/node.exe"), \
+             patch.object(vstudio, "_node_major", return_value=22), \
+             patch.object(vstudio, "_video_node_modules_ok", return_value=False):
+            ok, msg = vstudio.node_env_check("tts-scenes.mjs")
+            self.assertFalse(ok); self.assertIn("npm install", msg)
         # ⑤ 接线: _tts_node 前置失败直接回错误文案
         with patch.object(vstudio, "node_env_check", return_value=(False, "未检测到 Node.js")):
             self.assertEqual(vstudio._tts_node([{"id": "p", "narration": "x"}],
                                                self.tmp, {"engine": "edge"}, "v"),
                              (None, "未检测到 Node.js"))
-        # ⑥ presets 下发环境标志, 前端可提前引导
-        presets = vstudio.build_presets()
-        self.assertIn("node_ok", presets); self.assertIn("node_err", presets)
-        self.assertIn("video_scripts_ok", presets)
+        # ⑥ presets 下发 video_env 单字段(前端缺环境出指引), 裸克隆上 ok=False 也不炸
+        env = vstudio.build_presets()["video_env"]
+        self.assertIsInstance(env, dict)
+        self.assertTrue(env["ok"] or env["err"])   # ok 与 err 必有一个说清状态
 
 
 if __name__ == "__main__":
