@@ -74,7 +74,7 @@
 <div id="app"></div>
 <script src="/vendor/vue.global.prod.js"></script>
 <script>
-/* ══ 只看看板: 资讯总览 / X推荐 / X热门帖 / YTB追踪 ══
+/* ══ 只看看板: X推荐 / X热门帖 / YTB追踪 ══(资讯总览 2026-09-15 用户裁决移除, 翻译面收窄到X)
    工作台对应页面的只读裁剪版——无生成/采集/设置能力;
    访问口令存 localStorage(vb_key), 管理员链接可带 #k=xxx 自动落钥。 */
 window.VB = {
@@ -201,7 +201,7 @@ VB.trans = (function () {
 const app = Vue.createApp({
   data() {
     return {
-      tab: "news", gateOpen: false, gateInput: "", gateNeed: false,
+      tab: "reco", gateOpen: false, gateInput: "", gateNeed: false,
       loaded: {},                       /* 各页首访懒加载标记 */
       filterOpen: true, sectorOpen: true,   /* 筛选卡折叠态(手机默认收起) */
       /* ── 资讯总览 ── */
@@ -275,7 +275,6 @@ const app = Vue.createApp({
     },
     enter() {
       this.checkGate();
-      if (this.tab === "news") this.initNews();
       if (this.tab === "reco") this.loadXF();
       if (this.tab === "surge") this.loadRss();
       if (this.tab === "yt") this.initYt();
@@ -283,7 +282,6 @@ const app = Vue.createApp({
     pickTab(t) {
       this.tab = t;
       if (this.gateOpen) return;
-      if (t === "news" && !this.loaded.news) this.initNews();
       if (t === "reco" && !this.loaded.reco) this.loadXF();
       if (t === "surge" && !this.loaded.surge) this.loadRss();
       if (t === "yt" && !this.loaded.yt) this.initYt();
@@ -481,14 +479,13 @@ const app = Vue.createApp({
     /* 手机: 筛选卡默认收起, 信息流直接顶到首屏 */
     if (window.innerWidth <= 720) { this.filterOpen = false; this.sectorOpen = false; }
     this.checkGate();
-    this.initNews();
+    this.loadXF();
   },
   template: `
   <div>
     <header class="topbar">
       <span class="vb-title">热点看板</span>
       <nav class="vb-nav">
-        <span class="nav-item" :class="{active: tab==='news'}" @click="pickTab('news')">资讯总览</span>
         <span class="nav-item" :class="{active: tab==='reco'}" @click="pickTab('reco')">X推荐</span>
         <span class="nav-item" :class="{active: tab==='surge'}" @click="pickTab('surge')">X热门帖</span>
         <span class="nav-item" :class="{active: tab==='yt'}" @click="pickTab('yt')">YTB追踪</span>
@@ -496,122 +493,6 @@ const app = Vue.createApp({
     </header>
     <div class="vb-wrap">
 
-      <!-- ═══ 1 资讯总览 ═══ -->
-      <div v-show="tab==='news'" class="news-cols">
-        <div>
-          <details class="card vb-fold" :open="filterOpen">
-            <summary class="vb-sum">筛选 <span v-if="activeCount" class="badge blue">{{ activeCount }}</span></summary>
-            <div class="filter-group">
-              <h4>市场 <span class="clear" v-if="f.markets.length" @click="f.markets=[]; reloadNews()">清空</span></h4>
-              <span v-for="m in dict.markets" :key="m" class="chip" :class="{on: f.markets.includes(m)}"
-                    @click="toggle('markets', m)">{{ m }}</span>
-              <div class="muted" v-if="!dict.markets.length">(数据站未连通)</div>
-            </div>
-            <div class="filter-group">
-              <h4>定位 <span class="clear" v-if="f.positionings.length" @click="f.positionings=[]; reloadNews()">清空</span></h4>
-              <span v-for="p in enums.positionings" :key="p" class="chip" :class="{on: f.positionings.includes(p)}"
-                    @click="toggle('positionings', p)">{{ p }}</span>
-            </div>
-            <div class="filter-group">
-              <h4>类型 <span class="clear" v-if="f.item_types.length" @click="f.item_types=[]; reloadNews()">清空</span></h4>
-              <span v-for="t in enums.item_types" :key="t" class="chip" :class="{on: f.item_types.includes(t)}"
-                    @click="toggle('item_types', t)">{{ t }}</span>
-            </div>
-            <div class="filter-group">
-              <h4>情绪 <span class="clear" v-if="f.sentiments.length" @click="f.sentiments=[]; reloadNews()">清空</span></h4>
-              <span v-for="[v, t] in enums.sentiments" :key="v" class="chip" :class="{on: f.sentiments.includes(v)}"
-                    @click="toggle('sentiments', v)">{{ t }}</span>
-            </div>
-            <button class="btn" style="width:100%;justify-content:center" @click="clearAll">清空全部筛选</button>
-          </details>
-          <details class="card vb-fold" :open="sectorOpen">
-            <summary class="vb-sum">赛道 <span class="muted" style="font-weight:normal">48h 实时</span>
-              <span v-if="f.sectors.length" class="badge blue">{{ f.sectors.length }}</span>
-              <span class="clear" v-if="f.sectors.length" @click="f.sectors=[]; reloadNews()">清空</span></summary>
-            <div class="filter-group">
-              <span v-for="[s, n] in sector48Top" :key="s" class="chip" :class="{on: f.sectors.includes(s)}"
-                    @click="toggle('sectors', s)" :title="'近48h ' + n + ' 条'">{{ s }} {{ n }}</span>
-              <span v-for="[s, n] in sector48Rest" :key="s" class="chip" :class="{on: f.sectors.includes(s)}"
-                    @click="toggle('sectors', s)" :title="'近48h ' + n + ' 条'">{{ s }} {{ n }}</span>
-              <span class="act" v-if="sector48.length > 8" @click="showAllSectors = !showAllSectors">
-                {{ showAllSectors ? '收起' : '展开全部(' + sector48.length + ')' }}</span>
-              <div class="muted" v-if="!sector48.length">48h 内无赛道标签</div>
-            </div>
-          </details>
-        </div>
-        <div>
-          <div class="feed-toolbar">
-            <input type="text" v-model="f.q" placeholder="搜索(拆词 AND, 中英同检), 回车确认" @keyup.enter="reloadNews()">
-            <select v-model="f.since" @change="reloadNews()">
-              <option v-for="[v, t] in sinceOpts" :key="v" :value="v">{{ t }}</option>
-            </select>
-            <label class="muted"><input type="checkbox" v-model="f.dedup" @change="reloadNews()"> 折叠同事件</label>
-            <label class="muted"><input type="checkbox" v-model="f.display" @change="reloadNews()"> 中文优先</label>
-            <span style="flex:1"></span>
-            <span class="muted" v-if="total">{{ total }} 条</span>
-          </div>
-          <input type="text" v-model="f.tickers" placeholder="标的过滤(如 NVDA,TSLA), 回车确认"
-                 style="width:100%;margin-bottom:10px" @keyup.enter="reloadNews()">
-          <div v-if="error" class="err-box"><p>{{ error.error }}</p>
-            <p v-if="error.hint" style="margin-top:6px">{{ error.hint }}</p></div>
-          <div v-else-if="!items.length && !loading" class="empty">无匹配条目 —— 调整筛选条件试试</div>
-          <div class="feed">
-            <div v-for="it in items" :key="it.id" class="news-card">
-              <div class="nc-grid">
-                <div class="nc-src" v-if="isX(it)">
-                  <div class="name">{{ it.source }}</div>
-                  <div class="who"><a :href="'https://x.com/' + it.author_handle" target="_blank" rel="noopener"
-                      @click.stop>@{{ it.author_handle }}</a></div>
-                  <div class="nc-badges" style="margin-bottom:0">
-                    <span v-if="it.positioning" class="badge blue">{{ it.positioning }}</span>
-                    <span v-for="m in (it.markets || [])" :key="m" class="badge">{{ m }}</span>
-                  </div>
-                </div>
-                <div class="nc-src" v-else>
-                  <div class="name">{{ sourceTitle(it.source_id) }}</div>
-                  <div class="nc-badges" style="margin-bottom:0">
-                    <span v-if="it.positioning" class="badge blue">{{ it.positioning }}</span>
-                    <span v-for="m in ((sourceInfo(it.source_id) || {}).markets || it.markets || [])"
-                          :key="m" class="badge">{{ m }}</span>
-                  </div>
-                </div>
-                <div class="nc-body">
-                  <div class="nc-badges">
-                    <span class="nc-time">{{ it.time }}</span>
-                    <span v-if="it.item_type" class="badge blue">{{ it.item_type }}</span>
-                    <template v-for="sec in visibleSectors(it)" :key="sec">
-                      <span class="badge yellow" :title="sec">{{ sectorParts(sec)[0] }}</span>
-                      <span v-if="sectorParts(sec)[1]" class="badge" :title="sec">{{ sectorParts(sec)[1] }}</span>
-                    </template>
-                    <span v-if="sectorsRest(it)" class="badge" :title="(it.sectors || []).join('\\n')">+{{ sectorsRest(it) }}</span>
-                    <span v-if="it.sentiment" class="badge" :class="sentimentBadge(it.sentiment)">{{ sentimentText(it.sentiment) }}</span>
-                    <span v-for="t in it.tickers" :key="t" class="badge">{{ t }}</span>
-                    <span v-if="it.event_type" class="badge">{{ it.event_type }}</span>
-                    <span v-if="it.dup_count > 1" class="badge yellow">同事件 ×{{ it.dup_count }}</span>
-                  </div>
-                  <div class="news-text" :class="{expanded: bodyExpanded[it.id]}"
-                       :ref="el => newsTrRef(el, it)">
-                    {{ it.title ? it.title + ' — ' : '' }}{{ it.text }}</div>
-                  <div class="news-src-text" v-if="bodyExpanded[it.id] && it.text_src">{{ it.text_src }}</div>
-                  <div class="news-actions">
-                    <a v-if="it.url" :href="it.url" target="_blank" rel="noopener">原文链接 ↗</a>
-                    <span class="act" v-if="(it.text || '').length > 280"
-                          @click="bodyExpanded[it.id] = !bodyExpanded[it.id]">
-                      {{ bodyExpanded[it.id] ? '收起' : '展开全文' }}</span>
-                    <span class="act" v-if="it.text_src" @click="bodyExpanded[it.id] = !bodyExpanded[it.id]">
-                      {{ bodyExpanded[it.id] ? '收起原文' : '查看原文(译前)' }}</span>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-          <div class="load-more">
-            <button v-if="nextCursor" class="btn" :disabled="loading" @click="loadNews(nextCursor)">
-              {{ loading ? '加载中…' : '加载更多' }}</button>
-            <span v-else-if="items.length" class="muted">—— 已加载全部 {{ items.length }} 条 ——</span>
-          </div>
-        </div>
-      </div>
 
       <!-- ═══ 2 X推荐 ═══ -->
       <div v-show="tab==='reco'">
