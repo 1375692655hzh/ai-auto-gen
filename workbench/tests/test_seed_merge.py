@@ -1,10 +1,12 @@
 """种子升级合并: 存量用户吃得到开发者新增清单, 本地状态/删除不被破坏。全离线。"""
 import json
+import sys
 import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))    # 任意目录可跑(同目录其余测试约定)
 from workbench.server import config
 
 
