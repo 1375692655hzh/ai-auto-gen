@@ -13,7 +13,7 @@ from fastapi.testclient import TestClient
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from server.app import create_app
-from server import views
+from server import config, views
 
 
 class VideoDeleteTests(unittest.TestCase):
@@ -40,8 +40,8 @@ class VideoDeleteTests(unittest.TestCase):
         # launcher registration. The fixed production argv has its own test below.
         real_run = subprocess.run
         def portable_python(argv, **kwargs):
-            self.assertEqual(argv[:2], ["py", "-3.11"])
-            return real_run([sys.executable, *argv[2:]], **kwargs)
+            self.assertEqual(argv[:len(config.py_cmd())], list(config.py_cmd()))
+            return real_run([sys.executable, *argv[len(config.py_cmd()):]], **kwargs)
         with patch("subprocess.run", side_effect=portable_python):
             response = self.client.delete("/wb-api/videos/wbdelete-test")
         self.assertEqual(response.status_code, 200, response.text)
@@ -74,8 +74,8 @@ class VideoDeleteTests(unittest.TestCase):
             self.assertEqual(response.status_code, 400)
             self.assertEqual(response.json(), {"error": "remove_failed", "hint": (stderr or stdout)[-200:]})
             run.assert_called_once_with(
-                ["py", "-3.11", str(self.videos.parents[2] / "cli.py"), "video", "remove", "wbdelete-test"],
-                capture_output=True, text=True, encoding="utf-8", timeout=60)
+                [*config.py_cmd(), str(self.videos.parents[2] / "cli.py"), "video", "remove", "wbdelete-test"],
+                capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=60)
 
     def test_verify_summary(self):
         verify = self.project / "out" / "verify.json"

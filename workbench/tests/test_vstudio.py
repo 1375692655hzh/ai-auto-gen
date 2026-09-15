@@ -91,6 +91,7 @@ class BuildTests(unittest.TestCase):
                 patch.object(vstudio, "BUILD_LOG_DIR", MagicMock()),
                 patch.object(vstudio, "tick"), patch.object(vstudio, "_set_job_result"),
                 patch.object(vstudio, "finish_job"),
+                patch.object(vstudio, "node_env_check", return_value=(True, "")),
                 patch.object(vstudio, "_run_build_process", return_value=(0, "")) as run,
                 redirect_stdout(io.StringIO()),
             ):
