@@ -192,7 +192,7 @@ class MakeTests(unittest.TestCase):
             return 0
         proc.wait.side_effect = finish
         with (patch.object(vstudio, "node_env_check", return_value=(True, "")),
-              patch.object(vstudio.subprocess, "Popen", return_value=proc)) as spawn:
+              patch.object(vstudio.subprocess, "Popen", return_value=proc) as spawn):
             items, err = vstudio._tts_node(scenes, out, provider, "longanlufeng", True)
         self.assertIsNone(err)
         self.assertEqual(items["b1"]["hash"], "abc")
