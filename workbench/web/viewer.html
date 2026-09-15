@@ -24,6 +24,50 @@
               font-size: 13px; z-index: 300; opacity: 0; transition: opacity .25s; pointer-events: none; }
   .vb-toast.show { opacity: 1; }
   .foot-note { text-align: center; color: var(--text-mute); font-size: 11.5px; margin-top: 28px; }
+  /* 可折叠筛选卡(移动端默认收起, JS 控制 open) */
+  summary.vb-sum { list-style: none; cursor: pointer; user-select: none;
+                   font-size: 13px; color: var(--text-dim); font-weight: 600;
+                   margin: 2px 0 var(--s3); display: flex; align-items: center; gap: var(--s2); }
+  summary.vb-sum::-webkit-details-marker { display: none; }
+  summary.vb-sum::after { content: "▾"; margin-left: auto; color: var(--text-mute); font-size: 11px; }
+  details[open] > summary.vb-sum::after { content: "▴"; }
+  details.vb-fold > .filter-group:last-of-type { margin-bottom: 0; }
+  /* YTB 表格横向滚动容器 */
+  .tbl-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+
+  /* ── 移动端(≤720px): 底部Tab导航 + 单列紧凑 ── */
+  @media (max-width: 720px) {
+    body { padding-bottom: calc(58px + env(safe-area-inset-bottom)); }
+    .vb-wrap { padding: 0 10px 26px; }
+    .topbar { height: 44px; padding: 0 10px; position: sticky; top: 0; z-index: 90;
+              background: var(--bg); }
+    .vb-title { font-size: 14px; padding-right: 10px; }
+    .vb-nav { position: fixed; left: 0; right: 0; bottom: 0; z-index: 100;
+              background: var(--bg-panel); border-top: 1px solid var(--border);
+              display: flex; gap: 2px; padding: 3px 4px calc(3px + env(safe-area-inset-bottom)); }
+    .vb-nav .nav-item { flex: 1; justify-content: center; font-size: 12.5px; padding: 9px 2px;
+                        border-radius: var(--r-ctl); }
+    .news-cols { grid-template-columns: 1fr; gap: 10px; }
+    .card { padding: 10px 12px; }
+    .feed-toolbar input[type=text] { flex-basis: 100%; min-width: 0; }
+    /* 资讯卡: 左侧来源框压成横条 */
+    .nc-src { flex-direction: row; flex-wrap: wrap; align-items: center; gap: 4px 8px; padding: 6px 9px; }
+    .nc-src .name { font-size: 12px; }
+    /* X推荐/热门帖: 分数列压成横排徽章行 */
+    .surge-grid { grid-template-columns: 1fr; gap: 8px; }
+    .surge-rank { flex-direction: row; align-items: center; justify-content: flex-start;
+                  flex-wrap: wrap; gap: 4px 10px; text-align: left; }
+    .surge-rank .prob { font-size: 17px; }
+    .surge-rank .prob-lab { display: none; }
+    .surge-rank .badge { margin-top: 0; }
+    .surge-top { flex-wrap: wrap; row-gap: 2px; }
+    .surge-top .muted:last-child { margin-left: 0 !important; flex-basis: 100%; font-size: 11px; }
+    table.tbl { font-size: 12px; }
+    table.tbl th, table.tbl td { padding: 6px 7px; }
+    .reco-filter .chip, .filter-group .chip { font-size: 11.5px; padding: 1px 8px; }
+    .xhot-text { font-size: 13.5px; }
+    .foot-note { margin-bottom: 14px; }
+  }
 </style>
 </head>
 <body class="light">
@@ -70,6 +114,7 @@ const app = Vue.createApp({
     return {
       tab: "news", gateOpen: false, gateInput: "", gateNeed: false,
       loaded: {},                       /* 各页首访懒加载标记 */
+      filterOpen: true, sectorOpen: true,   /* 筛选卡折叠态(手机默认收起) */
       /* ── 资讯总览 ── */
       dict: { markets: [], sources: [] },
       enums: {
@@ -327,6 +372,8 @@ const app = Vue.createApp({
     /* 管理员发的链接可带 #k=口令 → 自动落钥免手输 */
     const m = location.hash.match(/^#k=(.+)$/);
     if (m) { localStorage.setItem("vb_key", m[1].trim()); history.replaceState(null, "", location.pathname); }
+    /* 手机: 筛选卡默认收起, 信息流直接顶到首屏 */
+    if (window.innerWidth <= 720) { this.filterOpen = false; this.sectorOpen = false; }
     this.checkGate();
     this.initNews();
   },
@@ -346,8 +393,8 @@ const app = Vue.createApp({
       <!-- ═══ 1 资讯总览 ═══ -->
       <div v-show="tab==='news'" class="news-cols">
         <div>
-          <div class="card">
-            <h3>筛选 <span v-if="activeCount" class="badge blue">{{ activeCount }}</span></h3>
+          <details class="card vb-fold" :open="filterOpen">
+            <summary class="vb-sum">筛选 <span v-if="activeCount" class="badge blue">{{ activeCount }}</span></summary>
             <div class="filter-group">
               <h4>市场 <span class="clear" v-if="f.markets.length" @click="f.markets=[]; reloadNews()">清空</span></h4>
               <span v-for="m in dict.markets" :key="m" class="chip" :class="{on: f.markets.includes(m)}"
@@ -370,11 +417,11 @@ const app = Vue.createApp({
                     @click="toggle('sentiments', v)">{{ t }}</span>
             </div>
             <button class="btn" style="width:100%;justify-content:center" @click="clearAll">清空全部筛选</button>
-          </div>
-          <div class="card">
-            <h3>赛道 <span class="muted" style="font-weight:normal">48h 实时</span>
+          </details>
+          <details class="card vb-fold" :open="sectorOpen">
+            <summary class="vb-sum">赛道 <span class="muted" style="font-weight:normal">48h 实时</span>
               <span v-if="f.sectors.length" class="badge blue">{{ f.sectors.length }}</span>
-              <span class="clear" v-if="f.sectors.length" @click="f.sectors=[]; reloadNews()">清空</span></h3>
+              <span class="clear" v-if="f.sectors.length" @click="f.sectors=[]; reloadNews()">清空</span></summary>
             <div class="filter-group">
               <span v-for="[s, n] in sector48Top" :key="s" class="chip" :class="{on: f.sectors.includes(s)}"
                     @click="toggle('sectors', s)" :title="'近48h ' + n + ' 条'">{{ s }} {{ n }}</span>
@@ -384,7 +431,7 @@ const app = Vue.createApp({
                 {{ showAllSectors ? '收起' : '展开全部(' + sector48.length + ')' }}</span>
               <div class="muted" v-if="!sector48.length">48h 内无赛道标签</div>
             </div>
-          </div>
+          </details>
         </div>
         <div>
           <div class="feed-toolbar">
@@ -487,7 +534,8 @@ const app = Vue.createApp({
             <span class="chip" :class="{on: xf.finance}" @click="toggleXFFlag('finance')">仅投资金融</span></div>
         </div>
         <p class="surge-meta">
-          <template v-if="xf.meta.updated_at">快照 {{ xf.meta.updated_at }} ·
+          <template v-if="xf.loading">快照计算中…(首轮要几秒)</template>
+          <template v-else-if="xf.meta.updated_at">快照 {{ xf.meta.updated_at }} ·
             {{ xf.meta.data_age_min }} 分钟前 · 在跟踪 {{ xf.meta.tracked }} 帖 · X 条目 {{ xf.total }}</template>
           <template v-else>暂无快照</template>
           <span v-if="xf.meta.err" class="badge red" style="margin-left:8px">{{ xf.meta.err }}</span>
@@ -639,7 +687,7 @@ const app = Vue.createApp({
           <div v-if="yErr" class="err-box">{{ yErr.error || yErr }}</div>
           <div v-else-if="!yLoading && !yItems.length" class="empty">
             {{ yMeta && yMeta.configured ? '该时间窗口内追踪频道没有新发布视频 —— 把时间范围切到「近 7 天/28 天」即可看到' : '管理员配置 Key 并完成首轮采集后, 这里是追踪频道的热播榜' }}</div>
-          <table v-else class="tbl">
+          <div v-else class="tbl-scroll"><table class="tbl">
             <thead><tr>
               <th>视频</th><th>频道</th><th>类型</th><th>发布</th>
               <th>播放</th><th>Δ24h</th><th>Δ7d</th><th>日速</th><th>赞</th><th>评</th>
@@ -660,7 +708,7 @@ const app = Vue.createApp({
                 <td class="mono muted">{{ fmtNum(r.comments) }}</td>
               </tr>
             </tbody>
-          </table>
+          </table></div>
           <p class="muted" style="margin-top:8px" v-if="yMeta">{{ yMeta.rule }}</p>
         </div>
       </div>
