@@ -131,12 +131,10 @@ class BuildTests(unittest.TestCase):
         ]
         with TestClient(create_app()) as client:
             for body, expected in cases:
-                with (
-                    self.subTest(body=body),
-                    patch.object(vstudio, "job_running", return_value=False),
-                    patch.object(vstudio, "begin_job") as begin,
-                    patch("subprocess.Popen") as spawn,
-                ):
+                with (self.subTest(body=body),
+                      patch.object(vstudio, "try_begin_job", return_value=True) as begin,
+                      patch.object(vstudio.config, "py_cmd", return_value=["py", "-3.11"]),
+                      patch("subprocess.Popen") as spawn):
                     response = client.post("/wb-api/video-build", json={
                         "script": {"format": "vertical", "beats": [{"narration": "测试"}]}, **body})
                     self.assertEqual(response.status_code, 200, response.text)
@@ -145,18 +143,24 @@ class BuildTests(unittest.TestCase):
                         "aspect", "fps", "theme", "layout", "voice", "tts_provider", "enrich", "title"})
                     self.assertEqual(tuple(settings[k] for k in ("aspect", "fps", "theme", "layout")),
                                      expected)
+                    self.assertEqual(spawn.call_args.args[0][-3:], ["workbench", "build-video", "--json"])
                     spawn.assert_called_once()
-            with (
-                patch.object(vstudio, "job_running", return_value=False),
-                patch.object(vstudio, "begin_job") as begin,
-                patch("subprocess.Popen") as spawn,
-            ):
+            with (patch.object(vstudio, "try_begin_job", return_value=True) as begin,
+                  patch.object(vstudio.config, "py_cmd", return_value=["py", "-3.11"]),
+                  patch("subprocess.Popen") as spawn):
                 response = client.post("/wb-api/video-build", json={
                     "script": {"format": "vertical", "beats": [{"narration": "测试"}]},
                     "format": "vertical", "style_pack": "vox-collage"})
                 self.assertEqual(response.status_code, 400, response.text)
                 self.assertIn("16:9", response.json().get("hint", ""))
                 begin.assert_not_called()
+                spawn.assert_not_called()
+            # 原子启动门(try_begin_job): 有任务进行中直接 409, 不拉子进程
+            with (patch.object(vstudio, "try_begin_job", return_value=False),
+                  patch("subprocess.Popen") as spawn):
+                response = client.post("/wb-api/video-build", json={
+                    "script": {"beats": [{"narration": "测试"}]}})
+                self.assertEqual(response.status_code, 409, response.text)
                 spawn.assert_not_called()
 
     def test_verify_duration(self):

@@ -502,14 +502,21 @@ def _fmt_rows(rows: list, n: int) -> str:
     return "\n".join(out) or "(无)"
 
 
+_LAST_LLM_ERR = ""      # 链上最后一次失败原因(供 run_compose 的 hint 透传, 不再吞成"未返回 JSON")
+
+
 def _llm(cfg3, system: str, user: str, max_tokens: int | None = None,
          timeout: int = 120) -> str | None:
+    global _LAST_LLM_ERR
     base, key, model = cfg3[:3]
     extra = cfg3[3] if len(cfg3) > 3 else None     # 厂商私有参数(如推理模型关思考)
-    return vstudio.chat_completions(base, key, model,
-                                    [{"role": "system", "content": system},
-                                     {"role": "user", "content": user}],
-                                    0.4, max_tokens, timeout, extra=extra)
+    content, err = vstudio.chat_completions_ex(base, key, model,
+                                               [{"role": "system", "content": system},
+                                                {"role": "user", "content": user}],
+                                               0.4, max_tokens, timeout, extra=extra)
+    if not content:
+        _LAST_LLM_ERR = (err or "")[:160]
+    return content
 
 
 # ── grok CLI 引擎(2026-09-11 用户拍板: 成稿链接入本机 grok build, 走订阅额度) ──
@@ -920,7 +927,10 @@ def run_compose(request: dict) -> tuple[dict, int]:
         text = "\n\n".join(thread)
     else:
         if not draft or not (draft.get("text") or "").strip():
-            return {"error": "llm_failed", "hint": "成稿模型未返回有效 JSON, 请重试"}, 3
+            hint = "成稿模型未返回有效 JSON, 请重试"
+            if _LAST_LLM_ERR:                      # 供应商真实原因(风控/温度/空content)透传
+                hint += f"; 链上原因: {_LAST_LLM_ERR}"
+            return {"error": "llm_failed", "hint": hint}, 3
         text = str(draft["text"]).strip()
         if _URL_RE.search(text):                     # 硬保证: 成稿不指向他人内容
             text = _strip_urls(text)

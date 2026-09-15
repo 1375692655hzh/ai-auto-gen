@@ -173,17 +173,17 @@ class BoundaryTests(unittest.TestCase):
         self.assertEqual((code, result["error"]), (4, "no_llm_config"))
 
     def test_llm_extra_body_passthrough(self):
-        # 厂商私有参数(如智谱关思考)须原样透传到 chat_completions
+        # 厂商私有参数(如智谱关思考)须原样透传到 chat_completions_ex(_llm 走诊断版取失败原因)
         seen = {}
         def fake_cc(base, key, model, messages, temperature, max_tokens, timeout, extra=None):
             seen["extra"] = extra
-            return '{"text": "ok"}'
+            return '{"text": "ok"}', None
         cfg4 = ("http://x", "k", "m", {"thinking": {"type": "disabled"}})
-        with patch.object(gcompose.vstudio, "chat_completions", fake_cc):
+        with patch.object(gcompose.vstudio, "chat_completions_ex", fake_cc):
             self.assertEqual(gcompose._llm(cfg4, "s", "u"), '{"text": "ok"}')
         self.assertEqual(seen["extra"], {"thinking": {"type": "disabled"}})
         seen.clear()
-        with patch.object(gcompose.vstudio, "chat_completions", fake_cc):
+        with patch.object(gcompose.vstudio, "chat_completions_ex", fake_cc):
             gcompose._llm(("http://x", "k", "m"), "s", "u")
         self.assertIsNone(seen["extra"])   # 旧 3 元组调用方不受影响
 
@@ -230,18 +230,21 @@ class LlmConnectionTests(unittest.TestCase):
         spec.loader.exec_module(cls.cli)
 
     def test_cli_results_and_no_secret_output(self):
+        # test-llm 走 compose 链逐位 chat_completions_ex(元组返回, err 为安全分类);
+        # 旧单槽 cfg 由 compose_chain 兜底成 name="成稿模型" 的链位 → model 标签带名字前缀
+        label = "成稿模型 · test-model"
         for cfg, response, code, error in [({}, None, 4, "no_llm_config"),
-                ({"base_url": "https://local.invalid", "api_key": "test-secret", "model": "test-model"}, "pong", 0, ""),
-                ({"base_url": "https://local.invalid", "api_key": "test-secret", "model": "test-model"}, None, 3, "llm_connection_failed"),
+                ({"base_url": "https://local.invalid", "api_key": "test-secret", "model": "test-model"}, ("pong", None), 0, ""),
+                ({"base_url": "https://local.invalid", "api_key": "test-secret", "model": "test-model"}, (None, "llm_connection_failed"), 3, "llm_connection_failed"),
                 ({"base_url": "https://local.invalid", "api_key": "test-secret", "model": "test-model"}, RuntimeError("test-secret"), 3, "llm_connection_failed")]:
             output = io.StringIO()
             with self.subTest(code=code), patch.object(gcompose.config, "load", return_value={"compose": cfg}), \
-                    patch.object(gcompose.vstudio, "chat_completions", **(
+                    patch.object(gcompose.vstudio, "chat_completions_ex", **(
                         {"side_effect": response} if isinstance(response, Exception) else {"return_value": response})) as chat, \
                     contextlib.redirect_stdout(output):
                 self.assertEqual(self.cli.workbench_cmd(SimpleNamespace(sub="test-llm")), code)
             self.assertEqual(json.loads(output.getvalue()),
-                             {"ok": code == 0, "model": cfg.get("model", ""), "error": error})
+                             {"ok": code == 0, "model": label if cfg else "", "error": error})
             self.assertNotIn("test-secret", output.getvalue())
             if cfg:
                 # max_tokens=512: 推理模型可能先烧 reasoning token, 8 会误判连接失败;
@@ -258,18 +261,23 @@ class LlmConnectionTests(unittest.TestCase):
         import inspect
         self.assertFalse(inspect.iscoroutinefunction(endpoint))
         good = {"ok": True, "model": "test", "error": ""}
-        with patch("subprocess.run", return_value=SimpleNamespace(returncode=0, stdout=json.dumps(good))) as run:
-            self.assertEqual(endpoint(), good)
+        with (patch.object(gcompose.config, "py_cmd", return_value=["py", "-3.11"]),
+              patch("subprocess.run", return_value=SimpleNamespace(returncode=0, stdout=json.dumps(good))) as run):
+            self.assertEqual(endpoint({}), good)
         self.assertEqual(run.call_args.args[0][:2], ["py", "-3.11"])
         self.assertEqual(run.call_args.args[0][-2:], ["workbench", "test-llm"])
         self.assertEqual(run.call_args.kwargs["timeout"], 40)
+        with (patch.object(gcompose.config, "py_cmd", return_value=["py", "-3.11"]),
+              patch("subprocess.run", return_value=SimpleNamespace(returncode=0, stdout=json.dumps(good))) as run):
+            endpoint({"model_id": "m2"})            # 指定链位透传 --model-id
+            self.assertIn("--model-id", run.call_args.args[0])
         for side_effect, result, status in [
                 (subprocess.TimeoutExpired("test", 40), None, 504),
                 (OSError("test"), None, 500),
                 (None, SimpleNamespace(returncode=3, stdout="not JSON"), 502),
                 (None, SimpleNamespace(returncode=4, stdout=json.dumps({"ok": False, "model": "", "error": "no_llm_config"})), 400)]:
             with self.subTest(status=status), patch("subprocess.run", side_effect=side_effect, return_value=result):
-                self.assertEqual(endpoint().status_code, status)
+                self.assertEqual(endpoint({}).status_code, status)
 
 
 if __name__ == "__main__":
