@@ -155,11 +155,23 @@ def run(since_fetched_at: str) -> dict:
 
     conn = _store._connect()
     try:
+        # 选择裁决(2026-09-16): 本轮新条目全量(15min 时效承诺, 中文占位会被
+        # _need_zh 即时 skip 只花选择时间); 旧积压才吃 round_cap 余量——
+        # 旧逻辑单 LIMIT 下高频轮的新条目(250-400+)把 cap 塞满, 外文新条目
+        # 落在时间升序窗口外时整轮零翻译。
         rows = conn.execute(
             "SELECT id, text, title, lang, cluster_id, zh_status, zh_attempts FROM items "
-            "WHERE zh_status IN ('','fail') AND zh_attempts<? "
-            "ORDER BY (fetched_at>=?) DESC, time ASC LIMIT ?",
-            (MAX_ATTEMPTS, since_fetched_at, conf["round_cap"])).fetchall()
+            "WHERE zh_status IN ('','fail') AND zh_attempts<? AND fetched_at>=?",
+            (MAX_ATTEMPTS, since_fetched_at)).fetchall()
+        if len(rows) < conf["round_cap"]:
+            seen = {r[0] for r in rows}
+            for r in conn.execute(
+                "SELECT id, text, title, lang, cluster_id, zh_status, zh_attempts FROM items "
+                "WHERE zh_status IN ('','fail') AND zh_attempts<? "
+                "ORDER BY time ASC LIMIT ?",
+                (MAX_ATTEMPTS, conf["round_cap"] - len(rows))).fetchall():
+                if r[0] not in seen:
+                    rows.append(r)
         rep_ok = {r[0] for r in conn.execute(
             "SELECT representative_id FROM clusters").fetchall()}
     finally:
