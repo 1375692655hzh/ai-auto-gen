@@ -21,6 +21,7 @@
 import json
 import os
 import re
+import sqlite3
 import tempfile
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -30,6 +31,34 @@ from pathlib import Path
 from . import proxy, x_profile_enricher
 
 DATA_DIR = Path(__file__).resolve().parents[2] / "data" / "workbench"
+# 站端 items 库(只读): 看板 X 推文与站端 twitter 源同源采集, 复用其译文省配额
+STATION_DB = Path(__file__).resolve().parents[2] / "data" / "serve" / "items.db"
+
+
+def station_zh(sid: str = "", text: str = "") -> str:
+    """站端译文复用(2026-09-16 用户裁决"合并翻译": 使用群体同一批、额度有限,
+    不干重复的活)。站端 items 已翻(text_zh)则直接取用; 缺库/异常返回 '',
+    调用方照常回退 LLM 链。只读连接, 不写站端任何东西。"""
+    try:
+        if not STATION_DB.exists():
+            return ""
+        conn = sqlite3.connect(f"file:{STATION_DB}?mode=ro", uri=True)
+        try:
+            if sid:
+                row = conn.execute(
+                    "SELECT text_zh FROM items WHERE url LIKE ? "
+                    "AND COALESCE(text_zh,'') != '' LIMIT 1",
+                    (f"%/status/{sid}%",)).fetchone()
+            else:
+                row = conn.execute(
+                    "SELECT text_zh FROM items WHERE substr(text,1,120) = ? "
+                    "AND COALESCE(text_zh,'') != '' LIMIT 1",
+                    ((text or "")[:120],)).fetchone()
+            return (row[0] or "").strip() if row else ""
+        finally:
+            conn.close()
+    except Exception:
+        return ""
 ENGAGE_FILE = DATA_DIR / "x_engagement.json"
 TEXTS_FILE = DATA_DIR / "x_surge_texts.json"     # 推文译文缓存 {status_id: {zh, ts}}
 
@@ -357,6 +386,7 @@ def translate_pending(cands: list, limit: int = 60) -> dict:
     cache = load_texts()
     now_s = time.strftime("%Y-%m-%d %H:%M:%S")
     zh_native = 0
+    station_hit = 0
     todo = []
     for c in cands:
         sid = c["status_id"]
@@ -372,18 +402,25 @@ def translate_pending(cands: list, limit: int = 60) -> dict:
             cache[sid] = {"zh": full, "ts": now_s}
             zh_native += 1
         else:
-            todo.append(c)
+            zhs = station_zh(sid, full)     # 站端已翻则零成本复用, 不进 LLM 队列
+            if zhs:
+                cache[sid] = {"zh": zhs, "ts": now_s}
+                station_hit += 1
+            else:
+                todo.append(c)
     if not chain:
-        if zh_native:
+        if zh_native or station_hit:
             _save_texts(cache)
         return {"translated": 0, "translate_failed": 0, "zh_native": zh_native,
-                "pending": len(todo), "skipped": "translate 未配置, 跳过"}
+                "station_reuse": station_hit, "pending": len(todo),
+                "skipped": "translate 未配置, 跳过"}
     todo = [c for c in todo if len((c["text"] or "").strip()) >= 8][-limit:]  # 空文本不送翻
     if time.time() < _breaker_until():              # 熔断冷却中: 全线停翻防雷群空烧配额
-        if zh_native:
+        if zh_native or station_hit:
             _save_texts(cache)
         return {"translated": 0, "translate_failed": 0, "zh_native": zh_native,
-                "pending": len(todo), "skipped": "translate 熔断中(疑似免费池限流), 冷却后自动恢复"}
+                "station_reuse": station_hit, "pending": len(todo),
+                "skipped": "translate 熔断中(疑似免费池限流), 冷却后自动恢复"}
     ok = fail = streak = 0
     for i, c in enumerate(todo):
         if i:                                        # 轻微间隔, 防 API 限流
@@ -404,10 +441,10 @@ def translate_pending(cands: list, limit: int = 60) -> dict:
         if streak >= 5:                              # 连续全链失败=账号级限流/链路死, 熔断止损
             _trip_breaker("translate_chain_dead")
             break
-    if ok or zh_native:
+    if ok or zh_native or station_hit:
         _save_texts(cache)
     return {"translated": ok, "translate_failed": fail, "zh_native": zh_native,
-            "pending": max(len(todo) - ok - fail, 0)}
+            "station_reuse": station_hit, "pending": max(len(todo) - ok - fail, 0)}
 
 
 # ── 指标(读缓存+数据站, 无外呼; app.py 端点用) ────────────────────────────────

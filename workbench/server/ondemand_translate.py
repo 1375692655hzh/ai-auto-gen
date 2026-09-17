@@ -100,7 +100,7 @@ def translate_batch(items: list) -> dict:
     cache = _load()
     now_s = time.strftime("%Y-%m-%d %H:%M:%S")
     results, todo = [], []
-    native = cached = failed = 0
+    native = cached = failed = station_hit = 0
     for it in items[:BATCH_MAX]:
         if not isinstance(it, dict):
             continue
@@ -116,6 +116,12 @@ def translate_batch(items: list) -> dict:
         if h in cache:
             results.append({"i": i, "hash": h, "zh": cache[h]["zh"]})
             cached += 1
+            continue
+        zhs = x_surge.station_zh(text=text)     # 站端已翻则零成本复用(合并裁决: 不重翻)
+        if zhs:
+            cache[h] = {"zh": zhs, "ts": now_s}
+            results.append({"i": i, "hash": h, "zh": zhs, "station": 1})
+            station_hit += 1
             continue
         todo.append((i, h, text))
     unconfigured = not chain
@@ -138,7 +144,7 @@ def translate_batch(items: list) -> dict:
             if streak >= 5:          # 连续全链失败=账号级限流, 熔断止损防视口批次空烧
                 x_surge._trip_breaker("ondemand_chain_dead")
                 break
-    if todo and not unconfigured and not cooldown:
+    if station_hit or (todo and not unconfigured and not cooldown):
         _save(cache)
-    return {"results": results, "failed": failed, "native": native,
-            "cached": cached, "unconfigured": unconfigured, "cooldown": cooldown}
+    return {"results": results, "failed": failed, "native": native, "cached": cached,
+            "station_reuse": station_hit, "unconfigured": unconfigured, "cooldown": cooldown}

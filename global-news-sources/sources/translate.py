@@ -160,15 +160,15 @@ def run(since_fetched_at: str) -> dict:
         # 旧逻辑单 LIMIT 下高频轮的新条目(250-400+)把 cap 塞满, 外文新条目
         # 落在时间升序窗口外时整轮零翻译。
         rows = conn.execute(
-            "SELECT id, text, title, lang, cluster_id, zh_status, zh_attempts FROM items "
-            "WHERE zh_status IN ('','fail') AND zh_attempts<? AND fetched_at>=?",
+            "SELECT id, text, title, lang, cluster_id, zh_status, zh_attempts, source_id "
+            "FROM items WHERE zh_status IN ('','fail') AND zh_attempts<? AND fetched_at>=?",
             (MAX_ATTEMPTS, since_fetched_at)).fetchall()
         if len(rows) < conf["round_cap"]:
             seen = {r[0] for r in rows}
             for r in conn.execute(
-                "SELECT id, text, title, lang, cluster_id, zh_status, zh_attempts FROM items "
-                "WHERE zh_status IN ('','fail') AND zh_attempts<? "
-                "ORDER BY time ASC LIMIT ?",
+                "SELECT id, text, title, lang, cluster_id, zh_status, zh_attempts, source_id "
+                "FROM items WHERE zh_status IN ('','fail') AND zh_attempts<? "
+                "ORDER BY (source_id LIKE '%twitter%') DESC, time ASC LIMIT ?",
                 (MAX_ATTEMPTS, conf["round_cap"] - len(rows))).fetchall():
                 if r[0] not in seen:
                     rows.append(r)
@@ -176,9 +176,12 @@ def run(since_fetched_at: str) -> dict:
             "SELECT representative_id FROM clusters").fetchall()}
     finally:
         conn.close()
+    # X 源优先(2026-09-16 用户裁决: 优先翻译X源, 其他源滞后)——稳定排序保持各层内
+    # [本轮新条目在前/积压时间升序] 的既有次序, 只把 twitter 源整体提前
+    rows.sort(key=lambda r: 0 if "twitter" in (r[7] or "").lower() else 1)
 
     todo_short, todo_long, updates = [], [], []
-    for rid, text, title, lang, cid, st, att in rows:
+    for rid, text, title, lang, cid, st, att, _sid in rows:
         need, det = _need_zh(lang, text)
         if not need:
             updates.append(("skip", "", "", det if det.startswith("skip-detected") else "",
