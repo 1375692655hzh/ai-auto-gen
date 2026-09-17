@@ -425,8 +425,9 @@ def sources_cmd(args) -> int:
             print("sent" if ok else f"fail: {err}")
             return EXIT_OK if ok else EXIT_FAIL
         if args.action == "digest":
-            rep = feishu_mod.run_digest(
-                __import__("datetime").datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+            import datetime as _dt
+            since = (_dt.datetime.now() - _dt.timedelta(minutes=16)).strftime("%Y-%m-%d %H:%M:%S")
+            rep = feishu_mod.run_digest(since)
             print(json.dumps(rep, ensure_ascii=False, indent=1))
             return EXIT_OK
         return feishu_mod.watch_loop()
