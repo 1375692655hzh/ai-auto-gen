@@ -32,7 +32,7 @@ WB.pages.video = {
       makes: [], cur: null, blank: null,   /* blank=内存态空白新稿(不落库, 首次编辑才建行) */
       presets: null, narTab: 'a', narBrief: '', narDraftId: '', importId: '',
       makeRoute: 'script',   /* 制作路线: script=文案路线 audio=音频路线(上传录音→转写→切原声) */
-      asrErr: '', asrBusy: false, asrProgress: null, asrUp: null, asrUpErr: '', asrNotice: '',
+      asrErr: '', asrBusy: false, asrProgress: null, asrUp: null, asrUpErr: '', asrNotice: '', voiceNotice: '',
       refText: '', refName: '', refDirty: false,   /* 参考稿(音频路线可选校准稿): 粘贴/文件双入口, 独立防抖保存 */
       makeStep: 1,           /* 生成卡内部步骤子页(0913a): 1项目名称/2口播/3脚本/4音频/5视频 */
       makeSeen: { 1: true }, /* 步骤懒挂载(0913c): 首次访问才建DOM(47拍分镜+47audio全量构建=载入慢的根因), 之后v-show保活 */
@@ -118,6 +118,13 @@ WB.pages.video = {
       return parts.join('；');
     },
     isAudioRoute() { return this.makeRoute === 'audio'; },
+    asrAlignBad() {
+      /* 上次转写对齐降级的持久信号(audio.align_ok 落库)——刷新/切页后 asrNotice 内存态
+         会丢, 用库字段重建提示(0917 codex P2) */
+      const m = this.curMake, a = (m && m.audio) || {};
+      return !!(this.isAudioRoute && m && m.narration && m.narration.text
+                && a.asset_id !== undefined && (m.audio || {}).align_ok === false);
+    },
     asrPhrases() { return ((this.curMake && this.curMake.audio) || {}).phrases || []; },
     audioCuts() { return ((this.curMake && this.curMake.audio) || {}).cuts || []; },
     makeVoices() { const p = this.ttsProviders.find((p) => this.curMake && p.id === this.curMake.voice.profile_id); return p ? p.voices || [] : []; },
@@ -626,6 +633,8 @@ WB.pages.video = {
               WB.toast('转写完成，但' + job.result.hint.split('——')[0]);
             } else WB.toast(kind === 'voice' ? (this.isAudioRoute ? '画面对齐完成' : '语音已生成')
                      : kind === 'asr' ? '转写完成，请校对后定稿' : task === 'narration' ? '口播稿已生成' : '分镜脚本已生成');
+            if (kind === 'voice' && job.result && job.result.warnings && job.result.warnings.length)
+              this.voiceNotice = job.result.warnings.join('；');   /* 第4步预检警告持久可见 */
           } else {
             WB.toast('独立生成页已下线，产物可在脚本仓库查看');
           }
@@ -946,6 +955,7 @@ WB.pages.video = {
     },
     async selectMake(id) {
       if (this.makeActionBusy) { WB.toast('有任务进行中，请稍候再切换草稿'); return; }
+      if (Object.values(this.assetUploadBusy).some(Boolean)) { WB.toast('音频/素材上传中，请等上传完成再切换'); return; }
       if (this.cur === id) { await this.unloadMake(); return; }
       try {
         if (this.cur) await this.flushMake(this.cur);
@@ -955,7 +965,7 @@ WB.pages.video = {
         this.cur = m.id; this.blank = null; this.narTab = m.narration.source === 'manual' ? 'b' : 'a';
         this.makeRoute = m.route || 'script';
         this.narBrief = ''; this.narDraftId = ''; this.importId = ''; this.beatCursors = {};
-        this.narErr = ''; this.scriptErr = ''; this.voiceErr = ''; this.asrErr = ''; this.asrNotice = ''; this.setMakeDefaults(m);
+        this.narErr = ''; this.scriptErr = ''; this.voiceErr = ''; this.asrErr = ''; this.asrNotice = ''; this.voiceNotice = ''; this.voiceNotice = ''; this.setMakeDefaults(m);
       } catch (e) { this.makeErr = this.makeError(e); }
     },
     setMakeDefaults(m) {
@@ -999,7 +1009,7 @@ WB.pages.video = {
         if (this.cur) await this.flushMake(this.cur);
         const m = this.putMake((await WB.api.post('/video-makes', { route })).make);
         this.cur = m.id; this.narTab = 'b'; this.narBrief = ''; this.narDraftId = ''; this.importId = '';
-        this.narErr = ''; this.scriptErr = ''; this.voiceErr = ''; this.asrErr = ''; this.asrNotice = '';
+        this.narErr = ''; this.scriptErr = ''; this.voiceErr = ''; this.asrErr = ''; this.asrNotice = ''; this.voiceNotice = '';
         this.setMakeDefaults(m); this.makeRoute = route;
       } catch (e) { this.makeErr = this.makeError(e); }
       finally { this.makeActionBusy = false; }
@@ -1043,7 +1053,10 @@ WB.pages.video = {
       /* 空白稿必须先落库: 否则 this.cur=null, POST 建出一张无路线孤儿单且音频绑定被服务端丢弃 */
       await this.materializeBlank();
       if (!this.cur) { this.asrUpErr = '制作单尚未就绪，请稍候重试'; return; }
-      const busyKey = this.cur + ':asr';
+      /* 全程锁定目标制作单: 大文件上传耗时数分钟, 期间用户切草稿不得把绑定落到别的单上
+         (0917 codex P1——旧代码完成后重读 this.cur, 换绑会清掉目标单的转写/脚本进度) */
+      const targetId = this.cur;
+      const busyKey = targetId + ':asr';
       this.assetUploadBusy[busyKey] = true;
       this.asrUp = { name: file.name, size: file.size, pct: 0 };
       try {
@@ -1057,19 +1070,20 @@ WB.pages.video = {
           x.onerror = () => reject({ error: '上传失败（网络中断?）' });
           x.send(file);
         });
-        const m = this.curMake;
+        const m = this.makes.find((x) => x.id === targetId) || this.curMake;
         /* 换绑前丢弃防抖中的旧载荷: 带旧 asset_id 的 payload 迟到会被服务端当换绑,
            把转写/脚本进度全清掉(0917 cursor 复审 P1) */
-        clearTimeout(this.saveTimers[this.cur]);
-        delete this.savePending[this.cur];
-        this.saveVersions[this.cur] = (this.saveVersions[this.cur] || 0) + 1;
+        clearTimeout(this.saveTimers[targetId]);
+        delete this.savePending[targetId];
+        this.saveVersions[targetId] = (this.saveVersions[targetId] || 0) + 1;
         /* route 必须与 audio 同载荷上行: 服务端只对 route=audio 的制作单接受音频绑定 */
-        const patch = { id: this.cur, route: 'audio', audio: { asset_id: aid, asset_name: file.name } };
-        const t = String(m.title || '').trim();
-        if (!t || t === '未命名视频')   /* 项目名默认取音频文件名(用户已命名则不动) */
-          patch.title = (file.name.replace(/\.[^.]+$/, '').slice(0, 60)) || '未命名视频';
+        const patch = { id: targetId, route: 'audio', audio: { asset_id: aid, asset_name: file.name } };
+        /* 标题随绑定一并上行: 防抖已丢, 用户刚输入的自定义标题不能跟着丢(0917 codex P2) */
+        const t = String((m || {}).title || '').trim();
+        patch.title = (t && t !== '未命名视频') ? t
+          : ((file.name.replace(/\.[^.]+$/, '').slice(0, 60)) || '未命名视频');
         await WB.api.post('/video-makes', patch);
-        await this.fetchMake(this.cur);
+        await this.fetchMake(targetId);
         this.makeRoute = 'audio';
         WB.toast('✅ 上传完成：' + file.name + '（' + (file.size / 1048576).toFixed(1) + ' MB）——点「下一步」提取文字稿');
       } catch (e) { this.asrUpErr = this.makeError(e); }
@@ -1358,18 +1372,19 @@ WB.pages.video = {
     async refreshMakeJob(job) {
       await Promise.all([this.loadMakes(), this.loadVideos()]);
       const id = (job.request || {}).make_id || (job.result || {}).make_id;
-      if (id && this.saveState[id] !== 'saving') {
-        const pending = this.savePending[id];
-        const pendNar = String((((pending || {}).body) || {}).narration || {}).text || '';
-        /* 任务产物必须落地: 防抖里的"空文稿"不得盖掉刚写回的转写(0917 cursor 复审 P1);
-           用户正在输入非空文稿时仍让 pending 先走(旧保护语义) */
-        if (!pending || !pendNar.trim()) {
-          try {
-            const fresh = await this.fetchMake(id);
-            if (pending && fresh && String(fresh.narration.text || '').trim() && !pendNar.trim())
-              delete pending.body.narration;
-          } catch (e) { this.makeErr = this.makeError(e); }
-        }
+      if (!id || this.saveState[id] === 'saving') return;
+      const pending = this.savePending[id];
+      const pendBody = (pending || {}).body || {};
+      const pendNar = String((pendBody.narration || {}).text || '');
+      /* 用户正在输入非空文稿 → pending 先走, 不用服务端行覆盖编辑区(旧保护语义);
+         否则任务产物必须落地——防抖载荷里的"空文稿"剥离后再送, 不得盖掉刚写回的转写 */
+      if (pending && pendNar.trim()) return;
+      try { await this.fetchMake(id); }
+      catch (e) { this.makeErr = this.makeError(e); return; }
+      if (pending) {
+        delete pending.body.narration;   // 空文稿不得盖转写; title/video 等其余字段保留随后上行
+        clearTimeout(this.saveTimers[id]);
+        this.saveTimers[id] = setTimeout(() => this.flushMake(id).catch(() => {}), 2000);
       }
     },
     async runMakeJob(task, scope = 'all') {
@@ -1377,7 +1392,7 @@ WB.pages.video = {
       if (!this.cur) await this.materializeBlank(); if (!this.cur) return;
       const id = this.cur, kind = task === 'voice' ? 'voice' : task === 'build' ? 'build' : 'generate';
       const errKey = { voice: 'voiceErr', build: 'buildErr', narration: 'narErr', storyboard: 'scriptErr' }[task];
-      this[errKey] = ''; this.makeActionBusy = true;
+      this[errKey] = ''; if (task === 'voice') this.voiceNotice = ''; this.makeActionBusy = true;
       try {
         await this.flushMake(id); const m = this.curMake;
         const payload = task === 'narration' ? { make_id: id, brief: this.narBrief, ref_text: m.narration.ref_text, style_id: m.narration.style_id, length_s: m.narration.length_s || 0, fidelity: m.narration.fidelity || 'faithful', llm_source: m.narration.llm_source || 'compose:0' }
@@ -2083,7 +2098,7 @@ WB.pages.video = {
                       <span v-if="asrBusy && asrProgress" class="muted">{{ asrProgress.message }}</span>
                     </div>
                     <p v-if="asrErr" class="err-text">{{ asrErr }}</p>
-                    <div v-if="asrNotice" class="notice" style="margin-top:8px">⚠ {{ asrNotice }}</div>
+                    <div v-if="asrNotice || asrAlignBad" class="notice" style="margin-top:8px">⚠ {{ asrNotice || '上次转写时句级对齐不可用（本机缺 Node 或 ffmpeg）——点句跳播与句级字幕暂缺；装好后重新转写即可补齐' }}</div>
                     <template v-if="curMake.narration.text && !curMake.narration.locked">
                       <p class="muted" style="margin:10px 0 4px">校对转写稿（<b>英文词</b>与<b>数字</b>最易错——数字请改回阿拉伯数字，画面数据卡要保持一致）。改完点「定稿」。</p>
                       <textarea v-model="curMake.narration.text" @input="saveMake()" rows="10" style="width:100%"></textarea>
@@ -2229,6 +2244,7 @@ WB.pages.video = {
                   <button class="btn primary" type="button" :disabled="voiceBusy || curMake.script_stale" @click="runMakeJob('voice')">{{ voiceBusy ? '对齐中…' : (curMake.audio && curMake.audio.timeline ? '重新对齐画面' : '开始对齐画面') }}</button>
                 </fieldset>
                 <p v-if="voiceBusy" class="muted">{{ voiceProgress && voiceProgress.message || '准备中…' }}</p>
+                <div v-if="voiceNotice" class="notice" style="margin-top:8px">⚠ {{ voiceNotice }}</div>
                 <div v-for="(c, i) in audioCuts" :key="c.id" style="display:flex;gap:10px;align-items:center;padding:6px 0;border-bottom:1px solid var(--border)">
                   <span class="muted" style="min-width:110px;font-size:12px;font-family:monospace">{{ i + 1 }} · {{ fmtClock(c.start) }}–{{ fmtClock(c.end) }}</span>
                   <span class="badge green" style="font-size:10px">原音</span>

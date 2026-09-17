@@ -16,6 +16,7 @@ import re
 import shutil
 import sys
 import tempfile
+import time
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[2]          # workbench/server/config.py → 仓库根
@@ -551,9 +552,19 @@ def seed_merge_if_updated(name: str, key_fields: tuple = ("channel_id", "value")
 
 
 def load_rows(name: str) -> list:
+    p = DATA_DIR / name
     try:
-        return json.loads((DATA_DIR / name).read_text(encoding="utf-8"))
+        return json.loads(p.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return []
     except Exception:
+        # 损坏熔断(0917 codex 复审 P1): 读异常与"不存在"必须区分——直接回 [] 会让下一次
+        # save_rows 用只含当前行的列表整表覆盖, 其余制作单全灭。原件改名保留供人工恢复。
+        try:
+            stamp = int(time.time())
+            p.rename(p.with_name(f"{name}.corrupt-{stamp}"))
+        except OSError:
+            pass
         return []
 
 

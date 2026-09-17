@@ -283,6 +283,20 @@ class ContinuousMasterTests(unittest.TestCase):
         self.assertEqual(cur["narration"]["text"], "转写文本在这里。")
         self.assertEqual(cur["audio"]["src_ext"], "mp3")
 
+        # 同路数但 mimo 回报 usage.seconds=420(7MB 低码率 mp3 可装 10min+):
+        # 小文件≠短音频, 截断必须变明拒而不是静默缺文本落库
+        row_b = vstudio.make_upsert({"route": "audio", "audio": {"asset_id": aid}, "title": "低码率长mp3"})
+        with patch.object(vstudio, "_resolve_ffmpeg", return_value=""), \
+             patch.object(vstudio, "_asr_pin", return_value=([], "x", {})), \
+             patch.object(vstudio, "_estimate_phrases", return_value=([], "x")), \
+             patch.object(vstudio, "_ensure_master", return_value=({}, "skip")), \
+             patch.object(vasr, "transcribe_file",
+                          return_value={"text": "只有前三分之一", "seconds": 420.0}):
+            report_b, code_b = vstudio._run_asr({"make_id": row_b["id"]})
+        self.assertEqual(code_b, 3)
+        self.assertEqual(report_b["error"], "audio_too_long")
+        self.assertIn("ffmpeg", report_b["hint"])
+
     def test_make_view_timeline_current(self):
         """时间轴时效(0917 cursor 复审 P2): 文稿哈希/beat id 序列任一变化即 timeline_current=False。"""
         row = _audio_make()
@@ -305,6 +319,77 @@ class ContinuousMasterTests(unittest.TestCase):
         view2 = vstudio.make_view(vstudio.make_get(row["id"]))
         view2["audio"]["timeline"]["ids"] = ["b1", "b9"]
         self.assertFalse(vstudio.make_view(view2)["audio"]["timeline_current"])
+
+    def test_run_slice_captions_precheck_warns(self):
+        """分镜切在钉词短语内部 → 第 4 步就给 warnings(第 5 步 captions.mjs 必炸的提前预告)。"""
+        row = _audio_make()   # beats: b1"第一句话在这里。" b2"第二句话也来了。"
+        vdir = vstudio._safe_path(vstudio.voice_root(), row["id"])
+        vdir.mkdir(parents=True, exist_ok=True)
+        mfile = vdir / "master.m4a"
+        mfile.write_bytes(b"M4A")
+        (vdir / "source.mp3").write_bytes(b"MP3")
+        row["audio"] = {"asset_id": "va1", "src_ext": "mp3",
+                        "master": {"file": "master.m4a", "hash": vstudio._file_hash8(mfile),
+                                   "duration_s": 5.9}}
+        vstudio._make_save(row)
+        # 短语文本与 beat narration 不一致(句中拆拍的模拟): b2 拼不回原文
+        phrases = [{"text": "第一句话在这里。", "start": 0.0, "end": 2.0},
+                   {"text": "第二句话也来", "start": 2.0, "end": 5.9}]
+        with patch.object(vstudio, "_asr_pin", return_value=(phrases, "", {})), \
+             patch.object(vstudio, "node_env_check", return_value=(True, "")):
+            report, code = vstudio._run_slice({"make_id": row["id"]})
+        self.assertEqual(code, 0, report)
+        self.assertTrue(any("b2" in w for w in report.get("warnings") or []),
+                        report.get("warnings"))
+        # 对照: 短语与 narration 逐幕一致 → 无警告
+        phrases_ok = [{"text": "第一句话在这里。", "start": 0.0, "end": 2.0},
+                      {"text": "第二句话也来了。", "start": 2.0, "end": 5.9}]
+        with patch.object(vstudio, "_asr_pin", return_value=(phrases_ok, "", {})), \
+             patch.object(vstudio, "node_env_check", return_value=(True, "")):
+            report2, code2 = vstudio._run_slice({"make_id": row["id"]})
+        self.assertEqual(code2, 0, report2)
+        self.assertEqual(report2.get("warnings"), [])
+
+    def test_load_rows_corruption_breaker(self):
+        """video_makes.json 损坏: 原件改名保留 + 回空——下一次保存不得静默清空整个制作库。"""
+        import glob
+        f = config.DATA_DIR / "video_makes.json"
+        f.parent.mkdir(parents=True, exist_ok=True)
+        f.write_text("{broken json!!", encoding="utf-8")
+        self.assertEqual(config.load_rows("video_makes.json"), [])
+        leftovers = glob.glob(str(config.DATA_DIR / "video_makes.json.corrupt-*"))
+        self.assertTrue(leftovers, "损坏原件必须改名保留供人工恢复")
+        # 熔断后建行正常, 且库里只剩新行(旧行在 .corrupt 文件里可找回)
+        row = vstudio.make_upsert({"route": "audio", "title": "熔断后新建"})
+        self.assertEqual(row["title"], "熔断后新建")
+        self.assertEqual(len(config.load_rows("video_makes.json")), 1)
+
+    def test_asset_del_force_unbinds_audio(self):
+        """force 删除绑定的录音: 无 master 的单整体回退未上传态; 有 master 的保留产物只断资产引用。"""
+        # 无 master: 转写后进度应被清
+        aid = _mk_asset("mp3", b"FAKE-" + bytes(range(8)))
+        row = vstudio.make_upsert({"route": "audio", "audio": {"asset_id": aid}, "title": "删我"})
+        row["narration"].update(text="已有转写", source="asr")
+        vstudio._make_save(row)
+        r = vstudio.asset_del(aid, force=True)
+        self.assertTrue(r["ok"])
+        cur = vstudio.make_get(row["id"])
+        self.assertIsNone(cur.get("audio"))
+        self.assertEqual(cur["narration"]["text"], "")
+        # 有 master: 产物保留, 只断 asset_id
+        aid2 = _mk_asset("mp3", b"FAKE2-" + bytes(range(8)))
+        row2 = vstudio.make_upsert({"route": "audio", "audio": {"asset_id": aid2}, "title": "留产物"})
+        vdir = vstudio._safe_path(vstudio.voice_root(), row2["id"])
+        vdir.mkdir(parents=True, exist_ok=True)
+        mfile = vdir / "master.mp3"
+        mfile.write_bytes(b"MASTER")
+        row2["audio"].update(master={"file": "master.mp3", "hash": vstudio._file_hash8(mfile),
+                                     "duration_s": 3.0})
+        vstudio._make_save(row2)
+        vstudio.asset_del(aid2, force=True)
+        cur2 = vstudio.make_get(row2["id"])
+        self.assertEqual((cur2.get("audio") or {}).get("asset_id"), "")
+        self.assertTrue(((cur2.get("audio") or {}).get("master") or {}).get("file") == "master.mp3")
 
 
 if __name__ == "__main__":

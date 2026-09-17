@@ -31,8 +31,11 @@ MAX_SCRIPTS = 300
 JOB_KINDS = ("analyze", "generate", "voice", "build", "asr")
 # build 是分钟级真渲染, stale 阈值独立放宽到 60 分钟; analyze/generate 维持 20 分钟
 # asr(音频路线转写+本地钉词) 首次要下 whisper 模型, 放宽到 40 分钟
-JOB_STALE_S = {"analyze": 20 * 60, "generate": 20 * 60, "voice": 20 * 60,
-               "build": 60 * 60, "asr": 40 * 60}
+# voice stale ≥ _asr_pin 的 node 超时(2400s=40min), build stale ≥ 60fps 构建超时
+# (BUILD_TIMEOUT_S×2=120min)——旧口径 20/60 分钟会把合法长任务判僵, 触发双 build 并发
+# 互写 active-story.ts(0917 codex 复审 P1)
+JOB_STALE_S = {"analyze": 20 * 60, "generate": 20 * 60, "voice": 45 * 60,
+               "build": 125 * 60, "asr": 40 * 60}
 SEMANTIC_KEYS = ("theme", "hook", "structure", "devices", "voice", "cta",
                  "reusable", "visuals", "tier_note")
 
@@ -1262,12 +1265,17 @@ def make_get(mid: str) -> dict | None:
 
 def _make_save(row: dict) -> dict:
     with config.file_lock("video_makes"):          # 构建 CLI 回写 与 前端自动保存互斥
-        rows = config.load_video_makes()
-        row["updated_at"] = _now()
-        rows = [row if r.get("id") == row["id"] else r for r in rows]
-        if not any(r.get("id") == row["id"] for r in rows):
-            rows.append(row)
-        config.save_video_makes(rows)
+        return _make_save_locked(row)
+
+
+def _make_save_locked(row: dict) -> dict:
+    """调用方必须已持有 file_lock("video_makes")(file_lock 不可重入)。"""
+    rows = config.load_video_makes()
+    row["updated_at"] = _now()
+    rows = [row if r.get("id") == row["id"] else r for r in rows]
+    if not any(r.get("id") == row["id"] for r in rows):
+        rows.append(row)
+    config.save_video_makes(rows)
     return row
 
 
@@ -1280,6 +1288,14 @@ def _new_make_id() -> str:
 
 
 def make_upsert(payload: dict) -> dict | None:
+    """读-改-写整体入 file_lock 临界区(锁不可重入, 内部走 _make_save_locked):
+    旧行快照在请求开始时取、保存时整行替换, 与任务回写/双开标签页并发会丢更新
+    (0917 codex 复审 P1)。"""
+    with config.file_lock("video_makes"):
+        return _make_upsert_locked(payload)
+
+
+def _make_upsert_locked(payload: dict) -> dict | None:
     mid = payload.get("id")
     row = make_get(mid) if mid else None
     if mid and not row:
@@ -1361,7 +1377,7 @@ def make_upsert(payload: dict) -> dict | None:
                 if row["status"] in ("voice_ready", "built"):
                     row["status"] = "script_locked" if row["script_meta"]["locked"] else "editing_script"
             row["voice"][key] = value
-    return _make_save(row)
+    return _make_save_locked(row)
 
 
 def make_view(row: dict) -> dict:
@@ -1494,21 +1510,22 @@ def asset_add(orig_name: str, body: bytes, duration_s=None):
     ext = Path(orig_name).suffix.lower().lstrip(".")
     if ext not in ASSET_KIND:
         return None, {"error": "bad_ext"}
-    rows = config.load_video_assets()
-    if len(rows) >= MAX_ASSETS:
-        return None, {"error": "capacity_limit", "hint": f"素材库最多 {MAX_ASSETS} 条，请先删除不再使用的素材"}
-    aid = _id("va")
-    while any(a.get("asset_id") == aid for a in rows) or asset_find(aid)[0]:
-        time.sleep(0.001)
+    with config.file_lock("video_assets"):   # 读改写互斥: 双开标签页并发上传不丢记录(0917 codex S2)
+        rows = config.load_video_assets()
+        if len(rows) >= MAX_ASSETS:
+            return None, {"error": "capacity_limit", "hint": f"素材库最多 {MAX_ASSETS} 条，请先删除不再使用的素材"}
         aid = _id("va")
-    path = _safe_path(assets_root(), f"{aid}.{ext}")
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_bytes(body)
-    asset = {"asset_id": aid, "name": orig_name, "ext": ext, "size": len(body),
-             "kind": ASSET_KIND[ext], "duration_s": duration_s,
-             "created_at": _now(), "updated_at": _now()}
-    rows.append(asset)
-    config.save_video_assets(rows)
+        while any(a.get("asset_id") == aid for a in rows) or asset_find(aid)[0]:
+            time.sleep(0.001)
+            aid = _id("va")
+        path = _safe_path(assets_root(), f"{aid}.{ext}")
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(body)
+        asset = {"asset_id": aid, "name": orig_name, "ext": ext, "size": len(body),
+                 "kind": ASSET_KIND[ext], "duration_s": duration_s,
+                 "created_at": _now(), "updated_at": _now()}
+        rows.append(asset)
+        config.save_video_assets(rows)
     return asset, None
 
 
@@ -1550,19 +1567,41 @@ def asset_del(asset_id: str, force: bool = False) -> dict:
     path, _ = asset_find(asset_id)
     if path:
         path.unlink(missing_ok=True)
-    rows = config.load_video_assets()
-    kept = [a for a in rows if a.get("asset_id") != asset_id]
-    if len(kept) != len(rows):
-        config.save_video_assets(kept)
-    makes, cleared = config.load_video_makes(), 0
-    for row in makes:
-        for o in (row.get("video") or {}).get("beat_overrides") or []:
-            if isinstance(o, dict) and o.get("asset_id") == asset_id:
-                del o["asset_id"]                    # 只解绑素材，保留逐拍编排参数
+    with config.file_lock("video_assets"):
+        rows = config.load_video_assets()
+        kept = [a for a in rows if a.get("asset_id") != asset_id]
+        if len(kept) != len(rows):
+            config.save_video_assets(kept)
+    cleared = 0
+    with config.file_lock("video_makes"):
+        makes = config.load_video_makes()
+        for row in makes:
+            for o in (row.get("video") or {}).get("beat_overrides") or []:
+                if isinstance(o, dict) and o.get("asset_id") == asset_id:
+                    del o["asset_id"]                    # 只解绑素材，保留逐拍编排参数
+                    cleared += 1
+                    row["updated_at"] = _now()
+            # 音频路线绑定也解绑(0917 codex P2): 已切主轨的单保留产物只断资产引用;
+            # 没产物的单整体回退到未上传态, 不留悬空 asset_id 假装"已上传"
+            audio = row.get("audio") or {}
+            if audio.get("asset_id") == asset_id:
+                if audio.get("master"):
+                    audio["asset_id"], audio["asset_name"] = "", ""
+                elif not row["narration"].get("locked"):
+                    row["audio"] = None
+                    row["narration"].update(text="", source="", locked=False,
+                                            locked_at=None, hash="")
+                    row["script"] = None
+                    row["script_meta"] = {"locked": False, "locked_at": None, "hash": "",
+                                          "source_narration_hash": ""}
+                    row["voice"].update(items={}, voice_key="")
+                    row["status"] = "editing_narration"
+                else:
+                    row["audio"] = None
                 cleared += 1
                 row["updated_at"] = _now()
-    if cleared:
-        config.save_video_makes(makes)
+        if cleared:
+            config.save_video_makes(makes)
     return {"ok": True, "cleared_overrides": cleared, "refs": []}
 
 
@@ -2173,7 +2212,9 @@ def _asr_source_path(mid: str, ext: str) -> Path:
 
 
 def _file_hash8(path: Path) -> str:
-    return hashlib.sha1(Path(path).read_bytes()).hexdigest()[:8]
+    # 流式哈希: 100MB 主轨整读进内存曾在每次 build 门禁各算一次(0917 codex S4)
+    with open(path, "rb") as f:
+        return hashlib.file_digest(f, "sha1").hexdigest()[:8]
 
 
 def _probe_duration(path: Path) -> float:
@@ -2535,9 +2576,10 @@ def _run_asr(request: dict) -> tuple[dict, int]:
     # 每段现压 16k 单声道转写档(段 ≤160s 约 ≤400KB, 远低于 10MB 请求限)。
     # 无 ffmpeg 的裸机放行短音频(≤7MB 免压缩免分段直传)——否则官方引导"没 ffmpeg 就传
     # mp3/wav"会在段规划步自相矛盾地死掉(0917 cursor 复审 P1)
+    no_ffmpeg_bypass = False
     if (not _resolve_ffmpeg()) and ext in ("mp3", "wav") \
             and src.stat().st_size <= 7 * 1024 * 1024:
-        segs, plan_err = [(0.0, 0.0)], ""
+        segs, plan_err, no_ffmpeg_bypass = [(0.0, 0.0)], "", True
     else:
         segs, plan_err = _plan_asr_segments(src)
     if not segs:
@@ -2552,6 +2594,12 @@ def _run_asr(request: dict) -> tuple[dict, int]:
                 return {"error": "extract_failed", "hint": "压缩转写副本失败: " + err}, 3
         result = vasr.transcribe_file(asr_copy)     # AsrError 抛给上层分类
         text, seconds = result["text"], result.get("seconds")
+        if no_ffmpeg_bypass and seconds and seconds > 240:
+            # 小文件≠短音频(64kbps mp3 7MB≈14min): mimo 整轨单发有截断上限,
+            # 用返回的 usage.seconds 兜底判长, 把"静默缺 2/3 文本"变成明拒(0917 codex P1)
+            return {"error": "audio_too_long",
+                    "hint": f"音频约 {int(seconds // 60)} 分钟——无 ffmpeg 时无法分段, 整轨单发转写会被截断。"
+                            "请安装完整版 ffmpeg 后重试, 或改传 3 分钟以内的短音频"}, 3
     else:
         text_parts, seconds = [], None
         for i, (seg_s, seg_e) in enumerate(segs):
@@ -2645,6 +2693,11 @@ def _run_slice(request: dict):
     src = _asr_source_path(row["id"], "." + str((row.get("audio") or {}).get("src_ext") or "mp3"))
     if not src.is_file():
         return {"error": "source_missing", "hint": "上传音频不存在, 请重新上传并转写"}, 4
+    # 钉词(whisper)硬依赖 Node——前置快败给环境指引: 裸机缺 Node 时不要让用户先看到
+    # "主轨时长探测失败(ffprobe?)"这类次生误导, 也不误报"校对改写幅度过大"(0917 codex S3)
+    ok, env_err = node_env_check("asr-timeline.mjs")
+    if not ok:
+        return {"error": "node_env", "hint": env_err}, 3
     # 主轨(原始上传音频; 旧制作单自愈补建)
     audio_meta = row.get("audio") or {}
     master = audio_meta.get("master") or {}
@@ -2660,11 +2713,6 @@ def _run_slice(request: dict):
     if duration_s <= 0:
         return {"error": "master_bad", "hint": "主轨时长探测失败(ffprobe?)"}, 3
     beats = row["script"]["beats"]
-    # 钉词(whisper)硬依赖 Node——裸机缺 Node 时先快败给环境指引,
-    # 不让"钉词失败(校对改写幅度过大?)"误导用户去改稿(0917 分发审计)
-    ok, env_err = node_env_check("asr-timeline.mjs")
-    if not ok:
-        return {"error": "node_env", "hint": env_err}, 3
     tick("voice", "align", 30, "终稿句级对齐(校对改文会自动重钉)")
     phrases, align_err, _meta = _asr_pin(src, row["narration"]["text"])
     align_mode = "whisper"
@@ -2708,6 +2756,14 @@ def _run_slice(request: dict):
     vdir = _safe_path(voice_root(), row["id"])
     vdir.mkdir(parents=True, exist_ok=True)
     tick("voice", "cut", 70, f"画面时间轴({len(tl_beats)} 幕, 原音连续不切)")
+    # 第 5 步字幕一致性预检(captions.mjs 同口径 compact=去空白): 分镜切在钉词短语内部时
+    # 该幕拼接≠口播全文, build 必炸"字幕对齐失效"且重对齐无解——提前到第 4 步给指引(0917 codex P1)
+    _ws = re.sub
+    warnings = [f"第 {i + 1} 拍({beat['id']}) 分镜切在句中: 字幕拼接≠口播全文, 第 5 步渲染会失败——"
+                f"请回第 3 步重新生成脚本, 或把拆分/合并点移到句号处"
+                for i, (beat, group) in enumerate(zip(beats, groups))
+                if _ws(r"\s+", "", "".join(str(p.get("text") or "") for p in group))
+                != _ws(r"\s+", "", str(beat.get("narration") or ""))]
     timeline = {"schema": "wb-original-continuous-timeline/v1",
                 "audio_hash": master["hash"], "narration_hash": voice_hash(row["narration"]["text"]),
                 "duration_s": round(duration_s, 3), "alignment": align_mode,
@@ -2731,7 +2787,8 @@ def _run_slice(request: dict):
     _make_save(current)
     result = {"make_id": row["id"], "beats": len(tl_beats),
               "duration_s": timeline["duration_s"], "align_mode": align_mode,
-              "master": {"file": master["file"], "delivery": master.get("delivery")}}
+              "master": {"file": master["file"], "delivery": master.get("delivery")},
+              "warnings": warnings}
     _set_job_result("voice", result)
     return result, 0
 
