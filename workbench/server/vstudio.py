@@ -2197,8 +2197,45 @@ def _assign_phrases(beats: list, phrases: list) -> list:
     return out
 
 
+def _resolve_ffmpeg() -> str:
+    """抽音轨用 ffmpeg: 系统完整版优先(compositor 精简版缺编码器前科), 找不到返回空。"""
+    exe = shutil.which("ffmpeg")
+    if exe:
+        return exe
+    from . import vmake
+    nm = vmake.VIDEO_DIR / "node_modules"
+    cands = sorted(nm.glob("@remotion/compositor-*/ffmpeg.exe")) \
+        or sorted(p for p in nm.glob("@remotion/compositor-*/ffmpeg") if p.is_file())
+    return str(cands[0]) if cands else ""
+
+
+def _extract_audio(src: Path, dest_mp3: Path) -> str:
+    """视频/非常规音频 → 抽音轨转 mp3(-vn + libmp3lame VBR 高质); 返回错误文案(空=成功)。"""
+    ff = _resolve_ffmpeg()
+    if not ff:
+        return ("未找到可用的 ffmpeg（抽音轨需要）：请安装完整版 ffmpeg 并加入 PATH，"
+                "或先手动抽出音频再传 mp3")
+    dest_mp3.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        proc = subprocess.run(
+            [ff, "-hide_banner", "-loglevel", "error", "-y", "-i", str(src),
+             "-vn", "-c:a", "libmp3lame", "-q:a", "2", str(dest_mp3)],
+            capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=900,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+    except subprocess.TimeoutExpired:
+        return "抽音轨超时（视频过长?），可先手动抽出音频传 mp3"
+    if proc.returncode != 0 or not dest_mp3.is_file() or dest_mp3.stat().st_size < 1024:
+        tail = ((proc.stderr or "") + (proc.stdout or "")).strip()[-160:]
+        if "libmp3lame" in tail or "Unknown encoder" in tail:
+            return "本机 ffmpeg 缺 mp3 编码器（libmp3lame）：请安装完整版 ffmpeg 后重试"
+        return "抽音轨失败: " + (tail or "ffmpeg 无输出（视频里可能没有音轨?）")
+    return ""
+
+
 def _run_asr(request: dict) -> tuple[dict, int]:
-    """音频路线·转写: mimo 出文本(权威) → 写 narration(未锁, 进校对) → whisper 钉词 v1(校对页点句播)。"""
+    """音频路线·转写: mimo 出文本(权威) → 写 narration(未锁, 进校对) → whisper 钉词 v1(校对页点句播)。
+
+    上传视频(mp4/webm/m4a)自动 ffmpeg 抽音轨成 source.mp3, 后续钉词/切原声全链不变。"""
     from . import vasr
     row = make_get(request.get("make_id"))
     if not row or row.get("route") != "audio":
@@ -2207,14 +2244,24 @@ def _run_asr(request: dict) -> tuple[dict, int]:
         return {"error": "narration_locked", "hint": "先解锁文稿再重新转写"}, 4
     audio = row.get("audio") or {}
     path, kind = asset_find(audio.get("asset_id"))
-    if not path or kind != "audio":
-        return {"error": "audio_missing", "hint": "先上传语音稿(mp3/wav)"}, 4
+    if not path or kind not in ("audio", "video"):
+        return {"error": "audio_missing", "hint": "先上传音频或视频(mp3/wav/mp4/webm/m4a)"}, 4
+    # 源落 make 自有语音目录(与素材库解耦: 素材删了不影响制作单);
+    # mp3/wav 直用, 视频(m4a 同)先抽音轨——转写/钉词/切原声只认 source.mp3
+    ext = path.suffix.lower().lstrip(".")
+    from_video = kind == "video" or ext not in ("mp3", "wav")
+    if from_video:
+        src = _asr_source_path(row["id"], ".mp3")
+        tick("asr", "extract", 8, "抽取音轨(视频 → mp3)…")
+        err = _extract_audio(path, src)
+        if err:
+            return {"error": "extract_failed", "hint": err}, 3
+    else:
+        src = _asr_source_path(row["id"], "." + ext)
+        src.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(path, src)
     tick("asr", "mimo", 15, "mimo 转写中(约 20 倍速)")
-    result = vasr.transcribe_file(path)          # AsrError 抛给上层分类
-    # 源音频拷进 make 自有语音目录(与素材库解耦: 素材删了不影响制作单)
-    src = _asr_source_path(row["id"], path.suffix.lower())
-    src.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copy2(path, src)
+    result = vasr.transcribe_file(src)          # AsrError 抛给上层分类
     tick("asr", "align", 55, "本地 whisper 句级对齐(首次自动装模型, 之后有缓存)")
     phrases, align_err, meta = _asr_pin(src, result["text"])
     current = make_get(row["id"])
@@ -2226,7 +2273,8 @@ def _run_asr(request: dict) -> tuple[dict, int]:
                         "transcript": result["text"],
                         "engine": str((config.load().get("asr") or {}).get("model") or ""),
                         "seconds": result.get("seconds"),
-                        "file_hash": _file_hash8(src), "src_ext": path.suffix.lower().lstrip("."),
+                        "file_hash": _file_hash8(src), "src_ext": "mp3",
+                        "original_ext": ext, "from_video": from_video,
                         "phrases": phrases, "align_ok": not align_err,
                         "match_rate": meta.get("match_rate")}
     current["script"] = None

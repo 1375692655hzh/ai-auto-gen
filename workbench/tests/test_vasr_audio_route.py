@@ -144,6 +144,40 @@ class AudioRouteTests(unittest.TestCase):
             self.assertEqual(vstudio.run_asr_cli(None), 4)
         self.assertEqual(json.loads(out.getvalue())["error"], "bad_make")
 
+    def test_extract_audio_command_and_errors(self):
+        """视频抽音轨: ffmpeg 解析(系统优先) + libmp3lame 命令行 + lame 缺失给安装指引。"""
+        from types import SimpleNamespace
+        src = self.tmp / "clip.mp4"
+        src.write_bytes(b"fake-mp4")
+        dest = self.tmp / "out.mp3"
+        calls = {}
+        def fake_run(argv, **kw):
+            calls["argv"] = argv
+            if "libmp3lame" in argv:
+                dest.write_bytes(b"mp3" * 1000)     # 模拟成功产物
+            return SimpleNamespace(returncode=0, stdout="", stderr="")
+        with (patch("shutil.which", return_value="C:/ffmpeg/ffmpeg.exe"),
+              patch.object(vstudio.subprocess, "run", side_effect=fake_run)):
+            self.assertEqual(vstudio._extract_audio(src, dest), "")
+        argv = calls["argv"]
+        self.assertEqual(argv[0], "C:/ffmpeg/ffmpeg.exe")
+        for flag in ("-vn", "-c:a", "libmp3lame", "-q:a", "2"):
+            self.assertIn(flag, argv)
+        self.assertIn(str(src), argv)
+        # lame 缺失 → 指引文案(不透传裸 stderr)
+        def lame_fail(argv, **kw):
+            return SimpleNamespace(returncode=1, stdout="",
+                                   stderr="Unknown encoder 'libmp3lame'")
+        with (patch("shutil.which", return_value="C:/ffmpeg/ffmpeg.exe"),
+              patch.object(vstudio.subprocess, "run", side_effect=lame_fail)):
+            err = vstudio._extract_audio(src, self.tmp / "out2.mp3")
+        self.assertIn("libmp3lame", err)
+        self.assertIn("完整版 ffmpeg", err)
+        # 无任何 ffmpeg → 指引(直接桩解析结果, 不 patch Path 方法)
+        with patch.object(vstudio, "_resolve_ffmpeg", return_value=""):
+            err2 = vstudio._extract_audio(src, self.tmp / "out3.mp3")
+        self.assertIn("ffmpeg", err2)
+
 
 if __name__ == "__main__":
     unittest.main()

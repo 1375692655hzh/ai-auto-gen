@@ -990,8 +990,13 @@ WB.pages.video = {
     async uploadAsrAudio(ev) {
       const file = ev.target.files && ev.target.files[0]; ev.target.value = '';
       if (!file || !this.curMake) return;
-      if (file.size > 30 * 1024 * 1024) { WB.toast('音频不能超过 30MB（约 30 分钟）'); return; }
-      if (!/\.(mp3|wav)$/i.test(file.name)) { WB.toast('音频路线只支持 mp3 / wav'); return; }
+      const isVideo = /\.(mp4|webm|m4a)$/i.test(file.name);
+      if (file.size > (isVideo ? 100 : 30) * 1024 * 1024) {
+        WB.toast((isVideo ? '视频' : '音频') + '不能超过 ' + (isVideo ? 100 : 30) + 'MB'); return;
+      }
+      if (!/\.(mp3|wav|mp4|webm|m4a)$/i.test(file.name)) {
+        WB.toast('支持 mp3/wav 音频，或 mp4/webm/m4a 视频（视频自动抽取音轨）'); return;
+      }
       this.asrErr = '';
       try {
         const r = await fetch('/wb-api/video-assets?name=' + encodeURIComponent(file.name), { method: 'PUT', body: file });
@@ -1882,14 +1887,14 @@ WB.pages.video = {
               <template v-if="isAudioRoute">
                 <div class="form-row" style="margin-top:10px">
                   <label>语音稿</label>
-                  <input type="file" accept=".mp3,.wav" ref="asrFile" style="display:none" @change="uploadAsrAudio">
-                  <button class="btn" type="button" :disabled="curMake.narration.locked" @click="$refs.asrFile.click()">{{ curMake.audio && curMake.audio.asset_id ? '换一段音频' : '选择音频文件（mp3/wav ≤30MB）' }}</button>
-                  <span v-if="curMake.audio && curMake.audio.asset_id" class="muted">已上传{{ curMake.audio.seconds ? ' · 约 ' + Math.round(curMake.audio.seconds) + ' 秒' : '' }}</span>
+                  <input type="file" accept=".mp3,.wav,.mp4,.webm,.m4a" ref="asrFile" style="display:none" @change="uploadAsrAudio">
+                  <button class="btn" type="button" :disabled="curMake.narration.locked" @click="$refs.asrFile.click()">{{ curMake.audio && curMake.audio.asset_id ? '换一个文件' : '选择音频/视频文件（视频自动抽取音轨）' }}</button>
+                  <span v-if="curMake.audio && curMake.audio.asset_id" class="muted">已上传{{ curMake.audio.seconds ? ' · 约 ' + Math.round(curMake.audio.seconds) + ' 秒' : '' }}{{ curMake.audio.from_video ? ' · 已从视频抽取音轨' : '' }}</span>
                 </div>
                 <audio v-if="curMake.audio && curMake.audio.asset_id" ref="asrAudio"
                        :src="'/wb-api/video-assets/' + curMake.audio.asset_id + '/file'"
                        controls preload="none" style="width:100%;height:36px;margin-top:6px"></audio>
-                <p class="muted" style="margin-top:8px">上传后到第 2 步「提取文字稿」。更换音频会清空转写/脚本进度。</p>
+                <p class="muted" style="margin-top:8px">上传后到第 2 步「提取文字稿」。上传视频会自动抽取音轨（需要本机 ffmpeg）。更换文件会清空转写/脚本进度。</p>
               </template>
             </div>
             <div class="card" v-if="makeSeen[2]" v-show="makeStep===2">
