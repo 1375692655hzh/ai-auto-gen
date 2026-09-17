@@ -246,14 +246,21 @@ def run(dry_run: bool = False, export: bool = True) -> dict:
         rep["failures"].append("轮末预算耗尽, translate 跳过(下轮补)")
     if time.time() < tail_deadline:
         try:
+            from sources import feishu
+            rep["feishu"] = feishu.run_digest(rep["started_at"])
+        except Exception as ex:
+            rep["failures"].append(f"feishu({type(ex).__name__}: {str(ex)[:60]})")
+    # 顺序裁决(2026-09-16): translate 先于 llm_tag——用户对翻译有 15min 时效承诺,
+    # 标签无时效承诺且有规则打标兜底; 免费池经代理后单批变慢, 后者会吃光轮末预算。
+    # (2026-09-17) feishu 摘要插在 translate 后(译文就绪) llm_tag 前(标签可等)。
+    if time.time() < tail_deadline:
+        try:
             from sources import llm_tag
             rep["llm_tag"] = llm_tag.run(rep["started_at"])
         except Exception as ex:
             rep["failures"].append(f"llm_tag({type(ex).__name__}: {str(ex)[:60]})")
     else:
         rep["failures"].append("轮末预算耗尽, llm_tag 跳过(规则打标已兜底, 下轮补)")
-    # 顺序裁决(2026-09-16): translate 先于 llm_tag——用户对翻译有 15min 时效承诺,
-    # 标签无时效承诺且有规则打标兜底; 免费池经代理后单批变慢, 后者会吃光轮末预算。
     rep["elapsed_s"] = int(time.time() - started)        # 全程耗时(含 LLM 收尾段)
     ledger["round_elapsed_s"] = rep["elapsed_s"]
     ledger["round_finished_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")

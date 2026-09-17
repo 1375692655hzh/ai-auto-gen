@@ -418,6 +418,18 @@ def sources_cmd(args) -> int:
         return run(host=args.bind or args.host, port=args.port)
     if args.sub == "enable":
         return sources_enable_cmd(args.sid, args.state, args.json)
+    if args.sub == "feishu":
+        from sources import feishu as feishu_mod
+        if args.action == "test":
+            ok, err = feishu_mod.send_text(feishu_mod._conf(), "数据站飞书链路测试 ✅")
+            print("sent" if ok else f"fail: {err}")
+            return EXIT_OK if ok else EXIT_FAIL
+        if args.action == "digest":
+            rep = feishu_mod.run_digest(
+                __import__("datetime").datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+            print(json.dumps(rep, ensure_ascii=False, indent=1))
+            return EXIT_OK
+        return feishu_mod.watch_loop()
     return EXIT_FAIL
 
 
@@ -775,6 +787,9 @@ def main() -> int:
     ps_en.add_argument("state", nargs="?", choices=["on", "off"], default=None,
                        help="on/off, 缺省=翻转当前状态")
     ps_en.add_argument("--json", action="store_true")
+    ps_fs = ssub.add_parser("feishu", help="飞书披露(15min X热点摘要 / 1min 账号池监控)")
+    ps_fs.add_argument("action", choices=["digest", "watch", "test"],
+                       help="digest=手动跑一轮摘要; watch=常驻监控循环; test=发测试消息")
 
     p_fl = sub.add_parser("flows", help="生成工作流(板块二)")
     fsub = p_fl.add_subparsers(dest="sub", required=True)

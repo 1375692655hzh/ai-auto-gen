@@ -1,0 +1,20 @@
+# aag-xwatch.service — 飞书 X 账号池 1min 监控(2026-09-17)
+# 常驻循环: FxTwitter v2 时间线逐账号对比 last_seen, 有更新即发飞书群。
+# 账号池/凭证 = @REPO@/global-news-sources/config.local.yaml 的 sources.feishu 段
+# (watch.handles 改完即生效, 每轮循环重读; 凭证不进 git)。
+[Unit]
+Description=aag feishu X watch (1min pool monitor)
+After=network-online.target aag-zen-bridge@jp.service aag-zen-bridge@hk.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=@REPO@
+Environment=PYTHONUTF8=1
+ExecStart=@REPO@/.venv/bin/python cli.py sources feishu watch
+Restart=always
+RestartSec=15
+
+[Install]
+WantedBy=multi-user.target
