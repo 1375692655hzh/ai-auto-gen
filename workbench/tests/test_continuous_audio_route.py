@@ -204,6 +204,27 @@ class ContinuousMasterTests(unittest.TestCase):
         vstudio._make_save(srow)
         self.assertEqual(vstudio._audio_gate_missing(srow), ["b1"])   # voice_missing 语义原样
 
+    def test_audio_bind_needs_route_in_same_payload(self):
+        """0917 分发用户案回归: 前端历史上传不带 route, 服务端对 route!=audio 的单
+        静默丢 audio → 用户"传完没反应"。规则=route 与 audio 必须同载荷; 绑定保留 asset_name。"""
+        aid = _mk_asset("mp3", b"FAKE-MP3-" + bytes(range(32)))
+        # 新单(默认路线)只发 audio → 被丢弃(契约: 音频绑定只属于音频路线)
+        row = vstudio.make_upsert({"title": "路线未带"})
+        self.assertIsNone(vstudio.make_upsert({"id": row["id"], "audio": {"asset_id": aid}}).get("audio"))
+        # route+audio 同载荷 → 绑定成功且 asset_name 回显
+        row2 = vstudio.make_upsert({"id": row["id"], "route": "audio",
+                                    "audio": {"asset_id": aid, "asset_name": "晨会录音.mp3"}})
+        self.assertEqual(row2["route"], "audio")
+        self.assertEqual(row2["audio"]["asset_id"], aid)
+        self.assertEqual(row2["audio"]["asset_name"], "晨会录音.mp3")
+
+    def test_video_env_summary_reports_ffmpeg_flag(self):
+        """presets.video_env 必须带 ffmpeg_ok: 前端靠它在第 1 步拦下无 ffmpeg 的视频上传。"""
+        env = vstudio.video_env_summary()
+        self.assertIn("ok", env)
+        self.assertIn("err", env)
+        self.assertIsInstance(env["ffmpeg_ok"], bool)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -32,7 +32,7 @@ WB.pages.video = {
       makes: [], cur: null, blank: null,   /* blank=内存态空白新稿(不落库, 首次编辑才建行) */
       presets: null, narTab: 'a', narBrief: '', narDraftId: '', importId: '',
       makeRoute: 'script',   /* 制作路线: script=文案路线 audio=音频路线(上传录音→转写→切原声) */
-      asrErr: '', asrBusy: false, asrProgress: null,
+      asrErr: '', asrBusy: false, asrProgress: null, asrUp: null, asrUpErr: '',
       refText: '', refName: '', refDirty: false,   /* 参考稿(音频路线可选校准稿): 粘贴/文件双入口, 独立防抖保存 */
       makeStep: 1,           /* 生成卡内部步骤子页(0913a): 1项目名称/2口播/3脚本/4音频/5视频 */
       makeSeen: { 1: true }, /* 步骤懒挂载(0913c): 首次访问才建DOM(47拍分镜+47audio全量构建=载入慢的根因), 之后v-show保活 */
@@ -111,7 +111,11 @@ WB.pages.video = {
     ttsProviders() { return ((this.presets && this.presets.tts && this.presets.tts.providers) || []).filter((p) => p.enabled && (p.voices || []).length); },
     videoEnvWarn() {
       const e = this.presets && this.presets.video_env;
-      return (e && e.ok === false) ? (e.err || '视频功能环境缺失（Node/板块二目录/npm 依赖）') : '';
+      if (!e) return '';
+      const parts = [];
+      if (e.ok === false) parts.push(e.err || '视频功能环境缺失（Node/板块二目录/npm 依赖）');
+      if (e.ffmpeg_ok === false) parts.push('未检测到 ffmpeg：音频路线上传「视频」抽音轨需要它——请安装完整版 ffmpeg 并加入 PATH，或直接上传 mp3/wav 音频');
+      return parts.join('；');
     },
     isAudioRoute() { return this.makeRoute === 'audio'; },
     asrPhrases() { return ((this.curMake && this.curMake.audio) || {}).phrases || []; },
@@ -194,6 +198,12 @@ WB.pages.video = {
     /* 带参工具必须住 methods: 误放 computed 会被当无参 getter, 取值即炸(0913f 双列表
        全 0 事故根因)。Vue computed 只收无参 getter。 */
     goMakeStep(n) { this.makeSeen[n] = true; this.makeStep = n; },
+    nextMakeStep() {
+      /* 前进只提示不强拦: 各步自带的空态文案会接住 */
+      if (this.isAudioRoute && this.makeStep === 1 && !(this.curMake && this.curMake.audio && this.curMake.audio.asset_id))
+        WB.toast('提示：第 1 步还没上传语音稿——第 2 步转写需要它');
+      this.goMakeStep(Math.min(5, this.makeStep + 1));
+    },
     isHistoryMake(m) { return m.status === 'built' || !!m.last_build; },
     histDur(m) { const v = (this.videos || []).find((x) => x.id === m.project_id); return v && v.verify_duration_s ? this.fmtDur(v.verify_duration_s) : ''; },
     resolveMakeMethod(v) {
@@ -926,7 +936,7 @@ WB.pages.video = {
       this.newBlank();
     },
     async selectMake(id) {
-      if (this.makeActionBusy) return;
+      if (this.makeActionBusy) { WB.toast('有任务进行中，请稍候再切换草稿'); return; }
       if (this.cur === id) { await this.unloadMake(); return; }
       try {
         if (this.cur) await this.flushMake(this.cur);
@@ -1002,23 +1012,48 @@ WB.pages.video = {
     async uploadAsrAudio(ev) {
       const file = ev.target.files && ev.target.files[0]; ev.target.value = '';
       if (!file || !this.curMake) return;
-      const isVideo = /\.(mp4|webm|m4a)$/i.test(file.name);
+      const isVideo = /\.(mp4|webm|mov|mkv|m4a)$/i.test(file.name);
       if (file.size > (isVideo ? 100 : 30) * 1024 * 1024) {
         WB.toast((isVideo ? '视频' : '音频') + '不能超过 ' + (isVideo ? 100 : 30) + 'MB'); return;
       }
-      if (!/\.(mp3|wav|mp4|webm|m4a)$/i.test(file.name)) {
-        WB.toast('支持 mp3/wav 音频，或 mp4/webm/m4a 视频（视频自动抽取音轨）'); return;
+      if (!/\.(mp3|wav|mp4|webm|mov|mkv|m4a)$/i.test(file.name)) {
+        WB.toast('支持 mp3/wav 音频，或 mp4/webm/mov/mkv/m4a 视频（视频自动抽取音轨）'); return;
       }
-      this.asrErr = '';
+      /* 裸机无 ffmpeg 时视频抽不了音轨——选文件当场拦下, 不等用户传完上百 MB 才在第 2 步报错 */
+      if (isVideo && this.presets && this.presets.video_env && this.presets.video_env.ffmpeg_ok === false) {
+        this.asrUpErr = '本机未检测到 ffmpeg——视频文件抽不出音轨。请安装完整版 ffmpeg 并加入 PATH 后重试，或改传 mp3/wav 音频文件';
+        WB.toast('缺 ffmpeg：请改传 mp3/wav，或先安装 ffmpeg'); return;
+      }
+      this.asrUpErr = '';
+      /* 空白稿必须先落库: 否则 this.cur=null, POST 建出一张无路线孤儿单且音频绑定被服务端丢弃 */
+      await this.materializeBlank();
+      if (!this.cur) { this.asrUpErr = '制作单尚未就绪，请稍候重试'; return; }
+      const busyKey = this.cur + ':asr';
+      this.assetUploadBusy[busyKey] = true;
+      this.asrUp = { name: file.name, size: file.size, pct: 0 };
       try {
-        const r = await fetch('/wb-api/video-assets?name=' + encodeURIComponent(file.name), { method: 'PUT', body: file });
-        const d = await r.json();
-        if (!r.ok) throw (d || {});
-        const aid = d.asset.asset_id;
-        await WB.api.post('/video-makes', { id: this.cur, audio: { asset_id: aid } });
+        const aid = await new Promise((resolve, reject) => {
+          const x = new XMLHttpRequest();   /* fetch 无上传进度, 大文件必须 XHR 才看得见百分比 */
+          x.open('PUT', '/wb-api/video-assets?name=' + encodeURIComponent(file.name));
+          x.upload.onprogress = (e) => { if (e.lengthComputable) this.asrUp = { ...this.asrUp, pct: Math.round(e.loaded / e.total * 100) }; };
+          x.onload = () => { let d = null; try { d = JSON.parse(x.responseText); } catch (err) { /* 空体 */ }
+            if (x.status >= 200 && x.status < 300 && d && d.asset) resolve(d.asset.asset_id);
+            else reject(d || { error: '上传失败 HTTP ' + x.status }); };
+          x.onerror = () => reject({ error: '上传失败（网络中断?）' });
+          x.send(file);
+        });
+        const m = this.curMake;
+        /* route 必须与 audio 同载荷上行: 服务端只对 route=audio 的制作单接受音频绑定 */
+        const patch = { id: this.cur, route: 'audio', audio: { asset_id: aid, asset_name: file.name } };
+        const t = String(m.title || '').trim();
+        if (!t || t === '未命名视频')   /* 项目名默认取音频文件名(用户已命名则不动) */
+          patch.title = (file.name.replace(/\.[^.]+$/, '').slice(0, 60)) || '未命名视频';
+        await WB.api.post('/video-makes', patch);
         await this.fetchMake(this.cur);
-        WB.toast('音频已上传，点「提取文字稿」开始转写');
-      } catch (e) { this.asrErr = this.makeError(e); }
+        this.makeRoute = 'audio';
+        WB.toast('✅ 上传完成：' + file.name + '（' + (file.size / 1048576).toFixed(1) + ' MB）——点「下一步」提取文字稿');
+      } catch (e) { this.asrUpErr = this.makeError(e); }
+      finally { this.assetUploadBusy[busyKey] = false; this.asrUp = null; }
     },
     /* ── 参考稿(音频路线可选校准, 2026-09-17): 粘贴/文件双入口, 独立防抖保存 ── */
     saveRefScript() {
@@ -1139,7 +1174,7 @@ WB.pages.video = {
       const p = { id: m.id, title: m.title, route: m.route || this.makeRoute,
                   video: m.video, voice: { profile_id: m.voice.profile_id, voice: m.voice.voice } };
       if ((m.route || this.makeRoute) === 'audio' && m.audio && m.audio.asset_id && !m.narration.locked)
-        p.audio = { asset_id: m.audio.asset_id };   /* 换音频才上行; 转写产物等由服务端任务写 */
+        p.audio = { asset_id: m.audio.asset_id, asset_name: m.audio.asset_name || '' };   /* 换音频才上行(带文件名回显); 转写产物等由服务端任务写 */
       if (!m.narration.locked) p.narration = { text: m.narration.text, ref_text: m.narration.ref_text, source: m.narration.source, style_id: m.narration.style_id,
         llm_source: m.narration.llm_source, length_s: m.narration.length_s || 0, fidelity: m.narration.fidelity };  // 0913g: 三字段此前两头都丢, 保存回路把生成模型/片长/改写幅度顶回旧值
       if (!m.script_meta.locked && m.script) p.script = m.script;
@@ -1977,10 +2012,12 @@ WB.pages.video = {
               <template v-if="isAudioRoute">
                 <div class="form-row" style="margin-top:10px">
                   <label>语音稿</label>
-                  <input type="file" accept=".mp3,.wav,.mp4,.webm,.m4a" ref="asrFile" style="display:none" @change="uploadAsrAudio">
-                  <button class="btn" type="button" :disabled="curMake.narration.locked" @click="$refs.asrFile.click()">{{ curMake.audio && curMake.audio.asset_id ? '换一个文件' : '选择音频/视频文件（视频自动抽取音轨）' }}</button>
-                  <span v-if="curMake.audio && curMake.audio.asset_id" class="muted">已上传{{ curMake.audio.seconds ? ' · 约 ' + Math.round(curMake.audio.seconds) + ' 秒' : '' }}{{ curMake.audio.from_video ? ' · 已从视频抽取音轨' : '' }}</span>
+                  <input type="file" accept=".mp3,.wav,.mp4,.webm,.mov,.mkv,.m4a" ref="asrFile" style="display:none" @change="uploadAsrAudio">
+                  <button class="btn" type="button" :disabled="curMake.narration.locked || !!asrUp" @click="$refs.asrFile.click()">{{ asrUp ? ('上传中 ' + asrUp.pct + '%…') : (curMake.audio && curMake.audio.asset_id ? '换一个文件' : '选择音频/视频文件（视频自动抽取音轨）') }}</button>
+                  <span v-if="asrUp" class="muted">{{ asrUp.name }} · {{ (asrUp.size / 1048576).toFixed(1) }} MB</span>
+                  <span v-else-if="curMake.audio && curMake.audio.asset_id" class="muted" style="color:var(--green)">✅ 已上传{{ curMake.audio.asset_name ? '：' + curMake.audio.asset_name : '' }}{{ curMake.audio.seconds ? ' · 约 ' + Math.round(curMake.audio.seconds) + ' 秒' : '' }}{{ curMake.audio.from_video ? ' · 已从视频抽取音轨' : '' }}</span>
                 </div>
+                <p v-if="asrUpErr" class="err-text" style="margin:6px 0 0">{{ asrUpErr }}</p>
                 <audio v-if="curMake.audio && curMake.audio.asset_id" ref="asrAudio"
                        :src="'/wb-api/video-assets/' + curMake.audio.asset_id + '/file'"
                        controls preload="none" style="width:100%;height:36px;margin-top:6px"></audio>
@@ -1998,7 +2035,7 @@ WB.pages.video = {
                   未配置语音识别(mimo ASR) —— 到 <a href="#/settings">设置 → 视频 → 语音识别</a> 填写接口地址与 API Key 后才能转写
                   <span class="muted">（小米 mimo 开放平台注册, 与 TTS 同一把 key 通用; 模型/语言也可在设置页自选）</span>
                 </div>
-                <p class="muted" style="margin-top:8px">上传后到第 2 步「提取文字稿」。上传视频会自动抽取音轨（需要本机 ffmpeg）。更换文件会清空转写/脚本进度。</p>
+                <p class="muted" style="margin-top:8px">上传后点下方「下一步」到第 2 步提取文字稿。上传视频会自动抽取音轨（需要本机 ffmpeg，没有就改传 mp3/wav）。更换文件会清空转写/脚本进度。</p>
               </template>
             </div>
             <div class="card" v-if="makeSeen[2]" v-show="makeStep===2">
@@ -2287,6 +2324,12 @@ WB.pages.video = {
               </template>
               <div v-else class="muted">本项目尚未出片 —— 第五步点「开始制作」后，成片会出现在这里。</div>
             </div>
+            <div class="form-row" style="margin-top:12px;justify-content:space-between;align-items:center">
+              <button class="btn" type="button" v-if="makeStep > 1" @click="goMakeStep(makeStep - 1)">← 上一步</button>
+              <span v-else></span>
+              <button class="btn primary" type="button" v-if="makeStep < 5" @click="nextMakeStep()">下一步：{{ (makeSteps.find(s => s.n === makeStep + 1) || {}).label || '' }} →</button>
+              <span v-else class="muted" style="font-size:12px">最后一步——点左侧步骤条可回看任意环节</span>
+            </div>
               </div>
             </div>
             </div>
@@ -2298,6 +2341,7 @@ WB.pages.video = {
             <div v-for="m in draftMakes" :key="m.id" class="list-item" :class="{sel:cur===m.id}"
                  style="padding:7px 10px;cursor:pointer" title="点击载入该草稿" @click="selectMake(m.id)">
               <div class="t" style="display:flex;align-items:center;gap:6px">
+                <span v-if="m.route==='audio'" title="音频路线" style="flex-shrink:0">🎙️</span>
                 <span :title="m.title" style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ m.title }}</span>
                 <span style="display:inline-flex;gap:3px;flex-shrink:0">
                   <span v-for="stage in [1,2,3,4]" :key="stage" :title="['口播','脚本','语音','视频'][stage-1]+'：'+segBadge(stage,m).text" :style="{backgroundColor:segColor(stage,m)}" style="display:inline-block;width:7px;height:7px;border-radius:50%"></span></span></div>
@@ -2318,6 +2362,7 @@ WB.pages.video = {
             <div v-for="m in historyMakes" :key="m.id" class="list-item" :class="{sel:cur===m.id}"
                  style="padding:7px 10px;cursor:pointer" title="点击载入——直达成片页看视频，五步流程可自行翻看" @click="selectMake(m.id)">
               <div class="t" style="display:flex;align-items:center;gap:6px">
+                <span v-if="m.route==='audio'" title="音频路线" style="flex-shrink:0">🎙️</span>
                 <span :title="m.title" style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ m.title }}</span>
                 <span class="badge green" style="flex-shrink:0">已出片</span>
                 <span v-if="histDur(m)" class="muted" style="font-size:11px;flex-shrink:0">{{ histDur(m) }}</span></div>

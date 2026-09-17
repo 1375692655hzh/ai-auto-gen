@@ -1314,7 +1314,8 @@ def make_upsert(payload: dict) -> dict | None:
         aid = str(payload["audio"].get("asset_id") or "")
         prev = (row.get("audio") or {}).get("asset_id") or ""
         if aid and aid != prev and not row["narration"]["locked"]:
-            row["audio"] = {"asset_id": aid}
+            row["audio"] = {"asset_id": aid,
+                            "asset_name": str(payload["audio"].get("asset_name") or "")[:200]}
             row["narration"].update(text="", source="", locked=False, locked_at=None, hash="")
             row["script"] = None
             row["script_meta"] = {"locked": False, "locked_at": None, "hash": "",
@@ -1990,9 +1991,12 @@ def node_env_check(script: str = "") -> tuple[bool, str]:
 
 
 def video_env_summary() -> dict:
-    """presets 下发用：node/板块二脚本/npm 依赖三合一，err 直接展示给用户。"""
+    """presets 下发用：node/板块二脚本/npm 依赖三合一 + ffmpeg 探测, err 直接展示给用户。
+
+    ffmpeg_ok=False 时前端在音频路线第 1 步当场拦截视频文件上传(抽音轨需要 ffmpeg),
+    不让用户传完上百 MB 才在第 2 步转写时报错(0917 分发用户实测案)。"""
     ok, err = node_env_check("tts-scenes.mjs")
-    return {"ok": ok, "err": err}
+    return {"ok": ok, "err": err, "ffmpeg_ok": bool(_resolve_ffmpeg())}
 
 
 def _tts_node(scenes: list, out_dir: Path, provider: dict, voice: str, progress: bool = False):
