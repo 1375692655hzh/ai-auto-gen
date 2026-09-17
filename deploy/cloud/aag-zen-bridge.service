@@ -1,0 +1,23 @@
+# aag-zen-bridge.service — zen 免费层官方客户端桥(2026-09-17)
+# zen 门禁收紧后, omniroute 执行器被拒; 本服务用官方 opencode CLI 身份+真 key+
+# HTTPS_PROXY(住宅代理=独立配额桶) 承接站端/看板全部免费模型调用。
+[Unit]
+Description=aag zen bridge (opencode serve + OpenAI-compat adapter)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=@REPO@
+Environment=PYTHONUTF8=1
+Environment=ZEN_BRIDGE_PORT=20131
+Environment=ZEN_SERVE_PORT=4096
+# 住宅代理出口(配额按 IP 计): 日本静态住宅 IP(2026-09-16 接入, 实测通)
+Environment=HTTPS_PROXY=http://stcktvSAPvsoE:stc1sqFMOwpNX@103.27.82.240:7085
+ExecStart=@REPO@/.venv/bin/python deploy/cloud/zen_bridge.py
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
