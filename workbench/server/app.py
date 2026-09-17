@@ -900,7 +900,7 @@ def create_app(bind_host: str = "127.0.0.1") -> FastAPI:
         if not row or (row.get("route") or "script") != "audio":
             return JSONResponse({"error": "make_not_found" if not row else "bad_route"}, status_code=400)
         if not (row.get("audio") or {}).get("asset_id") or not vstudio.asset_find(row["audio"]["asset_id"])[0]:
-            return JSONResponse({"error": "audio_missing", "hint": "先上传语音稿(mp3/wav)"}, status_code=400)
+            return JSONResponse({"error": "audio_missing", "hint": "先上传音频或视频(mp3/wav/mp4/webm/mov/mkv/m4a)"}, status_code=400)
         if row["narration"]["locked"]:
             return JSONResponse({"error": "narration_locked", "hint": "先解锁文稿再重新转写"}, status_code=400)
         return start_video_job("asr", {"make_id": mid}, "asr-audio")
@@ -967,8 +967,9 @@ def create_app(bind_host: str = "127.0.0.1") -> FastAPI:
         if not path:
             return JSONResponse({"error": "not_found"}, status_code=404)
         mime = {"png": "image/png", "jpg": "image/jpeg", "jpeg": "image/jpeg", "webp": "image/webp",
-                "mp4": "video/mp4", "webm": "video/webm", "mp3": "audio/mpeg",
-                "wav": "audio/wav", "m4a": "audio/mp4"}[path.suffix.lower().lstrip(".")]
+                "mp4": "video/mp4", "webm": "video/webm", "mov": "video/quicktime",
+                "mkv": "video/x-matroska",
+                "mp3": "audio/mpeg", "wav": "audio/wav", "m4a": "audio/mp4"}[path.suffix.lower().lstrip(".")]
         return FileResponse(str(path), media_type=mime)
 
     @app.delete("/wb-api/video-assets/{asset_id}")
@@ -1381,8 +1382,16 @@ def create_app(bind_host: str = "127.0.0.1") -> FastAPI:
             mode = body.get("mode") or "build"
             if mode not in ("build", "estimate", "keyframes", "sample"):
                 mode = "build"
+            audio_route = (row.get("route") or "script") == "audio"
+            if audio_route and mode == "estimate":
+                # CONT 分支 build.mjs 一进就 exit 1(时长由原音决定)——别让用户空跑分钟级任务槽
+                return JSONResponse({"error": "bad_mode",
+                                     "hint": "音频路线不支持无声预览——成片时长由原音决定；请用「正式成片」或「静帧预览」"}, status_code=400)
             missing = vstudio._audio_gate_missing(row)
             if mode != "estimate" and missing:
+                if audio_route:
+                    return JSONResponse({"error": "master_missing",
+                                         "hint": "缺少主轨/画面时间轴：" + "、".join(missing) + "——回到第 4 步重新对齐"}, status_code=400)
                 return JSONResponse({"error": "voice_missing", "hint": "缺少语音：" + "、".join(missing)}, status_code=400)
             project_id = vstudio._id("wb")
             result = start_video_job("build", {"make_id": row["id"], "project_id": project_id,

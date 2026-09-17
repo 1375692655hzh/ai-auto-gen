@@ -129,7 +129,7 @@ WB.pages.video = {
           { n: 1, label: '项目与音频', badge: hasAudio && String(m.title || '').trim() && m.title !== '未命名视频' ? { cls: 'green', text: '就绪' } : hasAudio ? { cls: 'blue', text: '待命名' } : { cls: '', text: '待上传' } },
           { n: 2, label: '转写与校对', badge: this.segBadge(1) },
           { n: 3, label: '脚本生成', badge: this.segBadge(2) },
-          { n: 4, label: '切原声', badge: this.segBadge(3) },
+          { n: 4, label: '对齐画面', badge: this.segBadge(3) },
           { n: 5, label: '视频生成', badge: this.segBadge(4) },
         ];
       }
@@ -184,6 +184,10 @@ WB.pages.video = {
 
   },
   watch: {
+    makeRoute(r) {
+      /* 音频路线不支持 无声预览/带音样片(时长由原音决定, build.mjs CONT 分支直接拒) */
+      if (r === 'audio' && !['build', 'keyframes'].includes(this.buildMode)) this.buildMode = 'build';
+    },
     /* 参考稿回显: 服务端制作单引用变化(切换/转写/换绑)时同步本地编辑态;
        输入 refText 不改 curMake 引用, 不回环 */
     curMake(m) {
@@ -620,7 +624,7 @@ WB.pages.video = {
               /* 转写成功但对齐降级(典型=裸机缺 Node): 环境指引必须持续可见, 不能只闪一下 toast */
               this.asrNotice = job.result.hint;
               WB.toast('转写完成，但' + job.result.hint.split('——')[0]);
-            } else WB.toast(kind === 'voice' ? (this.isAudioRoute ? '原声已切好' : '语音已生成')
+            } else WB.toast(kind === 'voice' ? (this.isAudioRoute ? '画面对齐完成' : '语音已生成')
                      : kind === 'asr' ? '转写完成，请校对后定稿' : task === 'narration' ? '口播稿已生成' : '分镜脚本已生成');
           } else {
             WB.toast('独立生成页已下线，产物可在脚本仓库查看');
@@ -920,6 +924,7 @@ WB.pages.video = {
         try {
           const row = this.putMake((await WB.api.post('/video-makes', {})).make);
           row.title = blank.title;
+          row.route = blank.route || this.makeRoute;   /* 路线随建行落库, 否则刷新后音频单变回文案单 */
           row.narration = { ...row.narration, ...JSON.parse(JSON.stringify(blank.narration)) };
           row.voice = { ...row.voice, ...JSON.parse(JSON.stringify(blank.voice)) };
           row.video = { ...row.video, ...JSON.parse(JSON.stringify(blank.video)) };
@@ -950,7 +955,7 @@ WB.pages.video = {
         this.cur = m.id; this.blank = null; this.narTab = m.narration.source === 'manual' ? 'b' : 'a';
         this.makeRoute = m.route || 'script';
         this.narBrief = ''; this.narDraftId = ''; this.importId = ''; this.beatCursors = {};
-        this.narErr = ''; this.scriptErr = ''; this.voiceErr = ''; this.asrErr = ''; this.asrNotice = ''; this.asrNotice = ''; this.setMakeDefaults(m);
+        this.narErr = ''; this.scriptErr = ''; this.voiceErr = ''; this.asrErr = ''; this.asrNotice = ''; this.setMakeDefaults(m);
       } catch (e) { this.makeErr = this.makeError(e); }
     },
     setMakeDefaults(m) {
@@ -1016,17 +1021,23 @@ WB.pages.video = {
     async uploadAsrAudio(ev) {
       const file = ev.target.files && ev.target.files[0]; ev.target.value = '';
       if (!file || !this.curMake) return;
-      const isVideo = /\.(mp4|webm|mov|mkv|m4a)$/i.test(file.name);
-      if (file.size > (isVideo ? 100 : 30) * 1024 * 1024) {
-        WB.toast((isVideo ? '视频' : '音频') + '不能超过 ' + (isVideo ? 100 : 30) + 'MB'); return;
+      const needsFfmpeg = /\.(mp4|webm|mov|mkv|m4a)$/i.test(file.name);   /* m4a 转写也要抽 mp3 */
+      const sizeCap = /\.(mp4|webm|mov|mkv)$/i.test(file.name) ? 100 : 30; /* m4a 服务端按 audio 30MB */
+      if (file.size > sizeCap * 1024 * 1024) {
+        WB.toast((needsFfmpeg ? '视频' : '音频') + '不能超过 ' + sizeCap + 'MB'); return;
       }
       if (!/\.(mp3|wav|mp4|webm|mov|mkv|m4a)$/i.test(file.name)) {
         WB.toast('支持 mp3/wav 音频，或 mp4/webm/mov/mkv/m4a 视频（视频自动抽取音轨）'); return;
       }
-      /* 裸机无 ffmpeg 时视频抽不了音轨——选文件当场拦下, 不等用户传完上百 MB 才在第 2 步报错 */
-      if (isVideo && this.presets && this.presets.video_env && this.presets.video_env.ffmpeg_ok === false) {
-        this.asrUpErr = '本机未检测到 ffmpeg——视频文件抽不出音轨。请安装完整版 ffmpeg 并加入 PATH 后重试，或改传 mp3/wav 音频文件';
-        WB.toast('缺 ffmpeg：请改传 mp3/wav，或先安装 ffmpeg'); return;
+      /* 裸机无 ffmpeg: 视频/m4a 抽不了音轨、长音频(>7MB)压不了分段——选文件当场拦下 */
+      const env = (this.presets && this.presets.video_env) || {};
+      if (needsFfmpeg && env.ffmpeg_ok === false) {
+        this.asrUpErr = '本机未检测到 ffmpeg——视频/m4a 抽不出音轨。请安装完整版 ffmpeg 并加入 PATH 后重试，或改传 mp3/wav 音频文件（7MB 以内）';
+        WB.toast('缺 ffmpeg：请改传 7MB 内的 mp3/wav，或先安装 ffmpeg'); return;
+      }
+      if (!needsFfmpeg && file.size > 7 * 1024 * 1024 && env.ffmpeg_ok === false) {
+        this.asrUpErr = '超过 7MB 的音频在无 ffmpeg 的机器上无法压缩/分段转写——请安装 ffmpeg，或改传 7MB 以内的音频';
+        WB.toast('缺 ffmpeg：长音频转写需要它'); return;
       }
       this.asrUpErr = '';
       /* 空白稿必须先落库: 否则 this.cur=null, POST 建出一张无路线孤儿单且音频绑定被服务端丢弃 */
@@ -1047,6 +1058,11 @@ WB.pages.video = {
           x.send(file);
         });
         const m = this.curMake;
+        /* 换绑前丢弃防抖中的旧载荷: 带旧 asset_id 的 payload 迟到会被服务端当换绑,
+           把转写/脚本进度全清掉(0917 cursor 复审 P1) */
+        clearTimeout(this.saveTimers[this.cur]);
+        delete this.savePending[this.cur];
+        this.saveVersions[this.cur] = (this.saveVersions[this.cur] || 0) + 1;
         /* route 必须与 audio 同载荷上行: 服务端只对 route=audio 的制作单接受音频绑定 */
         const patch = { id: this.cur, route: 'audio', audio: { asset_id: aid, asset_name: file.name } };
         const t = String(m.title || '').trim();
@@ -1234,10 +1250,11 @@ WB.pages.video = {
       if (!m) return badge('', '未开始');
       const beats = (m.script || {}).beats || [], items = (m.voice || {}).items || {};
       if ((m.route || 'script') === 'audio' && stage === 3) {
-        /* 0917 原音连续: 第4步=画面时间轴对齐(不切音频), 就绪信号=audio.timeline */
-        const tl = (m.audio || {}).timeline;
-        return m.script_stale || (m.voice_bad || []).length ? badge('yellow', '待刷新')
-          : tl && tl.beats === beats.length ? badge('green', '已对齐') : badge('', '未对齐');
+        /* 0917 原音连续: 第4步=画面时间轴对齐(不切音频); stale 看服务端 timeline_current
+           (文稿哈希+beat id 序列都比对), 不再只数 beats 数量 */
+        const a = m.audio || {}, tl = a.timeline;
+        const stale = m.script_stale || (tl && a.timeline_current === false);
+        return stale ? badge('yellow', '待刷新') : tl && tl.beats === beats.length ? badge('green', '已对齐') : badge('', '未对齐');
       }
       const covered = beats.length && beats.every((b) => items[b.id]);
       if (stage === 1) return m.narration.locked ? badge('green', '已定稿') : m.narration.text || m.narration.ref_text ? badge('blue', '编辑中') : badge('', '未开始');
@@ -1341,8 +1358,18 @@ WB.pages.video = {
     async refreshMakeJob(job) {
       await Promise.all([this.loadMakes(), this.loadVideos()]);
       const id = (job.request || {}).make_id || (job.result || {}).make_id;
-      if (id && !this.savePending[id] && this.saveState[id] !== 'saving') {
-        try { await this.fetchMake(id); } catch (e) { this.makeErr = this.makeError(e); }
+      if (id && this.saveState[id] !== 'saving') {
+        const pending = this.savePending[id];
+        const pendNar = String((((pending || {}).body) || {}).narration || {}).text || '';
+        /* 任务产物必须落地: 防抖里的"空文稿"不得盖掉刚写回的转写(0917 cursor 复审 P1);
+           用户正在输入非空文稿时仍让 pending 先走(旧保护语义) */
+        if (!pending || !pendNar.trim()) {
+          try {
+            const fresh = await this.fetchMake(id);
+            if (pending && fresh && String(fresh.narration.text || '').trim() && !pendNar.trim())
+              delete pending.body.narration;
+          } catch (e) { this.makeErr = this.makeError(e); }
+        }
       }
     },
     async runMakeJob(task, scope = 'all') {
@@ -1513,7 +1540,7 @@ WB.pages.video = {
     try {
       const jobs = await WB.api.get('/video-jobs');
       if (jobs.analyze && jobs.analyze.running) { this.anBusy = true; this.pollJob('analyze'); }
-      for (const kind of ['generate', 'voice', 'build']) {
+      for (const kind of ['generate', 'voice', 'build', 'asr']) {
         if (jobs[kind] && jobs[kind].running) {
           this.adoptMakeJob(kind, jobs[kind]);
           if (!this.cur && (jobs[kind].request || {}).make_id) await this.selectMake(jobs[kind].request.make_id);
@@ -1538,12 +1565,13 @@ WB.pages.video = {
   template: `
   <div>
     <!-- 制作任务进度横栏: 页面最顶(导航栏下方 sticky), 任务运行时全页签可见 -->
-    <div v-if="narBusy || storyBusy || voiceBusy || buildBusy"
+    <div v-if="narBusy || storyBusy || voiceBusy || buildBusy || asrBusy"
          class="notice" style="position:sticky;top:56px;z-index:60;display:flex;gap:22px;align-items:center;padding:7px 16px;margin-bottom:10px">
       <div v-if="narBusy">口播稿生成中 · {{ narProgress && narProgress.message || '准备中…' }}</div>
       <div v-if="storyBusy">分镜生成中 · {{ storyProgress && storyProgress.message || '准备中…' }}</div>
-      <div v-if="voiceBusy">语音生成中 · {{ voiceProgress && voiceProgress.message || '准备中…' }}</div>
+      <div v-if="voiceBusy">{{ isAudioRoute ? '画面对齐中' : '语音生成中' }} · {{ voiceProgress && voiceProgress.message || '准备中…' }}</div>
       <div v-if="buildBusy">视频制作中 · {{ buildProgress && buildProgress.message || '准备中…' }}</div>
+      <div v-if="asrBusy">转写中 · {{ asrProgress && asrProgress.message || '准备中…' }}</div>
     </div>
     <!-- ═══ 子页1: 热点追踪 ═══ -->
     <div v-show="tab==='hot'">
@@ -2192,7 +2220,7 @@ WB.pages.video = {
               <div v-if="scriptErr" class="err-box" style="padding:12px">{{ scriptErr }}</div>
             </div>
             <div class="card" v-if="makeSeen[4]" v-show="makeStep===4">
-              <h3>{{ isAudioRoute ? '切原声' : '音频生成' }} <span class="badge" :class="segBadge(3).cls">{{ segBadge(3).text }}</span></h3>
+              <h3>{{ isAudioRoute ? '对齐画面' : '音频生成' }} <span class="badge" :class="segBadge(3).cls">{{ segBadge(3).text }}</span></h3>
               <div v-if="!curMake.script_meta.locked" class="stub-wrap" style="padding:30px;text-align:center;background:var(--bg-hover);color:var(--text-mute)">先定稿视频脚本</div>
               <template v-else-if="isAudioRoute">
                 <div v-if="curMake.voice_bad.length" class="notice">{{ curMake.voice_bad.length }} 幕与最新脚本不一致，请重新对齐（{{ curMake.voice_bad.join('、') }}）</div>
@@ -2289,7 +2317,7 @@ WB.pages.video = {
                         <div class="form-row"><label>起止（秒）</label><input type="number" min="0" step="0.1" :value="beatOverride(b).start" @input="setBeatOverride(b,'start',$event.target.value==='' ? '' : Number($event.target.value))" style="width:75px" aria-label="开始秒数">—<input type="number" min="0" step="0.1" :value="beatOverride(b).end" @input="setBeatOverride(b,'end',$event.target.value==='' ? '' : Number($event.target.value))" style="width:75px" aria-label="结束秒数"></div>
                       </details>
                     </td></tr></tbody></table></div>
-                <div class="form-row" style="margin-top:10px;flex-wrap:wrap;gap:8px"><label>出片模式</label><div class="radio-group" style="flex:1;min-width:0;flex-wrap:wrap"><label><input type="radio" value="build" v-model="buildMode">正式成片</label><label><input type="radio" value="sample" v-model="buildMode">带音样片20s</label><label><input type="radio" value="keyframes" v-model="buildMode">静帧预览</label><label><input type="radio" value="estimate" v-model="buildMode">无声预览</label></div>
+                <div class="form-row" style="margin-top:10px;flex-wrap:wrap;gap:8px"><label>出片模式</label><div class="radio-group" style="flex:1;min-width:0;flex-wrap:wrap"><label><input type="radio" value="build" v-model="buildMode">正式成片</label><label v-if="!isAudioRoute"><input type="radio" value="sample" v-model="buildMode">带音样片20s</label><label><input type="radio" value="keyframes" v-model="buildMode">静帧预览</label><label v-if="!isAudioRoute"><input type="radio" value="estimate" v-model="buildMode">无声预览</label></div>
                   <button class="btn primary" style="flex-shrink:0" :disabled="buildBusy || !curMake.script_meta.locked || curMake.script_stale || (buildMode!=='estimate' && !makeVoiceReady)" @click="runMakeJob('build')">开始制作</button></div>
               </fieldset>
               <div v-if="buildBusy || curMake.status==='rendering'" style="margin-top:12px">

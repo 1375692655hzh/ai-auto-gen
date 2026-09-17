@@ -66,6 +66,13 @@ class AppMakesTests(unittest.TestCase):
         params = {"make_id": row["id"], "beat_id": "b1"}
         for ext in ("svg", "txt", "exe"):   # mov/mkv 0917 起为合法视频格式(音频路线抽音轨)
             self.assertEqual(self.client.put("/wb-api/video-assets", params={**params, "name": "x." + ext}, content=b"x").status_code, 400)
+        for ext, mime in (("mov", "video/quicktime"), ("mkv", "video/x-matroska")):
+            # 0917 起新增视频格式: 预览/跳播的 /file 端点 mime 必须跟得上(旧缺键=500)
+            r = self.client.put("/wb-api/video-assets", params={**params, "name": "x." + ext}, content=b"x")
+            self.assertEqual(r.status_code, 200, r.text)
+            f = self.client.get("/wb-api/video-assets/" + r.json()["asset"]["asset_id"] + "/file", params=params)
+            self.assertEqual(f.status_code, 200)
+            self.assertEqual(f.headers["content-type"].split(";")[0], mime)
         response = self.client.put("/wb-api/video-assets", params={**params, "name": "x.png"}, content=b"png")
         self.assertEqual(response.status_code, 200, response.text)
         asset = response.json()["asset"]
@@ -155,6 +162,19 @@ class AppMakesTests(unittest.TestCase):
         for error, expected in ((subprocess.TimeoutExpired("tts", 120), 504), (OSError(), 500)):
             with patch("subprocess.run", side_effect=error):
                 self.assertEqual(self.client.post("/wb-api/test-tts", json={}).status_code, expected)
+
+
+    def test_audio_route_build_mode_gates(self):
+        """音频路线: estimate 直接 400(不空跑分钟级任务槽); 缺时间轴的 build 报 master_missing。"""
+        row = self.client.post("/wb-api/video-makes", json={"route": "audio", "title": "音频单"}).json()["make"]
+        self.lock(row)
+        est = self.client.post("/wb-api/video-build", json={"make_id": row["id"], "mode": "estimate"})
+        self.assertEqual(est.status_code, 400)
+        self.assertEqual(est.json()["error"], "bad_mode")
+        build = self.client.post("/wb-api/video-build", json={"make_id": row["id"], "mode": "build"})
+        self.assertEqual(build.status_code, 400)
+        self.assertEqual(build.json()["error"], "master_missing")
+        self.assertIn("第 4 步", build.json()["hint"])
 
 
 if __name__ == "__main__":

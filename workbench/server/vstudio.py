@@ -1374,6 +1374,14 @@ def make_view(row: dict) -> dict:
     row["script_badge"] = "stale" if row["script_stale"] else ("locked" if row["script_meta"]["locked"] else "draft")
     gate_missing = _audio_gate_missing(row)   # audio 路线=主轨+时间轴, script 路线=逐幕 take
     row["voice_badge"] = "stale" if row["voice_bad"] else ("ready" if beats and not gate_missing else "missing")
+    # 音频路线时间轴时效(0917 cursor 复审 P2): 旧版只比 beats 数量, 拆拍/换 beat id 仍绿灯;
+    # 真 stale = 文稿哈希变了 或 beat id 序列变了 → 前端第 4 步徽章据此亮"待刷新"
+    if row.get("route") == "audio":
+        tl = (row.get("audio") or {}).get("timeline") or {}
+        if tl:
+            row["audio"]["timeline_current"] = (
+                tl.get("narration_hash") == voice_hash(row["narration"]["text"])
+                and list(tl.get("ids") or []) == [b.get("id") for b in beats])
     return row
 
 
@@ -1517,10 +1525,16 @@ def asset_find(asset_id: str):
 
 
 def asset_refs(asset_id: str) -> list:
-    return [{"make_id": row["id"], "title": row.get("title", ""), "beat_id": o.get("beat_id")}
-            for row in config.load_video_makes()
-            for o in (row.get("video") or {}).get("beat_overrides") or []
-            if isinstance(o, dict) and o.get("asset_id") == asset_id]
+    """素材被哪些制作单引用: beat 素材覆盖 + 音频路线绑定的语音稿(旧版只扫 beat_overrides,
+    删录音素材后制作单仍显示"已上传"直到转写才炸——0917 cursor 复审 P2)。"""
+    refs = []
+    for row in config.load_video_makes():
+        if (row.get("audio") or {}).get("asset_id") == asset_id:
+            refs.append({"make_id": row["id"], "title": row.get("title", ""), "beat_id": "audio"})
+        for o in (row.get("video") or {}).get("beat_overrides") or []:
+            if isinstance(o, dict) and o.get("asset_id") == asset_id:
+                refs.append({"make_id": row["id"], "title": row.get("title", ""), "beat_id": o.get("beat_id")})
+    return refs
 
 
 def assets_list() -> list:
@@ -1996,10 +2010,10 @@ def node_env_check(script: str = "") -> tuple[bool, str]:
 def video_env_summary() -> dict:
     """presets 下发用：node/板块二脚本/npm 依赖三合一 + ffmpeg 探测, err 直接展示给用户。
 
-    ffmpeg_ok=False 时前端在音频路线第 1 步当场拦截视频文件上传(抽音轨需要 ffmpeg),
-    不让用户传完上百 MB 才在第 2 步转写时报错(0917 分发用户实测案)。"""
+    ffmpeg 可用性只认系统 PATH——compositor 精简版缺 libmp3lame 抽不了 mp3, 不能当"可抽音轨"信号
+    (误点亮会导致第 1 步放行视频、第 2 步才报缺编码器)。"""
     ok, err = node_env_check("tts-scenes.mjs")
-    return {"ok": ok, "err": err, "ffmpeg_ok": bool(_resolve_ffmpeg())}
+    return {"ok": ok, "err": err, "ffmpeg_ok": bool(shutil.which("ffmpeg"))}
 
 
 def _tts_node(scenes: list, out_dir: Path, provider: dict, voice: str, progress: bool = False):
@@ -2502,7 +2516,7 @@ def _run_asr(request: dict) -> tuple[dict, int]:
     if not path or kind not in ("audio", "video"):
         return {"error": "audio_missing", "hint": "先上传音频或视频(mp3/wav/mp4/webm/mov/mkv/m4a)"}, 4
     # 源落 make 自有语音目录(与素材库解耦: 素材删了不影响制作单);
-    # mp3/wav 直用, 视频(m4a 同)先抽音轨——转写/钉词/切原声只认 source.mp3
+    # mp3/wav 直用, 视频与 m4a 先抽音轨——转写/钉词/切原声只认 source.<ext>
     ext = path.suffix.lower().lstrip(".")
     from_video = kind == "video" or ext not in ("mp3", "wav")
     if from_video:
@@ -2519,7 +2533,13 @@ def _run_asr(request: dict) -> tuple[dict, int]:
     # mimo 单请求输出有截断上限(2026-09-17 实测: 13min 整轨单发只回约 1/3 文本) →
     # 长音频静音中点分段转写再拼(段界无重叠, 每段 ≤160s 单发完整); 段文件用完即删。
     # 每段现压 16k 单声道转写档(段 ≤160s 约 ≤400KB, 远低于 10MB 请求限)。
-    segs, plan_err = _plan_asr_segments(src)
+    # 无 ffmpeg 的裸机放行短音频(≤7MB 免压缩免分段直传)——否则官方引导"没 ffmpeg 就传
+    # mp3/wav"会在段规划步自相矛盾地死掉(0917 cursor 复审 P1)
+    if (not _resolve_ffmpeg()) and ext in ("mp3", "wav") \
+            and src.stat().st_size <= 7 * 1024 * 1024:
+        segs, plan_err = [(0.0, 0.0)], ""
+    else:
+        segs, plan_err = _plan_asr_segments(src)
     if not segs:
         return {"error": "extract_failed", "hint": "音频段规划失败: " + plan_err}, 3
     if len(segs) == 1:
@@ -2574,7 +2594,7 @@ def _run_asr(request: dict) -> tuple[dict, int]:
     audio_update = {"transcript": text,
                     "engine": str((config.load().get("asr") or {}).get("model") or ""),
                     "seconds": seconds,
-                    "file_hash": _file_hash8(src), "src_ext": "mp3",
+                    "file_hash": _file_hash8(src), "src_ext": ("mp3" if from_video else ext),
                     "original_ext": ext, "from_video": from_video,
                     "phrases": phrases, "align_ok": not align_err, "align_mode": align_mode,
                     "match_rate": meta.get("match_rate")}
@@ -2703,7 +2723,8 @@ def _run_slice(request: dict):
                                      "audio_hash": master["hash"],
                                      "narration_hash": timeline["narration_hash"],
                                      "duration_s": timeline["duration_s"],
-                                     "beats": len(tl_beats)},
+                                     "beats": len(tl_beats),
+                                     "ids": [b["id"] for b in tl_beats]},
                         "cuts": ui_cuts,
                         "match_rate": _meta.get("match_rate"), "align_mode": align_mode}
     current["status"] = "voice_ready" if not master_audio_missing(current) else "script_locked"

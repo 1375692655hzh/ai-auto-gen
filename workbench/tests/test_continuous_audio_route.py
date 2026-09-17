@@ -245,6 +245,67 @@ class ContinuousMasterTests(unittest.TestCase):
         self.assertEqual(report["error"], "node_env")
         self.assertIn("Node", report["hint"])
 
+    def test_run_asr_wav_src_ext_real_suffix(self):
+        """wav 转写回写 src_ext=wav(0917 cursor 复审 P1: 旧写死 mp3, 第 4 步找不到 source.wav)。"""
+        from workbench.server import vasr
+        aid = _mk_asset("wav", b"FAKE-WAV-" + bytes(range(16)))
+        row = vstudio.make_upsert({"route": "audio", "audio": {"asset_id": aid}, "title": "wav案"})
+        with patch.object(vstudio, "_asr_pin", return_value=(
+                [{"id": "s1", "text": "第一句话在这里。", "start": 0.0, "end": 2.0}], "", {})), \
+             patch.object(vstudio, "_ensure_master", return_value=(
+                {"file": "master.wav", "hash": "x", "duration_s": 2.0,
+                 "delivery": "stream-copy", "ext": "wav"}, "")), \
+             patch.object(vasr, "transcribe_file",
+                          return_value={"text": "第一句话在这里。", "seconds": 2.0}), \
+             patch.object(vstudio, "_plan_asr_segments", return_value=([(0.0, 0.0)], "")):
+            report, code = vstudio._run_asr({"make_id": row["id"]})
+        self.assertEqual(code, 0, report)
+        cur = vstudio.make_get(row["id"])
+        self.assertEqual(cur["audio"]["src_ext"], "wav")
+        self.assertTrue(vstudio._safe_path(vstudio.voice_root(), row["id"], "source.wav").is_file())
+
+    def test_run_asr_short_mp3_without_ffmpeg_single_segment(self):
+        """无 ffmpeg 裸机: ≤7MB mp3/wav 跳过静音分段直传(官方引导"没 ffmpeg 传 mp3"不再自相矛盾)。"""
+        from workbench.server import vasr
+        aid = _mk_asset("mp3", b"FAKE-MP3-SHORT-" + bytes(range(16)))
+        row = vstudio.make_upsert({"route": "audio", "audio": {"asset_id": aid}, "title": "裸机mp3"})
+        with patch.object(vstudio, "_resolve_ffmpeg", return_value=""), \
+             patch.object(vstudio, "_plan_asr_segments",
+                          side_effect=AssertionError("无 ffmpeg 短音频不应走静音分段")), \
+             patch.object(vstudio, "_asr_pin", return_value=([], "whisper 不可用", {})), \
+             patch.object(vstudio, "_estimate_phrases", return_value=([], "no ffmpeg")), \
+             patch.object(vstudio, "_ensure_master", return_value=({}, "skip")), \
+             patch.object(vasr, "transcribe_file",
+                          return_value={"text": "转写文本在这里。", "seconds": 3.0}):
+            report, code = vstudio._run_asr({"make_id": row["id"]})
+        self.assertEqual(code, 0, report)
+        cur = vstudio.make_get(row["id"])
+        self.assertEqual(cur["narration"]["text"], "转写文本在这里。")
+        self.assertEqual(cur["audio"]["src_ext"], "mp3")
+
+    def test_make_view_timeline_current(self):
+        """时间轴时效(0917 cursor 复审 P2): 文稿哈希/beat id 序列任一变化即 timeline_current=False。"""
+        row = _audio_make()
+        vdir = vstudio._safe_path(vstudio.voice_root(), row["id"])
+        vdir.mkdir(parents=True, exist_ok=True)
+        mfile = vdir / "master.m4a"
+        mfile.write_bytes(b"M4A")
+        row["audio"] = {"asset_id": "va1",
+                        "master": {"file": "master.m4a", "hash": vstudio._file_hash8(mfile),
+                                   "duration_s": 5.9},
+                        "timeline": {"file": "master.timeline.json", "beats": 2,
+                                     "narration_hash": vstudio.voice_hash(row["narration"]["text"]),
+                                     "ids": ["b1", "b2"]}}
+        (vdir / "master.timeline.json").write_text("{}", encoding="utf-8")
+        vstudio._make_save(row)
+        view = vstudio.make_view(row)
+        self.assertTrue(view["audio"]["timeline_current"])
+        view["narration"]["text"] += "改稿"
+        self.assertFalse(vstudio.make_view(view)["audio"]["timeline_current"])
+        view2 = vstudio.make_view(vstudio.make_get(row["id"]))
+        view2["audio"]["timeline"]["ids"] = ["b1", "b9"]
+        self.assertFalse(vstudio.make_view(view2)["audio"]["timeline_current"])
+
 
 if __name__ == "__main__":
     unittest.main()
