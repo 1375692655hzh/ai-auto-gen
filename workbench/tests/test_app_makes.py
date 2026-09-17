@@ -64,7 +64,7 @@ class AppMakesTests(unittest.TestCase):
     def test_upload_download_delete_and_limits(self):
         row = self.create()
         params = {"make_id": row["id"], "beat_id": "b1"}
-        for ext in ("svg", "mov", "txt"):
+        for ext in ("svg", "txt", "exe"):   # mov/mkv 0917 起为合法视频格式(音频路线抽音轨)
             self.assertEqual(self.client.put("/wb-api/video-assets", params={**params, "name": "x." + ext}, content=b"x").status_code, 400)
         response = self.client.put("/wb-api/video-assets", params={**params, "name": "x.png"}, content=b"png")
         self.assertEqual(response.status_code, 200, response.text)

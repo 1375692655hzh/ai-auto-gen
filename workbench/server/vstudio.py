@@ -1314,8 +1314,11 @@ def make_upsert(payload: dict) -> dict | None:
         aid = str(payload["audio"].get("asset_id") or "")
         prev = (row.get("audio") or {}).get("asset_id") or ""
         if aid and aid != prev and not row["narration"]["locked"]:
+            path, _k = asset_find(aid)
             row["audio"] = {"asset_id": aid,
-                            "asset_name": str(payload["audio"].get("asset_name") or "")[:200]}
+                            "asset_name": str(payload["audio"].get("asset_name") or "")[:200],
+                            # 绑定即回显时长(ffprobe 可用则实测, 裸机回 0 由转写后补)
+                            "seconds": round(_probe_duration(path), 1) if path else 0}
             row["narration"].update(text="", source="", locked=False, locked_at=None, hash="")
             row["script"] = None
             row["script_meta"] = {"locked": False, "locked_at": None, "hash": "",
@@ -1471,7 +1474,7 @@ def unlock_script(mid: str):
 
 
 ASSET_KIND = {"png": "image", "jpg": "image", "jpeg": "image", "webp": "image",
-              "mp4": "video", "webm": "video",
+              "mp4": "video", "webm": "video", "mov": "video", "mkv": "video",
               "mp3": "audio", "wav": "audio", "m4a": "audio"}
 ASSET_EXTS = set(ASSET_KIND)
 ASSET_LIMITS = {"image": 15 * 1024 * 1024, "video": 100 * 1024 * 1024, "audio": 30 * 1024 * 1024}
@@ -2327,8 +2330,8 @@ def _extract_audio(src: Path, dest_mp3: Path, voice_grade: bool = True,
     返回错误文案(空=成功)。"""
     ff = _resolve_ffmpeg()
     if not ff:
-        return ("未找到可用的 ffmpeg（抽音轨需要）：请安装完整版 ffmpeg 并加入 PATH，"
-                "或先手动抽出音频再传 mp3")
+        return ("未找到可用的 ffmpeg（视频抽音轨/长音频压缩分段都需要）："
+                "请安装完整版 ffmpeg 并加入 PATH，或先转成 mp3 后上传")
     dest_mp3.parent.mkdir(parents=True, exist_ok=True)
     argv = [ff, "-hide_banner", "-loglevel", "error", "-y"]
     if start_s is not None and duration_s:
@@ -2497,7 +2500,7 @@ def _run_asr(request: dict) -> tuple[dict, int]:
     audio = row.get("audio") or {}
     path, kind = asset_find(audio.get("asset_id"))
     if not path or kind not in ("audio", "video"):
-        return {"error": "audio_missing", "hint": "先上传音频或视频(mp3/wav/mp4/webm/m4a)"}, 4
+        return {"error": "audio_missing", "hint": "先上传音频或视频(mp3/wav/mp4/webm/mov/mkv/m4a)"}, 4
     # 源落 make 自有语音目录(与素材库解耦: 素材删了不影响制作单);
     # mp3/wav 直用, 视频(m4a 同)先抽音轨——转写/钉词/切原声只认 source.mp3
     ext = path.suffix.lower().lstrip(".")
@@ -2637,6 +2640,11 @@ def _run_slice(request: dict):
     if duration_s <= 0:
         return {"error": "master_bad", "hint": "主轨时长探测失败(ffprobe?)"}, 3
     beats = row["script"]["beats"]
+    # 钉词(whisper)硬依赖 Node——裸机缺 Node 时先快败给环境指引,
+    # 不让"钉词失败(校对改写幅度过大?)"误导用户去改稿(0917 分发审计)
+    ok, env_err = node_env_check("asr-timeline.mjs")
+    if not ok:
+        return {"error": "node_env", "hint": env_err}, 3
     tick("voice", "align", 30, "终稿句级对齐(校对改文会自动重钉)")
     phrases, align_err, _meta = _asr_pin(src, row["narration"]["text"])
     align_mode = "whisper"

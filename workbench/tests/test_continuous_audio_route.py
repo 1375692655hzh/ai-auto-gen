@@ -225,6 +225,26 @@ class ContinuousMasterTests(unittest.TestCase):
         self.assertIn("err", env)
         self.assertIsInstance(env["ffmpeg_ok"], bool)
 
+    def test_run_slice_node_env_fast_fail(self):
+        """裸机缺 Node: 第 4 步快败给环境指引, 不误报'校对改写幅度过大'让用户去改稿(0917 分发审计)。"""
+        row = _audio_make()
+        # 主轨+转写源在位(前置校验全过, 直达钉词前的环境检查)
+        vdir = vstudio._safe_path(vstudio.voice_root(), row["id"])
+        vdir.mkdir(parents=True, exist_ok=True)
+        mfile = vdir / "master.m4a"
+        mfile.write_bytes(b"M4A")
+        row["audio"] = {"asset_id": "va1"}
+        row["audio"].update(master={"file": "master.m4a", "hash": vstudio._file_hash8(mfile),
+                                    "duration_s": 5.9}, src_ext="mp3")
+        (vdir / "source.mp3").write_bytes(b"MP3")
+        vstudio._make_save(row)
+        with patch.object(vstudio, "node_env_check",
+                          return_value=(False, "未检测到 Node.js：视频功能需 Node ≥ 20")):
+            report, code = vstudio._run_slice({"make_id": row["id"]})
+        self.assertEqual(code, 3)
+        self.assertEqual(report["error"], "node_env")
+        self.assertIn("Node", report["hint"])
+
 
 if __name__ == "__main__":
     unittest.main()

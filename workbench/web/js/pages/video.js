@@ -32,7 +32,7 @@ WB.pages.video = {
       makes: [], cur: null, blank: null,   /* blank=内存态空白新稿(不落库, 首次编辑才建行) */
       presets: null, narTab: 'a', narBrief: '', narDraftId: '', importId: '',
       makeRoute: 'script',   /* 制作路线: script=文案路线 audio=音频路线(上传录音→转写→切原声) */
-      asrErr: '', asrBusy: false, asrProgress: null, asrUp: null, asrUpErr: '',
+      asrErr: '', asrBusy: false, asrProgress: null, asrUp: null, asrUpErr: '', asrNotice: '',
       refText: '', refName: '', refDirty: false,   /* 参考稿(音频路线可选校准稿): 粘贴/文件双入口, 独立防抖保存 */
       makeStep: 1,           /* 生成卡内部步骤子页(0913a): 1项目名称/2口播/3脚本/4音频/5视频 */
       makeSeen: { 1: true }, /* 步骤懒挂载(0913c): 首次访问才建DOM(47拍分镜+47audio全量构建=载入慢的根因), 之后v-show保活 */
@@ -616,7 +616,11 @@ WB.pages.video = {
             WB.toast('视频已生成' + (hit ? ': ' + this.cut(hit.title, 18) : '') + '——成片在本项目产出(Step 5)');
           } else if (kind === 'voice' || kind === 'asr' || task === 'narration' || task === 'storyboard') {
             await this.refreshMakeJob(job);
-            WB.toast(kind === 'voice' ? (this.isAudioRoute ? '原声已切好' : '语音已生成')
+            if (kind === 'asr' && job.result && job.result.hint) {
+              /* 转写成功但对齐降级(典型=裸机缺 Node): 环境指引必须持续可见, 不能只闪一下 toast */
+              this.asrNotice = job.result.hint;
+              WB.toast('转写完成，但' + job.result.hint.split('——')[0]);
+            } else WB.toast(kind === 'voice' ? (this.isAudioRoute ? '原声已切好' : '语音已生成')
                      : kind === 'asr' ? '转写完成，请校对后定稿' : task === 'narration' ? '口播稿已生成' : '分镜脚本已生成');
           } else {
             WB.toast('独立生成页已下线，产物可在脚本仓库查看');
@@ -946,7 +950,7 @@ WB.pages.video = {
         this.cur = m.id; this.blank = null; this.narTab = m.narration.source === 'manual' ? 'b' : 'a';
         this.makeRoute = m.route || 'script';
         this.narBrief = ''; this.narDraftId = ''; this.importId = ''; this.beatCursors = {};
-        this.narErr = ''; this.scriptErr = ''; this.voiceErr = ''; this.asrErr = ''; this.setMakeDefaults(m);
+        this.narErr = ''; this.scriptErr = ''; this.voiceErr = ''; this.asrErr = ''; this.asrNotice = ''; this.asrNotice = ''; this.setMakeDefaults(m);
       } catch (e) { this.makeErr = this.makeError(e); }
     },
     setMakeDefaults(m) {
@@ -990,7 +994,7 @@ WB.pages.video = {
         if (this.cur) await this.flushMake(this.cur);
         const m = this.putMake((await WB.api.post('/video-makes', { route })).make);
         this.cur = m.id; this.narTab = 'b'; this.narBrief = ''; this.narDraftId = ''; this.importId = '';
-        this.narErr = ''; this.scriptErr = ''; this.voiceErr = ''; this.asrErr = '';
+        this.narErr = ''; this.scriptErr = ''; this.voiceErr = ''; this.asrErr = ''; this.asrNotice = '';
         this.setMakeDefaults(m); this.makeRoute = route;
       } catch (e) { this.makeErr = this.makeError(e); }
       finally { this.makeActionBusy = false; }
@@ -1129,7 +1133,7 @@ WB.pages.video = {
     },
     async startAsr() {
       if (!this.curMake || this.asrBusy) return;
-      this.asrErr = '';
+      this.asrErr = ''; this.asrNotice = '';
       try {
         await this.flushMake(this.cur);
         await WB.api.post('/video-makes/' + this.cur + '/asr', {});
@@ -2051,6 +2055,7 @@ WB.pages.video = {
                       <span v-if="asrBusy && asrProgress" class="muted">{{ asrProgress.message }}</span>
                     </div>
                     <p v-if="asrErr" class="err-text">{{ asrErr }}</p>
+                    <div v-if="asrNotice" class="notice" style="margin-top:8px">⚠ {{ asrNotice }}</div>
                     <template v-if="curMake.narration.text && !curMake.narration.locked">
                       <p class="muted" style="margin:10px 0 4px">校对转写稿（<b>英文词</b>与<b>数字</b>最易错——数字请改回阿拉伯数字，画面数据卡要保持一致）。改完点「定稿」。</p>
                       <textarea v-model="curMake.narration.text" @input="saveMake()" rows="10" style="width:100%"></textarea>
