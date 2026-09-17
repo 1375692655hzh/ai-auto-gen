@@ -66,6 +66,12 @@ DEFAULTS = {
         "api_key": "",
         "model": "gemini-3.6-flash",
     },
+    "asr": {                                        # 视频制作·音频路线 ASR(mimo; 2026-09-15)
+        "base_url": "https://token-plan-cn.xiaomimimo.com/v1",   # 官方文档域名 api.xiaomimimo.com 同可用
+        "api_key": "",                              # 仅存服务端, 打码回显
+        "model": "mimo-v2.5-asr",
+        "language": "zh",                           # asr_options.language: auto/zh/en(默认 zh, 实测口径)
+    },
     "analysis_paths": {                             # 视频工坊·本地文件分析扫描根(4槽位, 设置页可改;
         "paths": ["", "", "", ""],                  #  出厂全空, 由用户自己选目录)
     },
@@ -238,6 +244,10 @@ def public_view(cfg: dict) -> dict:
     v["gemini"]["api_key"] = ""
     v["gemini"]["has_key"] = bool(gkey)
     v["gemini"]["key_tail"] = gkey[-4:] if gkey else ""
+    akey = (v.get("asr") or {}).get("api_key") or ""
+    v["asr"]["api_key"] = ""
+    v["asr"]["has_key"] = bool(akey)
+    v["asr"]["key_tail"] = akey[-4:] if akey else ""
     ckey = (v.get("compose") or {}).get("api_key") or ""
     v["compose"]["api_key"] = ""
     v["compose"]["has_key"] = bool(ckey)
@@ -406,7 +416,7 @@ def apply_patch(patch: dict) -> dict:
             patch["compose"] = s if s else None
             if not s:
                 patch.pop("compose", None)
-    for sec in ("source", "translate", "youtube", "gemini", "finnhub", "workbench"):
+    for sec in ("source", "translate", "youtube", "gemini", "asr", "finnhub", "workbench"):
         s = dict(patch.get(sec) or {})
         if "api_key" in s and not s["api_key"]:
             s.pop("api_key")

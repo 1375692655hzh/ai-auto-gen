@@ -30,6 +30,7 @@ WB.pages.settings = {
       fHasKey: false, fKeyTail: "",
       llmTest: false, llmTestResult: null,
       ttsRemoved: [], ttsTests: {}, ttsTesting: "",
+      asrTesting: false, asrTest: null,
       // 与 article.js genTpls 同步维护
       genTpls: [{ v: "catalyst-take", t: "事件快评 · 单票突发催化(默认)" },
                 { v: "earnings-print", t: "业绩拆解 · 财报/指引解读" },
@@ -161,7 +162,7 @@ WB.pages.settings = {
       const labels = { source: "信息源连接", ui: "界面偏好", translate: "翻译模型",
                        compose: "成稿模型", finnhub: "Finnhub", market: "行情源",
                        gen_defaults: "生成默认参数", youtube: "YouTube", gemini: "视频分析",
-                       tts: "语音合成", analysis_paths: "视频分析路径", workbench: "访问鉴权" };
+                       asr: "语音识别", tts: "语音合成", analysis_paths: "视频分析路径", workbench: "访问鉴权" };
       const scope2 = labels[scope] ? scope : "source";
       switch (scope2) {
         case "source":
@@ -184,6 +185,12 @@ WB.pages.settings = {
         case "gemini":
           payload.gemini = { api_key: (S.gemini || {}).api_key || '',
                              model: (S.gemini || {}).model || 'gemini-3.6-flash' };
+          break;
+        case "asr":
+          payload.asr = { base_url: (S.asr || {}).base_url || '',
+                          api_key: (S.asr || {}).api_key || '',
+                          model: (S.asr || {}).model || 'mimo-v2.5-asr',
+                          language: (S.asr || {}).language || 'zh' };
           break;
         case "tts": {
           const ids = [];
@@ -219,6 +226,8 @@ WB.pages.settings = {
         } else if (scope2 === "gemini") {
           if (S.gemini) S.gemini.api_key = '';
           this.gHasKey = (d.gemini || {}).has_key; this.gKeyTail = (d.gemini || {}).key_tail;
+        } else if (scope2 === "asr") {
+          if (S.asr) { S.asr.api_key = ""; S.asr.has_key = (d.asr || {}).has_key; S.asr.key_tail = (d.asr || {}).key_tail || ""; }
         } else if (scope2 === "compose") {
           this.applyComposePublic(d.compose);
         } else if (scope2 === "finnhub") {
@@ -506,6 +515,19 @@ WB.pages.settings = {
         } else WB.toast((d.error || "检测失败") + (d.hint ? " · " + d.hint : ""));
       } catch (e) { WB.toast(e.error || "检测失败"); }
       this.ttsTesting = "";
+    },
+    async testAsr() {
+      await this.save('asr');
+      this.asrTesting = true;
+      try {
+        const d = await WB.api.post("/test-asr");
+        this.asrTest = { ok: true, text: '连接正常 · ' + (d.text_head || '') + (d.seconds ? ` (${d.seconds}s 样本)` : '') };
+      } catch (e) {
+        const msgs = { no_key: '未配置 base_url / API Key', http_401: 'API Key 无效', http_404: '接口路径不对(检查接口地址)',
+                       network: '网络不通(代理拦截?)', empty: '转写返回空文本' };
+        this.asrTest = { ok: false, text: (msgs[e.error] || e.error || '检测失败') + (e.hint ? ' — ' + e.hint : '') };
+      }
+      this.asrTesting = false;
     },
     async testTts(p) {
       const voice = (this.s.tts.default.provider_id === p.id && this.s.tts.default.voice)
@@ -981,6 +1003,38 @@ WB.pages.settings = {
         <button class="btn" @click="addTtsTemplate('minimax')">＋ MiniMax 模板</button>
         <button class="btn" @click="addTtsProvider">＋ 空白供应商</button>
         <button class="btn primary" :disabled="saving" @click="save('tts')">保存设置</button>
+      </div>
+    </div>
+
+    <!-- 语音识别 ASR(视频制作·音频路线: 上传录音→提取文字稿) -->
+    <div class="card" v-show="sec==='video'">
+      <h3>语音识别 <span class="muted">视频制作·音频路线 · mimo ASR</span></h3>
+      <div class="key-guide">
+        <b>注册来源:</b> <a href="https://token-plan-cn.xiaomimimo.com" target="_blank" rel="noopener">小米 mimo 开放平台</a>
+        ——注册后在「API Keys」创建(与 mimo TTS 同一平台, 同一把 key 通用)。<br>
+        <b>说明:</b> 只服务视频制作「音频路线」(上传录音→提取文字稿→配画面出片); 转写只出文本,
+        逐句时间轴由本机 whisper 自动对齐(首次使用自动下载模型, 无需配置)。<br>
+        <b>填写案例:</b> 地址=<code>https://token-plan-cn.xiaomimimo.com/v1</code> · 模型=<code>mimo-v2.5-asr</code> · 语言=中文
+      </div>
+      <div class="form-row"><label>接口地址</label>
+        <input type="text" v-model="s.asr.base_url" style="width:340px"></div>
+      <div class="form-row"><label>API Key</label>
+        <input type="password" v-model="s.asr.api_key"
+               :placeholder="s.asr.has_key ? '已配置(尾号 ' + s.asr.key_tail + '), 留空保持不变' : 'tp-...'"
+               style="width:340px">
+        <span class="muted">仅存本机服务端, 不回显明文</span></div>
+      <div class="form-row"><label>模型</label>
+        <input type="text" v-model="s.asr.model" placeholder="mimo-v2.5-asr" style="width:220px">
+        <label style="margin-left:12px">语言</label>
+        <select v-model="s.asr.language">
+          <option value="zh">中文(推荐)</option>
+          <option value="auto">自动检测</option>
+          <option value="en">英文</option>
+        </select></div>
+      <div class="form-row" style="align-items:center">
+        <button class="btn primary" :disabled="saving" @click="save('asr')">保存设置</button>
+        <button class="btn" :disabled="asrTesting" @click="testAsr">{{ asrTesting ? '测试中…' : '测试连接(2 秒样本真实转写)' }}</button>
+        <span v-if="asrTest" class="muted" :style="{color: asrTest.ok ? 'var(--green)' : 'var(--red)'}">{{ asrTest.text }}</span>
       </div>
     </div>
 

@@ -19,7 +19,7 @@ WB.pages.video = {
       /* ── 视频工坊 ── */
       pool: [], poolMeta: null, poolIds: {}, poolSel: null,
       anUrl: '', anRec: null, anBusy: false, anErr: null, anProgress: null,
-      jobPolls: { analyze: null, generate: null, voice: null, build: null },
+      jobPolls: { analyze: null, generate: null, voice: null, build: null, asr: null },
       styles: [], lengthTiers: [], llmOptions: [], drafts: [],
       scripts: [], scriptSel: null, scriptFilter: '', reusableOnly: false,
       /* ── 追踪账号 ── */
@@ -31,7 +31,8 @@ WB.pages.video = {
       /* 四段制作：草稿持久化，任务槽独立恢复。 */
       makes: [], cur: null, blank: null,   /* blank=内存态空白新稿(不落库, 首次编辑才建行) */
       presets: null, narTab: 'a', narBrief: '', narDraftId: '', importId: '',
-      makeRoute: 'script',   /* 制作路线: script=文案路线 audio=音频路线(建设中) */
+      makeRoute: 'script',   /* 制作路线: script=文案路线 audio=音频路线(上传录音→转写→切原声) */
+      asrErr: '', asrBusy: false, asrProgress: null,
       makeStep: 1,           /* 生成卡内部步骤子页(0913a): 1项目名称/2口播/3脚本/4音频/5视频 */
       makeSeen: { 1: true }, /* 步骤懒挂载(0913c): 首次访问才建DOM(47拍分镜+47audio全量构建=载入慢的根因), 之后v-show保活 */
       narBusy: false, narProgress: null, storyBusy: false, storyProgress: null,
@@ -111,9 +112,22 @@ WB.pages.video = {
       const e = this.presets && this.presets.video_env;
       return (e && e.ok === false) ? (e.err || '视频功能环境缺失（Node/板块二目录/npm 依赖）') : '';
     },
+    isAudioRoute() { return this.makeRoute === 'audio'; },
+    asrPhrases() { return ((this.curMake && this.curMake.audio) || {}).phrases || []; },
+    audioCuts() { return ((this.curMake && this.curMake.audio) || {}).cuts || []; },
     makeVoices() { const p = this.ttsProviders.find((p) => this.curMake && p.id === this.curMake.voice.profile_id); return p ? p.voices || [] : []; },
     makeTheme() { return ((this.presets && this.presets.themes) || []).find((t) => this.curMake && t.id === this.curMake.video.theme); },
     makeSteps() {
+      if (this.makeRoute === 'audio') {
+        const m = this.curMake, hasAudio = m && m.audio && m.audio.asset_id;
+        return [
+          { n: 1, label: '项目与音频', badge: hasAudio && String(m.title || '').trim() && m.title !== '未命名视频' ? { cls: 'green', text: '就绪' } : hasAudio ? { cls: 'blue', text: '待命名' } : { cls: '', text: '待上传' } },
+          { n: 2, label: '转写与校对', badge: this.segBadge(1) },
+          { n: 3, label: '脚本生成', badge: this.segBadge(2) },
+          { n: 4, label: '切原声', badge: this.segBadge(3) },
+          { n: 5, label: '视频生成', badge: this.segBadge(4) },
+        ];
+      }
       const titled = this.curMake && String(this.curMake.title || '').trim();
       return [
         { n: 1, label: '项目名称', badge: { cls: titled ? 'green' : '', text: titled ? '已命名' : '未命名' } },
@@ -554,6 +568,7 @@ WB.pages.video = {
         if (kind === 'analyze') this.anProgress = job.progress || null;
         else if (kind === 'build') this.buildProgress = job.progress || null;
         else if (kind === 'voice') this.voiceProgress = job.progress || null;
+        else if (kind === 'asr') this.asrProgress = job.progress || null;
         else if (task === 'narration') this.narProgress = job.progress || null;
         else if (task === 'storyboard') this.storyProgress = job.progress || null;
         if (job.running) { this.jobPolls[kind] = setTimeout(tick, 3000); return; }
@@ -561,6 +576,7 @@ WB.pages.video = {
         if (kind === 'analyze') this.anBusy = false;
         else if (kind === 'build') this.buildBusy = false;
         else if (kind === 'voice') this.voiceBusy = false;
+        else if (kind === 'asr') this.asrBusy = false;
         else { this.narBusy = false; this.storyBusy = false; }
         delete this.makeJobIds[kind];
         if (job.exit === 0) {
@@ -576,9 +592,10 @@ WB.pages.video = {
             this.buildWarnings = (job.result && job.result.warnings) || [];
             this.buildErr = '';
             WB.toast('视频已生成' + (hit ? ': ' + this.cut(hit.title, 18) : '') + '——成片在本项目产出(Step 5)');
-          } else if (kind === 'voice' || task === 'narration' || task === 'storyboard') {
+          } else if (kind === 'voice' || kind === 'asr' || task === 'narration' || task === 'storyboard') {
             await this.refreshMakeJob(job);
-            WB.toast(kind === 'voice' ? '语音已生成' : task === 'narration' ? '口播稿已生成' : '分镜脚本已生成');
+            WB.toast(kind === 'voice' ? (this.isAudioRoute ? '原声已切好' : '语音已生成')
+                     : kind === 'asr' ? '转写完成，请校对后定稿' : task === 'narration' ? '口播稿已生成' : '分镜脚本已生成');
           } else {
             WB.toast('独立生成页已下线，产物可在脚本仓库查看');
           }
@@ -586,10 +603,11 @@ WB.pages.video = {
           const msg = this.makeError(job.error ? job : { error: '任务失败', hint: job.hint });
           if (kind === 'build') this.buildErr = msg;
           else if (kind === 'voice') this.voiceErr = msg;
+          else if (kind === 'asr') this.asrErr = msg;
           else if (task === 'narration') this.narErr = msg;
           else if (task === 'storyboard') this.scriptErr = msg;
           else WB.toast(msg);
-          if (kind === 'build' || kind === 'voice' || task === 'narration' || task === 'storyboard') await this.refreshMakeJob(job);
+          if (kind === 'build' || kind === 'voice' || kind === 'asr' || task === 'narration' || task === 'storyboard') await this.refreshMakeJob(job);
         }
       };
       this.jobPolls[kind] = setTimeout(tick, 3000);
@@ -904,8 +922,9 @@ WB.pages.video = {
         if (this.isHistoryMake(m)) this.makeStep = 5;   /* 历史项目: 默认直跳成片页(0913e) */
         this.makeSeen = { [this.makeStep]: true };   /* 换稿只挂当前步骤(0913c 懒挂载) */
         this.cur = m.id; this.blank = null; this.narTab = m.narration.source === 'manual' ? 'b' : 'a';
+        this.makeRoute = m.route || 'script';
         this.narBrief = ''; this.narDraftId = ''; this.importId = ''; this.beatCursors = {};
-        this.narErr = ''; this.scriptErr = ''; this.voiceErr = ''; this.setMakeDefaults(m);
+        this.narErr = ''; this.scriptErr = ''; this.voiceErr = ''; this.asrErr = ''; this.setMakeDefaults(m);
       } catch (e) { this.makeErr = this.makeError(e); }
     },
     setMakeDefaults(m) {
@@ -914,6 +933,9 @@ WB.pages.video = {
         const defStyle = this.styles.find((s) => s.default) || this.styles[0];
         m.narration.style_id = defStyle.id; changed = true;
       }
+      /* 音频路线无 TTS 供应商概念(原声切片), 不回填默认音色——
+         回填会触发服务端"换供应商清语音"把已切好的原声全清掉(0917 e2e 实证) */
+      if ((m.route || this.makeRoute) === 'audio') return changed;
       const def = (this.presets && this.presets.tts && this.presets.tts.default) || {};
       const current = this.ttsProviders.find((p) => p.id === m.voice.profile_id);
       const p = current || this.ttsProviders.find((x) => x.id === def.provider_id) || this.ttsProviders[0];
@@ -939,17 +961,72 @@ WB.pages.video = {
       if (this.cur) return;
       if (!this.blank) this.newBlank();
     },
-    async newMake() {
+    async newMake(route = 'script') {
       if (this.makeActionBusy) return;
       this.makeActionBusy = true;
       try {
         if (this.cur) await this.flushMake(this.cur);
-        const m = this.putMake((await WB.api.post('/video-makes', {})).make);
+        const m = this.putMake((await WB.api.post('/video-makes', { route })).make);
         this.cur = m.id; this.narTab = 'b'; this.narBrief = ''; this.narDraftId = ''; this.importId = '';
-        this.narErr = ''; this.scriptErr = ''; this.voiceErr = ''; this.setMakeDefaults(m);
+        this.narErr = ''; this.scriptErr = ''; this.voiceErr = ''; this.asrErr = '';
+        this.setMakeDefaults(m); this.makeRoute = route;
       } catch (e) { this.makeErr = this.makeError(e); }
       finally { this.makeActionBusy = false; }
     },
+    async switchRoute(r) {
+      if (r === this.makeRoute) return;
+      const m = this.curMake;
+      const dirty = m && (String(m.narration.text || '').trim() || m.script || (m.audio || {}).asset_id);
+      if (!m || !dirty) {
+        /* 空制作单直接改路线 */
+        if (m) { m.route = r; this.makeRoute = r; this.saveMake(); }
+        else this.makeRoute = r;
+        return;
+      }
+      /* 有内容的制作单 → 路线切换=另开一张新单, 互不污染 */
+      if (!confirm('当前制作单已有内容，切换路线将新建一张' + (r === 'audio' ? '音频路线' : '文案路线') + '制作单')) return;
+      await this.newMake(r);
+    },
+    async uploadAsrAudio(ev) {
+      const file = ev.target.files && ev.target.files[0]; ev.target.value = '';
+      if (!file || !this.curMake) return;
+      if (file.size > 30 * 1024 * 1024) { WB.toast('音频不能超过 30MB（约 30 分钟）'); return; }
+      if (!/\.(mp3|wav)$/i.test(file.name)) { WB.toast('音频路线只支持 mp3 / wav'); return; }
+      this.asrErr = '';
+      try {
+        const r = await fetch('/wb-api/video-assets?name=' + encodeURIComponent(file.name), { method: 'PUT', body: file });
+        const d = await r.json();
+        if (!r.ok) throw (d || {});
+        const aid = d.asset.asset_id;
+        await WB.api.post('/video-makes', { id: this.cur, audio: { asset_id: aid } });
+        await this.fetchMake(this.cur);
+        WB.toast('音频已上传，点「提取文字稿」开始转写');
+      } catch (e) { this.asrErr = this.makeError(e); }
+    },
+    async startAsr() {
+      if (!this.curMake || this.asrBusy) return;
+      this.asrErr = '';
+      try {
+        await this.flushMake(this.cur);
+        await WB.api.post('/video-makes/' + this.cur + '/asr', {});
+        this.asrBusy = true; this.adoptMakeJob('asr', { running: true, request: { make_id: this.cur } });
+        this.pollJob('asr');
+      } catch (e) {
+        if (e.status === 409) { this.asrBusy = true; this.pollJob('asr'); }
+        else this.asrErr = this.makeError(e);
+      }
+    },
+    playPhrase(p) {
+      const a = this.$refs.asrAudio;
+      if (!a) return;
+      a.currentTime = Math.max(0, (p.start || 0) - 0.15);
+      a.play().catch(() => {});
+    },
+    fmtClock(s) {
+      s = Math.max(0, Math.round(s || 0));
+      return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0');
+    },
+    isSuspect(t) { return /[A-Za-z]{2,}|\d/.test(String(t || '')); },   /* 实测错误集中在英文专名与数字 */
     async duplicateMake(m) {
       try {
         await this.flushMake(m.id);
@@ -970,7 +1047,10 @@ WB.pages.video = {
       } catch (e) { this.makeErr = this.makeError(e); }
     },
     makePayload(m) {
-      const p = { id: m.id, title: m.title, video: m.video, voice: { profile_id: m.voice.profile_id, voice: m.voice.voice } };
+      const p = { id: m.id, title: m.title, route: m.route || this.makeRoute,
+                  video: m.video, voice: { profile_id: m.voice.profile_id, voice: m.voice.voice } };
+      if ((m.route || this.makeRoute) === 'audio' && m.audio && m.audio.asset_id && !m.narration.locked)
+        p.audio = { asset_id: m.audio.asset_id };   /* 换音频才上行; 转写产物等由服务端任务写 */
       if (!m.narration.locked) p.narration = { text: m.narration.text, ref_text: m.narration.ref_text, source: m.narration.source, style_id: m.narration.style_id,
         llm_source: m.narration.llm_source, length_s: m.narration.length_s || 0, fidelity: m.narration.fidelity };  // 0913g: 三字段此前两头都丢, 保存回路把生成模型/片长/改写幅度顶回旧值
       if (!m.script_meta.locked && m.script) p.script = m.script;
@@ -1121,6 +1201,7 @@ WB.pages.video = {
       if (kind === 'generate') {
         this.narBusy = !!job.running && req.task === 'narration'; this.storyBusy = !!job.running && req.task === 'storyboard';
       } else if (kind === 'voice') this.voiceBusy = !!job.running;
+      else if (kind === 'asr') this.asrBusy = !!job.running;
       else if (kind === 'build') { this.buildBusy = !!job.running; this.buildPid = req.project_id || this.buildPid; this.buildMakeId = req.make_id || ''; }
     },
     async refreshMakeJob(job) {
@@ -1770,24 +1851,17 @@ WB.pages.video = {
             <div class="route-card" role="button" tabindex="0" :class="{sel: makeRoute==='script'}"
                  :style="{border: makeRoute==='script' ? '2px solid var(--accent)' : '1px solid var(--border)', background: makeRoute==='script' ? 'var(--accent-weak)' : ''}"
                  style="border-radius:10px;padding:12px 14px;cursor:pointer"
-                 @click="makeRoute='script'" @keydown.enter="makeRoute='script'">
+                 @click="switchRoute('script')" @keydown.enter="switchRoute('script')">
               <div style="display:flex;align-items:center;gap:8px;font-weight:600">✍️ 文案路线</div>
             </div>
             <div class="route-card" role="button" tabindex="0" :class="{sel: makeRoute==='audio'}"
                  :style="{border: makeRoute==='audio' ? '2px solid var(--accent)' : '1px solid var(--border)', background: makeRoute==='audio' ? 'var(--accent-weak)' : ''}"
                  style="border-radius:10px;padding:12px 14px;cursor:pointer"
-                 @click="makeRoute='audio'" @keydown.enter="makeRoute='audio'">
-              <div style="display:flex;align-items:center;gap:8px;font-weight:600">🎙️ 音频路线 <span class="badge yellow" style="font-size:10px">建设中</span></div>
+                 @click="switchRoute('audio')" @keydown.enter="switchRoute('audio')">
+              <div style="display:flex;align-items:center;gap:8px;font-weight:600">🎙️ 音频路线 <span class="muted" style="font-size:11px;font-weight:400">上传录音→转写→出片</span></div>
             </div>
           </div>
-          <div v-if="makeRoute==='audio'" class="card" style="padding:48px 24px;text-align:center">
-            <div style="font-size:40px">🎙️</div>
-            <h3>音频路线 · 建设中</h3>
-            <p class="muted" style="margin:10px 0 4px"><b>上传音频 + 提取文案 → 视频脚本 → 视频生成</b></p>
-            <p class="muted">从已成片的音频出发：上传配音/播客音频，自动转写提取文案，
-              校对后进入脚本分镜与出片流程（跳过 TTS 配音环节）。该路线正在开发中。</p>
-          </div>
-          <div v-else-if="!curMake" class="card empty">正在准备制作单…</div>
+          <div v-if="!curMake && makeRoute==='script'" class="card empty">正在准备制作单…</div>
           <template v-else>
             <div class="make-wrap">
               <aside class="make-step-nav" aria-label="制作步骤">
@@ -1801,14 +1875,62 @@ WB.pages.video = {
               <div class="make-step-main">
             <div class="notice" v-if="videoEnvWarn" style="margin:0 0 var(--s3)">⚠ {{ videoEnvWarn }}</div>
             <div class="card" v-if="makeSeen[1]" v-show="makeStep===1">
-              <h3>项目名称</h3>
+              <h3>{{ isAudioRoute ? '项目与音频' : '项目名称' }}</h3>
               <div class="form-row">
                 <input type="text" v-model="curMake.title" @input="saveMake()" :disabled="makeBusy" placeholder="给这条片子起个名字" style="flex:1;min-width:0;font-weight:600">
                 <span class="muted" style="white-space:nowrap">{{ {pending:'2 秒后自动保存',saving:'保存中…',saved:('已保存 ' + (savedAt[cur] || '')),error:'保存失败'}[saveState[cur]] || '' }}</span></div>
+              <template v-if="isAudioRoute">
+                <div class="form-row" style="margin-top:10px">
+                  <label>语音稿</label>
+                  <input type="file" accept=".mp3,.wav" ref="asrFile" style="display:none" @change="uploadAsrAudio">
+                  <button class="btn" type="button" :disabled="curMake.narration.locked" @click="$refs.asrFile.click()">{{ curMake.audio && curMake.audio.asset_id ? '换一段音频' : '选择音频文件（mp3/wav ≤30MB）' }}</button>
+                  <span v-if="curMake.audio && curMake.audio.asset_id" class="muted">已上传{{ curMake.audio.seconds ? ' · 约 ' + Math.round(curMake.audio.seconds) + ' 秒' : '' }}</span>
+                </div>
+                <audio v-if="curMake.audio && curMake.audio.asset_id" ref="asrAudio"
+                       :src="'/wb-api/video-assets/' + curMake.audio.asset_id + '/file'"
+                       controls preload="none" style="width:100%;height:36px;margin-top:6px"></audio>
+                <p class="muted" style="margin-top:8px">上传后到第 2 步「提取文字稿」。更换音频会清空转写/脚本进度。</p>
+              </template>
             </div>
             <div class="card" v-if="makeSeen[2]" v-show="makeStep===2">
-              <h3>口播稿生成 <span class="badge" :class="segBadge(1).cls">{{ segBadge(1).text }}</span></h3>
+              <h3>{{ isAudioRoute ? '转写与校对' : '口播稿生成' }} <span class="badge" :class="segBadge(1).cls">{{ segBadge(1).text }}</span></h3>
               <fieldset :disabled="makeBusy" style="border:0;min-width:0;padding:0">
+                <template v-if="isAudioRoute">
+                  <template v-if="!(curMake.audio && curMake.audio.asset_id)">
+                    <p class="muted">请先回到第 1 步上传语音稿（mp3/wav）。</p>
+                  </template>
+                  <template v-else>
+                    <div class="form-row">
+                      <button class="btn primary" type="button" :disabled="asrBusy || curMake.narration.locked" @click="startAsr">{{ asrBusy ? '转写中…' : (curMake.narration.text ? '重新转写' : '提取文字稿') }}</button>
+                      <span v-if="asrBusy && asrProgress" class="muted">{{ asrProgress.message }}</span>
+                    </div>
+                    <p v-if="asrErr" class="err-text">{{ asrErr }}</p>
+                    <template v-if="curMake.narration.text && !curMake.narration.locked">
+                      <p class="muted" style="margin:10px 0 4px">校对转写稿（<b>英文词</b>与<b>数字</b>最易错——数字请改回阿拉伯数字，画面数据卡要保持一致）。改完点「定稿」。</p>
+                      <textarea v-model="curMake.narration.text" @input="saveMake()" rows="10" style="width:100%"></textarea>
+                      <p class="muted">{{ narrationWords }} 字<span v-if="curMake.audio && curMake.audio.seconds"> · 音频约 {{ Math.round(curMake.audio.seconds) }} 秒 · 语速 {{ (narrationWords / curMake.audio.seconds).toFixed(1) }} 字/秒</span></p>
+                      <div v-if="asrPhrases.length" style="margin:8px 0">
+                        <div class="muted" style="font-size:12px;margin-bottom:4px">点时间跳播原声对照（句级时间轴来自本地对齐{{ curMake.audio && curMake.audio.match_rate != null ? ' · 匹配率 ' + Math.round(curMake.audio.match_rate * 100) + '%' : '' }}）：</div>
+                        <div style="max-height:170px;overflow:auto;border:1px solid var(--border);border-radius:8px;padding:6px">
+                          <div v-for="(p, i) in asrPhrases" :key="i" style="display:flex;gap:8px;padding:2px 4px;font-size:12px;align-items:baseline">
+                            <a href="javascript:void(0)" style="color:var(--accent);white-space:nowrap;font-family:monospace" @click="playPhrase(p)">{{ fmtClock(p.start) }}</a>
+                            <span :style="isSuspect(p.text) ? 'color:var(--yellow)' : ''">{{ p.text }}</span>
+                          </div>
+                        </div>
+                      </div>
+                      <div class="form-row" style="margin-top:8px">
+                        <button class="btn primary" type="button" :disabled="narrationWords < 40" @click="makeLock('narration')">定稿（锁定文稿）</button>
+                        <span class="muted" style="font-size:11px">定稿后切原声会按此稿精对齐；删净语气词可能影响对齐质量</span>
+                      </div>
+                    </template>
+                    <template v-else-if="curMake.narration.locked">
+                      <p class="muted">文稿已定稿（{{ narrationWords }} 字）。</p>
+                      <button class="btn" type="button" @click="makeLock('narration', true)">解锁重改</button>
+                    </template>
+                    <p v-else class="muted">点「提取文字稿」开始转写（mimo 约 20 倍速 + 本地句级对齐）。</p>
+                  </template>
+                </template>
+                <template v-else>
                 <template v-if="!curMake.narration.locked">
                   <div class="form-row radio-group">
                     <label><input type="radio" value="b" v-model="narTab">直接输入</label>
@@ -1844,6 +1966,7 @@ WB.pages.video = {
                   <p class="muted mono">已定稿 hash {{ curMake.narration.hash }} · {{ curMake.narration.locked_at }}</p>
                   <button class="btn" @click="makeLock('narration', true)">解锁改稿</button></div>
                 <button v-else class="btn primary" :disabled="narrationWords < 40" @click="makeLock('narration')">定稿</button>
+                </template>
               </fieldset>
               <div v-if="narErr" class="err-box" style="padding:12px">{{ narErr }}</div>
             </div>
@@ -1908,8 +2031,23 @@ WB.pages.video = {
               <div v-if="scriptErr" class="err-box" style="padding:12px">{{ scriptErr }}</div>
             </div>
             <div class="card" v-if="makeSeen[4]" v-show="makeStep===4">
-              <h3>音频生成 <span class="badge" :class="segBadge(3).cls">{{ segBadge(3).text }}</span></h3>
+              <h3>{{ isAudioRoute ? '切原声' : '音频生成' }} <span class="badge" :class="segBadge(3).cls">{{ segBadge(3).text }}</span></h3>
               <div v-if="!curMake.script_meta.locked" class="stub-wrap" style="padding:30px;text-align:center;background:var(--bg-hover);color:var(--text-mute)">先定稿视频脚本</div>
+              <template v-else-if="isAudioRoute">
+                <div v-if="curMake.voice_bad.length" class="notice">{{ curMake.voice_bad.length }} 幕原声与最新脚本不一致，请重切（{{ curMake.voice_bad.join('、') }}）</div>
+                <fieldset :disabled="makeBusy" style="border:0;min-width:0;padding:0">
+                  <p class="muted">按分镜句边界把上传音频切成逐幕原声——静音处下刀不打断语气，极少数无停顿处自动硬切（10ms 淡入淡出防爆音）。</p>
+                  <button class="btn primary" type="button" :disabled="voiceBusy || curMake.script_stale" @click="runMakeJob('voice')">{{ voiceBusy ? '切原声中…' : (curMake.voice.voice_key ? '重切原声' : '开始切原声') }}</button>
+                </fieldset>
+                <p v-if="voiceBusy" class="muted">{{ voiceProgress && voiceProgress.message || '准备中…' }}</p>
+                <div v-for="(c, i) in audioCuts" :key="c.id" style="display:flex;gap:10px;align-items:center;padding:6px 0;border-bottom:1px solid var(--border)">
+                  <span class="muted" style="min-width:110px;font-size:12px;font-family:monospace">{{ i + 1 }} · {{ fmtClock(c.start) }}–{{ fmtClock(c.end) }}</span>
+                  <span v-if="c.cut_mode==='hard'" class="badge yellow" style="font-size:10px">硬切</span>
+                  <span class="muted" style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px">{{ c.text }}</span>
+                  <audio v-if="curMake.voice.voice_key" controls preload="none" style="width:260px;height:32px"
+                         :src="'/wb-api/video-voice/' + curMake.id + '/' + curMake.voice.voice_key + '/' + c.id + '.mp3'"></audio>
+                </div>
+              </template>
               <template v-else>
                 <div v-if="curMake.voice_bad.length" class="notice">{{ curMake.voice_bad.length }} 拍语音与最新脚本不一致，需重生成（{{ curMake.voice_bad.map(id => {const i=makeBeats.findIndex(b=>b.id===id);return i>=0 ? '第 '+(i+1)+' 拍 ('+id+')' : id;}).join('、') }}）</div>
                 <fieldset :disabled="makeBusy" style="border:0;min-width:0;padding:0">

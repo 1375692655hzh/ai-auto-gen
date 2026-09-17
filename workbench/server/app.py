@@ -416,6 +416,30 @@ def create_app(bind_host: str = "127.0.0.1") -> FastAPI:
             return JSONResponse(out, status_code=400 if p.returncode == 4 else 502)
         return out
 
+    @app.post("/wb-api/test-asr")
+    def test_asr():
+        """同步 def 走线程池: seed 2s 样本实测 ~3s, 上限 60s。"""
+        import subprocess
+        cli = Path(__file__).resolve().parents[2] / "cli.py"
+        try:
+            p = subprocess.run([*config.py_cmd(), str(cli), "workbench", "test-asr"],
+                               capture_output=True, text=True, encoding="utf-8",
+                               errors="replace", timeout=60)
+        except subprocess.TimeoutExpired:
+            return JSONResponse({"ok": False, "error": "cli_timeout"}, status_code=504)
+        except OSError:
+            return JSONResponse({"ok": False, "error": "cli_start_failed"}, status_code=500)
+        try:
+            out = json.loads(p.stdout.strip().splitlines()[-1])
+            if not isinstance(out, dict):
+                raise ValueError("invalid result")
+        except (ValueError, TypeError, IndexError, AttributeError):
+            return JSONResponse({"ok": False, "error": "invalid_cli_response"}, status_code=502)
+        if p.returncode == 0 and out.get("ok") is True:
+            return out
+        return JSONResponse({"ok": False, "error": out.get("error") or "asr_failed",
+                             "hint": out.get("hint", "")}, status_code=502)
+
     # ── X 采集一键入口: 纯工作台部署无计划任务, 空态页面上直接拉数(xsurge_ctl) ──
     @app.get("/wb-api/xsurge-status")
     def xsurge_status():
@@ -867,6 +891,20 @@ def create_app(bind_host: str = "127.0.0.1") -> FastAPI:
             return JSONResponse({"error": "narration_not_locked" if row else "make_not_found"}, status_code=400)
         return start_video_job("generate", {"task": "storyboard", "make_id": row["id"]}, "gen-script")
 
+    @app.post("/wb-api/video-makes/{mid}/asr")
+    def video_make_asr(mid: str):
+        """音频路线·转写任务: mimo 出文本 + whisper 句级钉词(CLI 子进程)。"""
+        if vstudio.job_running("asr"):
+            return JSONResponse({"error": "任务进行中"}, status_code=409)
+        row = vstudio.make_get(mid)
+        if not row or (row.get("route") or "script") != "audio":
+            return JSONResponse({"error": "make_not_found" if not row else "bad_route"}, status_code=400)
+        if not (row.get("audio") or {}).get("asset_id") or not vstudio.asset_find(row["audio"]["asset_id"])[0]:
+            return JSONResponse({"error": "audio_missing", "hint": "先上传语音稿(mp3/wav)"}, status_code=400)
+        if row["narration"]["locked"]:
+            return JSONResponse({"error": "narration_locked", "hint": "先解锁文稿再重新转写"}, status_code=400)
+        return start_video_job("asr", {"make_id": mid}, "asr-audio")
+
     @app.post("/wb-api/video-voice/generate")
     async def video_voice_generate(request: Request):
         body = await request.json()
@@ -875,7 +913,8 @@ def create_app(bind_host: str = "127.0.0.1") -> FastAPI:
         row = vstudio.make_get(body.get("make_id"))
         if not row or not row["script_meta"]["locked"]:
             return JSONResponse({"error": "script_not_locked"}, status_code=400)
-        if not vstudio._tts_provider(body.get("provider_id"), body.get("voice")):
+        if (row.get("route") or "script") != "audio" \
+                and not vstudio._tts_provider(body.get("provider_id"), body.get("voice")):
             return JSONResponse({"error": "bad_provider"}, status_code=400)
         return start_video_job("voice", body, "gen-voice")
 

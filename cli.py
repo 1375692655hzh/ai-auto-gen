@@ -511,6 +511,14 @@ def workbench_cmd(args) -> int:
             pass
         print(json.dumps({"ok": code == 0, "model": model, "error": error}))
         return code
+    if args.sub == "test-asr":
+        sys.path.insert(0, str(WB))
+        from server import vstudio
+        return vstudio.run_test_asr_cli(args)
+    if args.sub == "asr-audio":
+        sys.path.insert(0, str(WB))
+        from server import vstudio
+        return vstudio.run_asr_cli(args)
     if args.sub == "gen-post":
         sys.path.insert(0, str(WB))
         from server import gcompose
@@ -853,6 +861,12 @@ def main() -> int:
     pw_vb.add_argument("--data-dir", help="CLI 隔离任务目录（须在本仓 data/ 内）")
     pw_tl = wsub.add_parser("test-llm", help="测试成稿模型连接(最小 ping, JSON 输出; 缺省按链优先级试到通)")
     pw_tl.add_argument("--model-id", default="", help="只测指定链位 id(含停用位)")
+    pw_ta = wsub.add_parser("test-asr", help="测试语音识别 ASR 连接(seed 自检音频真实转写, JSON 输出)")
+    pw_ta.add_argument("--json", action="store_true", help="输出单行 JSON(本就是, 习惯兼容)")
+    for command, desc2 in (("asr-audio", "视频制作音频路线转写任务(mimo+whisper 钉词)"),):
+        pw_job = wsub.add_parser(command, help=desc2)
+        pw_job.add_argument("--json", action="store_true", help="输出单行 JSON")
+        pw_job.add_argument("--data-dir", help="CLI 隔离任务目录（须在本仓 data/ 内）")
     pw_gp = wsub.add_parser("gen-post", help="内容生成成稿编排(CLI 子进程入口: 检索/行情图/技术位/观点聚合/LLM)")
     pw_gp.add_argument("--json", action="store_true", help="输出单行 JSON")
     pw_gr = wsub.add_parser("gen-reply", help="蹭蹭流量·评论生成(CLI 子进程入口: 按 status_id 取 RSS 快照→compose 链出 3 候选)")

@@ -28,9 +28,11 @@ BUILD_LOG_DIR = DATA_DIR / "video_builds"
 MAX_POOL = 500
 MAX_ANALYSES = 200
 MAX_SCRIPTS = 300
-JOB_KINDS = ("analyze", "generate", "voice", "build")
+JOB_KINDS = ("analyze", "generate", "voice", "build", "asr")
 # build 是分钟级真渲染, stale 阈值独立放宽到 60 分钟; analyze/generate 维持 20 分钟
-JOB_STALE_S = {"analyze": 20 * 60, "generate": 20 * 60, "voice": 20 * 60, "build": 60 * 60}
+# asr(音频路线转写+本地钉词) 首次要下 whisper 模型, 放宽到 40 分钟
+JOB_STALE_S = {"analyze": 20 * 60, "generate": 20 * 60, "voice": 20 * 60,
+               "build": 60 * 60, "asr": 40 * 60}
 SEMANTIC_KEYS = ("theme", "hook", "structure", "devices", "voice", "cta",
                  "reusable", "visuals", "tier_note")
 
@@ -729,6 +731,7 @@ def status_payload() -> dict:
     out["analyze"]["result_key"] = jobs["analyze"].get("result_key", "")
     out["generate"]["result"] = jobs["generate"].get("result")
     out["voice"]["result"] = jobs["voice"].get("result")
+    out["asr"]["result"] = jobs["asr"].get("result")
     out["build"]["result"] = jobs["build"].get("result") or _empty_build_result()
     return out
 
@@ -1250,7 +1253,11 @@ def _safe_id(value) -> bool:
 
 
 def make_get(mid: str) -> dict | None:
-    return next((r for r in config.load_video_makes() if r.get("id") == mid), None)
+    row = next((r for r in config.load_video_makes() if r.get("id") == mid), None)
+    if row is not None:
+        row.setdefault("route", "script")            # 2026-09-15 音频路线: 旧行迁移
+        row.setdefault("audio", None)
+    return row
 
 
 def _make_save(row: dict) -> dict:
@@ -1286,6 +1293,7 @@ def make_upsert(payload: dict) -> dict | None:
             gm = "inherit"
         row = {"id": _new_make_id(), "title": "未命名视频", "status": "editing_narration",
                "created_at": _now(), "updated_at": _now(), "project_id": "",
+               "route": "script", "audio": None,
                "narration": {"source": "", "style_id": "", "ref_text": "", "text": "",
                              "locked": False, "locked_at": None, "hash": ""},
                "script": None, "script_meta": {"locked": False, "locked_at": None,
@@ -1299,6 +1307,20 @@ def make_upsert(payload: dict) -> dict | None:
                          "hook_index": 0, "beat_overrides": []}}
     if "title" in payload:
         row["title"] = str(payload["title"])
+    if payload.get("route") in ("script", "audio"):
+        row["route"] = payload["route"]
+    # 音频路线: 绑定/换绑上传音频(换音频=转写校对分镜语音全作废, 一并重置)
+    if isinstance(payload.get("audio"), dict) and row["route"] == "audio":
+        aid = str(payload["audio"].get("asset_id") or "")
+        prev = (row.get("audio") or {}).get("asset_id") or ""
+        if aid and aid != prev and not row["narration"]["locked"]:
+            row["audio"] = {"asset_id": aid}
+            row["narration"].update(text="", source="", locked=False, locked_at=None, hash="")
+            row["script"] = None
+            row["script_meta"] = {"locked": False, "locked_at": None, "hash": "",
+                                  "source_narration_hash": ""}
+            row["voice"].update(items={}, voice_key="")
+            row["status"] = "editing_narration"
     if not row["narration"]["locked"]:
         # 0913g: llm_source/length_s/fidelity 此前被丢, 保存回显会把生成模型顶回链首
         for key in ("text", "ref_text", "style_id", "source", "llm_source", "fidelity"):
@@ -1317,6 +1339,9 @@ def make_upsert(payload: dict) -> dict | None:
     for key in ("profile_id", "voice"):
         if key in (payload.get("voice") or {}):
             value = str(payload["voice"][key] or "")
+            # 音频路线的 voice 段由切原声任务管理(profile 恒空), 前端回填默认供应商不得清已切原声(0917 e2e 实证)
+            if row.get("route") == "audio":
+                continue
             if row["voice"][key] != value:
                 row["voice"]["items"] = {}
                 row["voice"]["voice_key"] = ""
@@ -2091,12 +2116,244 @@ def _run_voice(request: dict):
     return result, 0
 
 
+def run_test_asr_cli(args) -> int:
+    """ASR 连通性测试: 仓内 seed 自检音频走真实转写; 输出 JSON, 异常只给分类不透传细节防泄露 key。"""
+    from . import vasr
+    seed = Path(__file__).resolve().parent / "seed" / "asr-probe.mp3"
+    try:
+        if not seed.is_file():
+            print(json.dumps({"ok": False, "error": "probe_audio_missing"}))
+            return 3
+        result = vasr.transcribe_file(seed)
+        print(json.dumps({"ok": True, "text_head": result["text"][:40],
+                          "seconds": result.get("seconds"),
+                          "audio_tokens": result.get("audio_tokens")}, ensure_ascii=False))
+        return 0
+    except vasr.AsrError as e:
+        print(json.dumps({"ok": False, "error": e.kind, "hint": e.message}, ensure_ascii=False))
+        return 3
+    except Exception as e:
+        print(json.dumps({"ok": False, "error": type(e).__name__}, ensure_ascii=False))
+        return 3
+
+
+def _asr_source_path(mid: str, ext: str) -> Path:
+    return _safe_path(voice_root(), mid, "source" + ext)
+
+
+def _file_hash8(path: Path) -> str:
+    return hashlib.sha1(Path(path).read_bytes()).hexdigest()[:8]
+
+
+def _asr_pin(audio_path: Path, narration: str) -> tuple[list, str, dict]:
+    """调 asr-timeline.mjs(钉词): 已知文本强制对齐到整条音频 → 句级 [{id,text,start,end}]。
+
+    复用 align.mjs 的 ensurePhraseTimeline(whisper token 时钟, 缓存键 audioHash+narrationHash),
+    校对改文后自动重钉。失败返回 ([], 错误文案, {}); 三岗复合裁决: P0 失败退出不做降级切。"""
+    from . import vmake
+    ok, env_err = node_env_check("asr-timeline.mjs")
+    if not ok:
+        return [], env_err, {}
+    job = {"audio_file": str(audio_path.resolve()), "narration": narration,
+           "scene_id": "asr-full",
+           "result_file": str((audio_path.parent / "_pinresult.json").resolve())}
+    (audio_path.parent / "_pinresult.json").unlink(missing_ok=True)
+    _atomic_json(audio_path.parent / "_pinjob.json", job)
+    try:
+        proc = subprocess.run(
+            ["node", "scripts/asr-timeline.mjs", str((audio_path.parent / "_pinjob.json").resolve())],
+            cwd=str(vmake.VIDEO_DIR), capture_output=True, text=True,
+            encoding="utf-8", errors="replace", timeout=2400,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+    except subprocess.TimeoutExpired:
+        return [], "钉词超时(音频过长?本地 whisper CPU 吃紧)", {}
+    try:
+        data = json.loads((audio_path.parent / "_pinresult.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        tail = ((proc.stdout or "") + (proc.stderr or "")).strip()[-200:]
+        return [], tail or "pin_result_missing", {}
+    if not data.get("ok"):
+        return [], str(data.get("error") or "align_failed"), {}
+    return data.get("phrases") or [], "", {"match_rate": data.get("match_rate"),
+                                           "audio_duration": data.get("audioDuration")}
+
+
+def _assign_phrases(beats: list, phrases: list) -> list:
+    """把全轨钉词句按文本消耗原子分配到 beats(两侧去空白逐字衔接, phrase 不可拆)。
+
+    beat 边界落在句中时整句归前幕——切点永远是句边界, 原声连续性优先。"""
+    norm = lambda s: re.sub(r"\s+", "", str(s or ""))
+    texts = [norm(p.get("text")) for p in phrases]
+    out, pi, consumed = [], 0, 0
+    for b in beats:
+        target = norm(b.get("narration"))
+        group = []
+        while pi < len(texts) and consumed < len(target):
+            group.append(phrases[pi])
+            consumed += len(texts[pi])
+            pi += 1
+        out.append(group)
+        consumed = max(0, consumed - len(target))
+    return out
+
+
+def _run_asr(request: dict) -> tuple[dict, int]:
+    """音频路线·转写: mimo 出文本(权威) → 写 narration(未锁, 进校对) → whisper 钉词 v1(校对页点句播)。"""
+    from . import vasr
+    row = make_get(request.get("make_id"))
+    if not row or row.get("route") != "audio":
+        return {"error": "bad_make"}, 4
+    if row["narration"]["locked"]:
+        return {"error": "narration_locked", "hint": "先解锁文稿再重新转写"}, 4
+    audio = row.get("audio") or {}
+    path, kind = asset_find(audio.get("asset_id"))
+    if not path or kind != "audio":
+        return {"error": "audio_missing", "hint": "先上传语音稿(mp3/wav)"}, 4
+    tick("asr", "mimo", 15, "mimo 转写中(约 20 倍速)")
+    result = vasr.transcribe_file(path)          # AsrError 抛给上层分类
+    # 源音频拷进 make 自有语音目录(与素材库解耦: 素材删了不影响制作单)
+    src = _asr_source_path(row["id"], path.suffix.lower())
+    src.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(path, src)
+    tick("asr", "align", 55, "本地 whisper 句级对齐(首次自动装模型, 之后有缓存)")
+    phrases, align_err, meta = _asr_pin(src, result["text"])
+    current = make_get(row["id"])
+    if not current or (current.get("audio") or {}).get("asset_id") != audio.get("asset_id"):
+        return {"error": "make_changed", "hint": "转写期间更换了音频，请重试"}, 4
+    current["narration"].update(text=result["text"], source="asr", locked=False,
+                                locked_at=None, hash="", llm_source="mimo-asr", style_id="")
+    current["audio"] = {**(current.get("audio") or {}),
+                        "transcript": result["text"],
+                        "engine": str((config.load().get("asr") or {}).get("model") or ""),
+                        "seconds": result.get("seconds"),
+                        "file_hash": _file_hash8(src), "src_ext": path.suffix.lower().lstrip("."),
+                        "phrases": phrases, "align_ok": not align_err,
+                        "match_rate": meta.get("match_rate")}
+    current["script"] = None
+    current["script_meta"] = {"locked": False, "locked_at": None, "hash": "",
+                              "source_narration_hash": ""}
+    current["voice"].update(items={}, voice_key="")
+    current["status"] = "editing_narration"
+    _make_save(current)
+    report = {"text_head": result["text"][:60], "sentences": len(phrases),
+              "align_ok": not align_err, "match_rate": meta.get("match_rate"),
+              "hint": ("句级对齐失败: " + align_err[:120] +
+                       "——仍可校对定稿, 切原声时会用终稿重钉") if align_err else ""}
+    _set_job_result("asr", report)
+    return report, 0
+
+
+def run_asr_cli(args) -> int:
+    report, code = {}, 3
+    try:
+        request = load_jobs()["asr"]["request"]
+        tick("asr", "start", 1, "准备转写")
+        report, code = _run_asr(request) if request else ({"error": "no_request"}, 4)
+    except Exception as e:
+        from . import vasr as _vasr
+        if isinstance(e, _vasr.AsrError):
+            report = {"error": e.kind, "hint": e.message}
+        else:
+            report = {"error": type(e).__name__, "hint": str(e)[:200]}
+    finally:
+        finish_job("asr", code, report.get("error", ""), report.get("hint", ""))
+        print(json.dumps(report, ensure_ascii=False))
+    return code
+
+
+def _run_slice(request: dict):
+    """音频路线·切原声: 终稿钉词 v2 → 句组映射 beats → 静音窗/硬切双路径切幕 → voice_ready。
+
+    产物与 TTS take 同构(裸 mp3+manifest 由既有拷贝链写, 不写 sidecar, profile 留空),
+    build.mjs 零改动接管(三岗复合裁决)。"""
+    from . import vmake
+    row = make_get(request.get("make_id"))
+    if not row or row.get("route") != "audio":
+        return {"error": "bad_make"}, 4
+    if not row["script"] or not row["script_meta"]["locked"]:
+        return {"error": "script_not_locked"}, 4
+    src = _asr_source_path(row["id"], "." + str((row.get("audio") or {}).get("src_ext") or "mp3"))
+    if not src.is_file():
+        return {"error": "source_missing", "hint": "上传音频不存在, 请重新上传并转写"}, 4
+    beats = row["script"]["beats"]
+    tick("voice", "align", 10, "终稿句级对齐(校对改文会自动重钉)")
+    phrases, align_err, _meta = _asr_pin(src, row["narration"]["text"])
+    if align_err:
+        return {"error": "align_failed",
+                "hint": "钉词失败(校对改写幅度过大?): " + align_err[:120]
+                        + "；请把改写控制在与原文相近长度后重试"}, 3
+    groups = _assign_phrases(beats, phrases)
+    cuts = []
+    for beat, group in zip(beats, groups):
+        start = float(group[0]["start"]) if group else 0.0
+        end = float(group[-1]["end"]) if group else 0.0
+        cuts.append({"id": beat["id"], "text": str(beat.get("narration") or "")[:50],
+                     "narration": beat["narration"], "start": start, "end": end,
+                     "phrases": [{"t": p["text"], "start": float(p["start"]),
+                                  "end": float(p["end"])} for p in group]})
+    ok, env_err = node_env_check("cut-audio.mjs")
+    if not ok:
+        return {"error": "env_missing", "hint": env_err}, 3
+    vkey = "asr-" + _file_hash8(src)
+    out_dir = _safe_path(voice_root(), row["id"], vkey)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    tick("voice", "cut", 40, f"切原声({len(cuts)} 幕, 静音窗下刀/硬切兜底)")
+    plan = {"source": str(src.resolve()), "out_dir": str(out_dir.resolve()), "cuts": cuts,
+            "window": 0.3, "expand": 0.6, "fade_ms": 10,
+            "result_file": str((out_dir / "_cutresult.json").resolve())}
+    (out_dir / "_cutresult.json").unlink(missing_ok=True)
+    _atomic_json(out_dir / "_cutplan.json", plan)
+    try:
+        proc = subprocess.run(
+            ["node", "scripts/cut-audio.mjs", str((out_dir / "_cutplan.json").resolve())],
+            cwd=str(vmake.VIDEO_DIR), capture_output=True, text=True,
+            encoding="utf-8", errors="replace", timeout=900,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+    except subprocess.TimeoutExpired:
+        return {"error": "cut_timeout", "hint": "切原声超时"}, 3
+    try:
+        data = json.loads((out_dir / "_cutresult.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        tail = ((proc.stdout or "") + (proc.stderr or "")).strip()[-200:]
+        return {"error": "cut_failed", "hint": tail or "cut_result_missing"}, 3
+    if not data.get("ok"):
+        hint = str(data.get("error") or "")[:180]
+        if "lame" in hint.lower() or "libmp3lame" in hint.lower():
+            hint += "——本机 ffmpeg 缺 mp3 编码器, 请安装完整版 ffmpeg 后重试"
+        return {"error": "cut_failed", "hint": hint}, 3
+    # lost-update 守卫(同 _run_voice): 切幕期间脚本变化则放弃
+    current = make_get(row["id"])
+    if not current or current["script"] != row["script"] or not current["script_meta"]["locked"]:
+        return {"error": "make_changed", "hint": "切幕期间脚本变化，请重新切原声"}, 4
+    items = {}
+    for beat, item in zip(beats, data.get("cuts") or []):
+        items[beat["id"]] = {"file": f"{beat['id']}.mp3",
+                             "hash": voice_hash(beat["narration"]),
+                             "duration_s": item.get("duration") or 0}
+    current["voice"].update(profile_id="", voice="", voice_key=vkey, items=items)
+    current["audio"] = {**(current.get("audio") or {}), "cuts": data.get("cuts") or [],
+                        "match_rate": _meta.get("match_rate")}
+    current["status"] = "voice_ready" if not voice_missing(current) else "script_locked"
+    _make_save(current)
+    result = {"make_id": row["id"], "voice_key": vkey,
+              "cuts": data.get("cuts") or []}
+    _set_job_result("voice", result)
+    return result, 0
+
+
 def run_voice_cli(args) -> int:
     report, code = {}, 3
     try:
         request = load_jobs()["voice"]["request"]
-        tick("voice", "start", 1, "准备合成语音")
-        report, code = _run_voice(request) if request else ({"error": "no_request"}, 4)
+        row = make_get(request.get("make_id")) if request else None
+        if request and (row or {}).get("route") == "audio":
+            tick("voice", "start", 1, "准备切原声")
+            report, code = _run_slice(request)
+        elif request:
+            tick("voice", "start", 1, "准备合成语音")
+            report, code = _run_voice(request)
+        else:
+            report, code = {"error": "no_request"}, 4
     except Exception as e:
         report = {"error": type(e).__name__}
     finally:
