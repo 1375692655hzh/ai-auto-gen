@@ -1381,7 +1381,7 @@ def create_app(bind_host: str = "127.0.0.1") -> FastAPI:
             mode = body.get("mode") or "build"
             if mode not in ("build", "estimate", "keyframes", "sample"):
                 mode = "build"
-            missing = vstudio.voice_missing(row)
+            missing = vstudio._audio_gate_missing(row)
             if mode != "estimate" and missing:
                 return JSONResponse({"error": "voice_missing", "hint": "缺少语音：" + "、".join(missing)}, status_code=400)
             project_id = vstudio._id("wb")

@@ -1368,7 +1368,8 @@ def make_view(row: dict) -> dict:
     row["voice_bad"] = [bid for bid, item in row["voice"]["items"].items()
                         if item.get("hash") != hashes.get(bid)]
     row["script_badge"] = "stale" if row["script_stale"] else ("locked" if row["script_meta"]["locked"] else "draft")
-    row["voice_badge"] = "stale" if row["voice_bad"] else ("ready" if beats and not voice_missing(row) else "missing")
+    gate_missing = _audio_gate_missing(row)   # audio 路线=主轨+时间轴, script 路线=逐幕 take
+    row["voice_badge"] = "stale" if row["voice_bad"] else ("ready" if beats and not gate_missing else "missing")
     return row
 
 
@@ -2154,6 +2155,102 @@ def _file_hash8(path: Path) -> str:
     return hashlib.sha1(Path(path).read_bytes()).hexdigest()[:8]
 
 
+def _probe_duration(path: Path) -> float:
+    """ffprobe 实测时长(秒); 失败返回 0。ffprobe: 系统 PATH 优先, compositor 兄弟文件兜底。"""
+    probe = shutil.which("ffprobe")
+    if not probe:
+        ff = _resolve_ffmpeg()
+        cand = ff.replace("ffmpeg.exe", "ffprobe.exe").replace("ffmpeg", "ffprobe") if ff else ""
+        probe = cand if cand and Path(cand).is_file() else ""
+    if not probe:
+        return 0.0
+    try:
+        proc = subprocess.run([probe, "-v", "error", "-show_entries", "format=duration",
+                               "-of", "csv=p=0", str(path)],
+                              capture_output=True, text=True, encoding="utf-8", errors="replace",
+                              timeout=60, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+        return float(proc.stdout.strip())
+    except (subprocess.TimeoutExpired, ValueError, OSError):
+        return 0.0
+
+
+def _ensure_master(row: dict) -> tuple[dict, str]:
+    """音频路线·原音连续主轨(0917 拍板): 成片唯一音轨 = 用户上传原始音频, 不切不分不转码。
+
+    master 落 make 语音目录: mp3/wav 复用 source 副本; m4a 直接字节复制原始资产;
+    视频一次性 -map 0:a:0 -c:a copy 抽 AAC(copy 失败才一次性 aac 转码并标记 normalized)。
+    返回 (master 元数据, 错误文案)。"""
+    audio = row.get("audio") or {}
+    path, kind = asset_find(audio.get("asset_id"))
+    if not path or kind not in ("audio", "video"):
+        return {}, "原始音频素材缺失, 请重新上传"
+    ext = path.suffix.lower().lstrip(".")
+    vdir = _safe_path(voice_root(), row["id"])
+    vdir.mkdir(parents=True, exist_ok=True)
+    delivery = "stream-copy"
+    if kind == "video":
+        mfile = vdir / "master.m4a"
+        ff = _resolve_ffmpeg()
+        if not ff:
+            return {}, "未找到 ffmpeg, 无法抽取视频音轨"
+        argv = [ff, "-hide_banner", "-loglevel", "error", "-y", "-i", str(path),
+                "-map", "0:a:0", "-vn", "-c:a", "copy", str(mfile)]
+        proc = subprocess.run(argv, capture_output=True, text=True, encoding="utf-8",
+                              errors="replace", timeout=900,
+                              creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+        delivery = "stream-copy"
+        if proc.returncode != 0 or not mfile.is_file() or mfile.stat().st_size < 1024:
+            # 容器不兼容流拷(非 AAC 音轨等) → 一次性 aac 转码, 诚实标记
+            argv = [ff, "-hide_banner", "-loglevel", "error", "-y", "-i", str(path),
+                    "-map", "0:a:0", "-vn", "-c:a", "aac", "-b:a", "192k", str(mfile)]
+            proc = subprocess.run(argv, capture_output=True, text=True, encoding="utf-8",
+                                  errors="replace", timeout=900,
+                                  creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+            delivery = "normalized-aac"
+            if proc.returncode != 0 or not mfile.is_file() or mfile.stat().st_size < 1024:
+                return {}, "抽取视频音轨失败: " + ((proc.stderr or "").strip()[-120:] or "视频可能没有音轨")
+    elif ext in ("mp3", "wav"):
+        mfile = vdir / f"master.{ext}"          # 与 source 同字节, 独立成文件防 ASR 副本被清理连坐
+        shutil.copy2(path, mfile)
+    else:                                        # m4a 等纯音频容器: 原始字节直拷
+        mfile = vdir / f"master.{ext or 'm4a'}"
+        shutil.copy2(path, mfile)
+    duration = _probe_duration(mfile)
+    if duration <= 0:
+        duration = (audio.get("seconds") or 0) or 0.0
+    return {"file": mfile.name, "ext": mfile.suffix.lstrip("."), "asset_id": audio.get("asset_id"),
+            "hash": _file_hash8(mfile), "duration_s": duration, "delivery": delivery}, ""
+
+
+def master_audio_missing(row: dict) -> list:
+    """audio 路线 build 前置校验: 主轨文件在+hash 一致+时间轴在+文稿未过期+幕数一致。空=可 build。"""
+    if (row.get("route") or "script") != "audio":
+        return []
+    audio = row.get("audio") or {}
+    master, tl = audio.get("master") or {}, audio.get("timeline") or {}
+    errs = []
+    mfile = _safe_path(voice_root(), row["id"], master.get("file") or "")
+    if not master.get("file") or not mfile.is_file():
+        errs.append("原始音频主轨未就绪")
+    elif master.get("hash") and _file_hash8(mfile) != master["hash"]:
+        errs.append("原始音频主轨文件已变化")
+    tfile = _safe_path(voice_root(), row["id"], tl.get("file") or "")
+    if not tl.get("file") or not tfile.is_file():
+        errs.append("画面时间轴未生成（重新执行第 4 步对齐）")
+    else:
+        if tl.get("narration_hash") and tl["narration_hash"] != voice_hash(row.get("narration", {}).get("text") or ""):
+            errs.append("文稿已修改，画面时间轴过期（重新执行第 4 步对齐）")
+        n_beats = len((row.get("script") or {}).get("beats") or [])
+        if tl.get("beats") not in (None, n_beats):
+            errs.append("分镜数与时间轴不一致（重新生成脚本或对齐）")
+    return errs
+
+
+def _audio_gate_missing(row: dict) -> list:
+    """route-aware build 门: audio 路线查主轨+时间轴, script 路线维持逐幕 take 校验。"""
+    return master_audio_missing(row) if (row.get("route") or "script") == "audio" else voice_missing(row)
+
+
 def _asr_pin(audio_path: Path, narration: str) -> tuple[list, str, dict]:
     """调 asr-timeline.mjs(钉词): 已知文本强制对齐到整条音频 → 句级 [{id,text,start,end}]。
 
@@ -2455,22 +2552,28 @@ def _run_asr(request: dict) -> tuple[dict, int]:
     if align_err:
         # 长音频 whisper 幻觉(token/旁白比出界)→ 静音比例估算降级: 句界近似但切点吸附静音,
         # 字幕精度由 build 期逐幕 whisper 保证(短音频无幻觉)
-        phrases, _est_err = _estimate_phrases(src, result["text"])
+        phrases, _est_err = _estimate_phrases(src, text)
         if phrases:
             align_mode, align_err = "estimated", ""
+    master, master_err = _ensure_master(row)
+    if master_err:
+        # 主轨准备失败不拦转写(校对仍可用), build 门会再拦
+        master = {}
     current = make_get(row["id"])
     if not current or (current.get("audio") or {}).get("asset_id") != audio.get("asset_id"):
         return {"error": "make_changed", "hint": "转写期间更换了音频，请重试"}, 4
     current["narration"].update(text=text, source="asr", locked=False,
                                 locked_at=None, hash="", llm_source="mimo-asr", style_id="")
-    current["audio"] = {**(current.get("audio") or {}),
-                        "transcript": text,
-                        "engine": str((config.load().get("asr") or {}).get("model") or ""),
-                        "seconds": seconds,
-                        "file_hash": _file_hash8(src), "src_ext": "mp3",
-                        "original_ext": ext, "from_video": from_video,
-                        "phrases": phrases, "align_ok": not align_err, "align_mode": align_mode,
-                        "match_rate": meta.get("match_rate")}
+    audio_update = {"transcript": text,
+                    "engine": str((config.load().get("asr") or {}).get("model") or ""),
+                    "seconds": seconds,
+                    "file_hash": _file_hash8(src), "src_ext": "mp3",
+                    "original_ext": ext, "from_video": from_video,
+                    "phrases": phrases, "align_ok": not align_err, "align_mode": align_mode,
+                    "match_rate": meta.get("match_rate")}
+    if master:
+        audio_update["master"] = master
+    current["audio"] = {**(current.get("audio") or {}), **audio_update}
     current["script"] = None
     current["script_meta"] = {"locked": False, "locked_at": None, "hash": "",
                               "source_narration_hash": ""}
@@ -2504,11 +2607,9 @@ def run_asr_cli(args) -> int:
 
 
 def _run_slice(request: dict):
-    """音频路线·切原声: 终稿钉词 v2 → 句组映射 beats → 静音窗/硬切双路径切幕 → voice_ready。
-
-    产物与 TTS take 同构(裸 mp3+manifest 由既有拷贝链写, 不写 sidecar, profile 留空),
-    build.mjs 零改动接管(三岗复合裁决)。"""
-    from . import vmake
+    """音频路线·原音连续时间轴(0917 用户裁决翻案): 不再切原声——成片唯一音轨=用户上传原始音频,
+    本步骤只做终稿钉词 + 句组映射 beats + 画面幕区间规划(覆盖全轨 [0, duration], 无洞无重叠)。
+    产物 master.timeline.json; build 期 Remotion 只渲静音画面, ffmpeg -c:a copy remux 原音收尾。"""
     row = make_get(request.get("make_id"))
     if not row or row.get("route") != "audio":
         return {"error": "bad_make"}, 4
@@ -2517,12 +2618,26 @@ def _run_slice(request: dict):
     src = _asr_source_path(row["id"], "." + str((row.get("audio") or {}).get("src_ext") or "mp3"))
     if not src.is_file():
         return {"error": "source_missing", "hint": "上传音频不存在, 请重新上传并转写"}, 4
+    # 主轨(原始上传音频; 旧制作单自愈补建)
+    audio_meta = row.get("audio") or {}
+    master = audio_meta.get("master") or {}
+    mfile = _safe_path(voice_root(), row["id"], master.get("file") or "")
+    if not master or not mfile.is_file() or master.get("hash") != _file_hash8(mfile):
+        master, err = _ensure_master(row)
+        if err:
+            return {"error": "master_missing", "hint": err}, 3
+        mfile = _safe_path(voice_root(), row["id"], master["file"])
+    duration_s = float(master.get("duration_s") or 0)
+    if duration_s <= 0:
+        duration_s = _probe_duration(mfile)
+    if duration_s <= 0:
+        return {"error": "master_bad", "hint": "主轨时长探测失败(ffprobe?)"}, 3
     beats = row["script"]["beats"]
-    tick("voice", "align", 10, "终稿句级对齐(校对改文会自动重钉)")
+    tick("voice", "align", 30, "终稿句级对齐(校对改文会自动重钉)")
     phrases, align_err, _meta = _asr_pin(src, row["narration"]["text"])
     align_mode = "whisper"
     if align_err:
-        # 全轨钉词失败(长音频幻觉) → 静音比例估算降级, 放宽切窗让边界尽量落在静音
+        # 全轨钉词失败(长音频幻觉) → 静音比例估算降级(字幕/切幕近似, 音轨不受影响——原音整轨直用)
         phrases, _est_err = _estimate_phrases(src, row["narration"]["text"])
         if not phrases:
             return {"error": "align_failed",
@@ -2530,61 +2645,60 @@ def _run_slice(request: dict):
                             + "；请把改写控制在与原文相近长度后重试"}, 3
         align_mode = "estimated"
     groups = _assign_phrases(beats, phrases)
-    cuts = []
-    for beat, group in zip(beats, groups):
-        start = float(group[0]["start"]) if group else 0.0
-        end = float(group[-1]["end"]) if group else 0.0
-        cuts.append({"id": beat["id"], "text": str(beat.get("narration") or "")[:50],
-                     "narration": beat["narration"], "start": start, "end": end,
-                     "phrases": [{"t": p["text"], "start": float(p["start"]),
-                                  "end": float(p["end"])} for p in group]})
-    ok, env_err = node_env_check("cut-audio.mjs")
-    if not ok:
-        return {"error": "env_missing", "hint": env_err}, 3
-    vkey = "asr-" + _file_hash8(src)
-    out_dir = _safe_path(voice_root(), row["id"], vkey)
-    out_dir.mkdir(parents=True, exist_ok=True)
-    tick("voice", "cut", 40, f"切原声({len(cuts)} 幕, 静音窗下刀/硬切兜底)")
-    win, expand = (0.8, 3.0) if align_mode == "estimated" else (0.3, 0.6)
-    plan = {"source": str(src.resolve()), "out_dir": str(out_dir.resolve()), "cuts": cuts,
-            "window": win, "expand": expand, "fade_ms": 10,
-            "result_file": str((out_dir / "_cutresult.json").resolve())}
-    (out_dir / "_cutresult.json").unlink(missing_ok=True)
-    _atomic_json(out_dir / "_cutplan.json", plan)
-    try:
-        proc = subprocess.run(
-            ["node", "scripts/cut-audio.mjs", str((out_dir / "_cutplan.json").resolve())],
-            cwd=str(vmake.VIDEO_DIR), capture_output=True, text=True,
-            encoding="utf-8", errors="replace", timeout=900,
-            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
-    except subprocess.TimeoutExpired:
-        return {"error": "cut_timeout", "hint": "切原声超时"}, 3
-    try:
-        data = json.loads((out_dir / "_cutresult.json").read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        tail = ((proc.stdout or "") + (proc.stderr or "")).strip()[-200:]
-        return {"error": "cut_failed", "hint": tail or "cut_result_missing"}, 3
-    if not data.get("ok"):
-        hint = str(data.get("error") or "")[:180]
-        if "lame" in hint.lower() or "libmp3lame" in hint.lower():
-            hint += "——本机 ffmpeg 缺 mp3 编码器, 请安装完整版 ffmpeg 后重试"
-        return {"error": "cut_failed", "hint": hint}, 3
-    # lost-update 守卫(同 _run_voice): 切幕期间脚本变化则放弃
+    # 画面幕区间: 首幕 0 起(保留片头呼吸/停顿), 末幕到原音 EOF(保留片尾);
+    # 中间边界=相邻句组 前组末句end 与 后组首句start 的中点(自然停顿处切画面)
+    bounds = [0.0]
+    for i in range(len(groups) - 1):
+        prev_end = float(groups[i][-1]["end"]) if groups[i] else None
+        nxt_start = float(groups[i + 1][0]["start"]) if groups[i + 1] else None
+        if prev_end is not None and nxt_start is not None:
+            bounds.append(min(duration_s, max(0.0, (prev_end + nxt_start) / 2)))
+        elif prev_end is not None:
+            bounds.append(min(duration_s, prev_end))
+        elif nxt_start is not None:
+            bounds.append(max(0.0, nxt_start))
+        else:
+            bounds.append(duration_s * (i + 1) / len(groups))
+    bounds.append(duration_s)
+    tl_beats, ui_cuts = [], []
+    for beat, group, start, end in zip(beats, groups, bounds[:-1], bounds[1:]):
+        if end - start < 0.05:
+            return {"error": "timeline_degenerate",
+                    "hint": f"分镜 {beat.get('id')} 分不到画面时间(钉词句数少于分镜数), "
+                            "请减少分镜数量或重新生成脚本"}, 3
+        tl_beats.append({"id": beat["id"], "start_s": round(start, 3), "end_s": round(end, 3),
+                         "phrases": [{"t": p["text"], "start": round(float(p["start"]), 3),
+                                      "end": round(float(p["end"]), 3)} for p in group]})
+        ui_cuts.append({"id": beat["id"], "text": str(beat.get("narration") or "")[:50],
+                        "start": round(start, 3), "end": round(end, 3),
+                        "duration": round(end - start, 3), "cut_mode": "continuous",
+                        "phrases": tl_beats[-1]["phrases"]})
+    vdir = _safe_path(voice_root(), row["id"])
+    vdir.mkdir(parents=True, exist_ok=True)
+    tick("voice", "cut", 70, f"画面时间轴({len(tl_beats)} 幕, 原音连续不切)")
+    timeline = {"schema": "wb-original-continuous-timeline/v1",
+                "audio_hash": master["hash"], "narration_hash": voice_hash(row["narration"]["text"]),
+                "duration_s": round(duration_s, 3), "alignment": align_mode,
+                "beats": tl_beats}
+    _atomic_json(vdir / "master.timeline.json", timeline)
+    # lost-update 守卫: 对齐期间脚本变化则放弃
     current = make_get(row["id"])
     if not current or current["script"] != row["script"] or not current["script_meta"]["locked"]:
-        return {"error": "make_changed", "hint": "切幕期间脚本变化，请重新切原声"}, 4
-    items = {}
-    for beat, item in zip(beats, data.get("cuts") or []):
-        items[beat["id"]] = {"file": f"{beat['id']}.mp3",
-                             "hash": voice_hash(beat["narration"]),
-                             "duration_s": item.get("duration") or 0}
-    current["voice"].update(profile_id="", voice="", voice_key=vkey, items=items)
-    current["audio"] = {**(current.get("audio") or {}), "cuts": data.get("cuts") or [],
+        return {"error": "make_changed", "hint": "对齐期间脚本变化，请重新执行"}, 4
+    current["voice"].update(profile_id="", voice="", voice_key="", items={})
+    current["audio"] = {**(current.get("audio") or {}), "master": master,
+                        "timeline": {"file": "master.timeline.json",
+                                     "audio_hash": master["hash"],
+                                     "narration_hash": timeline["narration_hash"],
+                                     "duration_s": timeline["duration_s"],
+                                     "beats": len(tl_beats)},
+                        "cuts": ui_cuts,
                         "match_rate": _meta.get("match_rate"), "align_mode": align_mode}
-    current["status"] = "voice_ready" if not voice_missing(current) else "script_locked"
+    current["status"] = "voice_ready" if not master_audio_missing(current) else "script_locked"
     _make_save(current)
-    result = {"make_id": row["id"], "voice_key": vkey,
-              "cuts": data.get("cuts") or []}
+    result = {"make_id": row["id"], "beats": len(tl_beats),
+              "duration_s": timeline["duration_s"], "align_mode": align_mode,
+              "master": {"file": master["file"], "delivery": master.get("delivery")}}
     _set_job_result("voice", result)
     return result, 0
 
@@ -3080,11 +3194,14 @@ def _run_make_build_cli(request: dict) -> int:
             return code
         if mode not in ("build", "estimate", "keyframes", "sample"):
             mode = "build"
-        if mode != "estimate" and voice_missing(row):
-            # 带音模式(正式/样片/静帧)都依赖真实音频定时长，无声预览才放行
-            code = 4
-            report = {"error": "voice_missing", "hint": "、".join(voice_missing(row))}
-            return code
+        if mode != "estimate":
+            # 带音模式门: audio 路线查主轨+时间轴, script 路线查逐幕 take; 无声预览放行
+            missing = _audio_gate_missing(row)
+            if missing:
+                code = 4
+                report = {"error": "voice_missing" if (row.get("route") or "script") != "audio"
+                          else "master_missing", "hint": "、".join(missing)}
+                return code
         if not _safe_id(project_id):
             code, report = 4, {"error": "bad_project_id"}
             return code
@@ -3137,35 +3254,57 @@ def _run_make_build_cli(request: dict) -> int:
             story["meta"]["tts"] = {"provider": "dashscope", "voice": row["voice"]["voice"]}
         audio_dir = proj / "audio"
         audio_dir.mkdir(parents=True, exist_ok=True)
-        manifest = {}
-        for scene in story["scenes"]:
-            item = row["voice"]["items"].get(scene["id"], {})
-            if item.get("hash") != voice_hash(scene["narration"]):
-                if mode == "build":
-                    raise ValueError(f"语音已过期: {scene['id']}，请重新选择匹配 take")
-                continue
-            path = _voice_file(row["id"], row["voice"]["voice_key"], item.get("file"))
-            if path and _safe_id(scene["id"]):
-                shutil.copy2(path, audio_dir / f"{scene['id']}.mp3")
-                manifest[scene["id"]] = item["hash"]
-                tts_sidecar = path.with_suffix(".tts.json")
-                target_sidecar = audio_dir / f"{scene['id']}.tts.json"
-                if tts_sidecar.is_file():
-                    shutil.copy2(tts_sidecar, target_sidecar)
-                else:
-                    target_sidecar.unlink(missing_ok=True)
-                alignment = path.with_suffix(".alignment.json")
-                if alignment.is_file():
-                    shutil.copy2(alignment, audio_dir / f"{scene['id']}.alignment.json")
-                else:
-                    (audio_dir / f"{scene['id']}.alignment.json").unlink(missing_ok=True)
-                cues = path.with_suffix(".cues.json")
-                if cues.is_file():
-                    shutil.copy2(cues, audio_dir / f"{scene['id']}.cues.json")
-                else:
-                    (audio_dir / f"{scene['id']}.cues.json").unlink(missing_ok=True)
-            elif mode == "build":
-                raise ValueError(f"已选语音文件缺失: {scene['id']}，请重新选择 take")
+        if (row.get("route") or "script") == "audio":
+            # 原音连续主轨(0917): 只拷一份完整 master + 全轨时间轴, 不拷逐幕切片;
+            # build 期 Remotion 渲静音画面, ffmpeg -c:a copy remux 原音收尾
+            master = row["audio"]["master"]
+            tl = row["audio"]["timeline"]
+            mext = master.get("ext") or "m4a"
+            msrc = _safe_path(voice_root(), row["id"], master["file"])
+            if not msrc.is_file():
+                raise ValueError("原始音频主轨文件缺失，请重新上传并转写")
+            shutil.copy2(msrc, audio_dir / f"master.{mext}")
+            tsrc = _safe_path(voice_root(), row["id"], tl["file"])
+            if not tsrc.is_file():
+                raise ValueError("画面时间轴文件缺失，请重新执行第 4 步对齐")
+            shutil.copy2(tsrc, audio_dir / "master.timeline.json")
+            settings["audioRoute"] = {"mode": "original-continuous",
+                                      "master": f"audio/master.{mext}",
+                                      "timeline": "audio/master.timeline.json",
+                                      "duration_s": tl.get("duration_s") or master.get("duration_s") or 0,
+                                      "audio_hash": master.get("hash") or "",
+                                      "delivery": master.get("delivery") or "stream-copy"}
+            manifest = {}
+        else:
+            manifest = {}
+            for scene in story["scenes"]:
+                item = row["voice"]["items"].get(scene["id"], {})
+                if item.get("hash") != voice_hash(scene["narration"]):
+                    if mode == "build":
+                        raise ValueError(f"语音已过期: {scene['id']}，请重新选择匹配 take")
+                    continue
+                path = _voice_file(row["id"], row["voice"]["voice_key"], item.get("file"))
+                if path and _safe_id(scene["id"]):
+                    shutil.copy2(path, audio_dir / f"{scene['id']}.mp3")
+                    manifest[scene["id"]] = item["hash"]
+                    tts_sidecar = path.with_suffix(".tts.json")
+                    target_sidecar = audio_dir / f"{scene['id']}.tts.json"
+                    if tts_sidecar.is_file():
+                        shutil.copy2(tts_sidecar, target_sidecar)
+                    else:
+                        target_sidecar.unlink(missing_ok=True)
+                    alignment = path.with_suffix(".alignment.json")
+                    if alignment.is_file():
+                        shutil.copy2(alignment, audio_dir / f"{scene['id']}.alignment.json")
+                    else:
+                        (audio_dir / f"{scene['id']}.alignment.json").unlink(missing_ok=True)
+                    cues = path.with_suffix(".cues.json")
+                    if cues.is_file():
+                        shutil.copy2(cues, audio_dir / f"{scene['id']}.cues.json")
+                    else:
+                        (audio_dir / f"{scene['id']}.cues.json").unlink(missing_ok=True)
+                elif mode == "build":
+                    raise ValueError(f"已选语音文件缺失: {scene['id']}，请重新选择 take")
         _atomic_json(audio_dir / "manifest.json", manifest)
         _atomic_json(proj / "story.json", story)
         project = json.loads((proj / "project.json").read_text(encoding="utf-8"))

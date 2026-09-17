@@ -1194,6 +1194,12 @@ WB.pages.video = {
       const badge = (cls, text) => ({ cls, text });
       if (!m) return badge('', '未开始');
       const beats = (m.script || {}).beats || [], items = (m.voice || {}).items || {};
+      if ((m.route || 'script') === 'audio' && stage === 3) {
+        /* 0917 原音连续: 第4步=画面时间轴对齐(不切音频), 就绪信号=audio.timeline */
+        const tl = (m.audio || {}).timeline;
+        return m.script_stale || (m.voice_bad || []).length ? badge('yellow', '待刷新')
+          : tl && tl.beats === beats.length ? badge('green', '已对齐') : badge('', '未对齐');
+      }
       const covered = beats.length && beats.every((b) => items[b.id]);
       if (stage === 1) return m.narration.locked ? badge('green', '已定稿') : m.narration.text || m.narration.ref_text ? badge('blue', '编辑中') : badge('', '未开始');
       if (stage === 2) return m.script_stale ? badge('yellow', '待刷新') : m.script_meta.locked ? badge('green', '已定稿') : m.script ? badge('blue', '编辑中') : badge('', '未开始');
@@ -2143,18 +2149,16 @@ WB.pages.video = {
               <h3>{{ isAudioRoute ? '切原声' : '音频生成' }} <span class="badge" :class="segBadge(3).cls">{{ segBadge(3).text }}</span></h3>
               <div v-if="!curMake.script_meta.locked" class="stub-wrap" style="padding:30px;text-align:center;background:var(--bg-hover);color:var(--text-mute)">先定稿视频脚本</div>
               <template v-else-if="isAudioRoute">
-                <div v-if="curMake.voice_bad.length" class="notice">{{ curMake.voice_bad.length }} 幕原声与最新脚本不一致，请重切（{{ curMake.voice_bad.join('、') }}）</div>
+                <div v-if="curMake.voice_bad.length" class="notice">{{ curMake.voice_bad.length }} 幕与最新脚本不一致，请重新对齐（{{ curMake.voice_bad.join('、') }}）</div>
                 <fieldset :disabled="makeBusy" style="border:0;min-width:0;padding:0">
-                  <p class="muted">按分镜句边界把上传音频切成逐幕原声——静音处下刀不打断语气，极少数无停顿处自动硬切（10ms 淡入淡出防爆音）。</p>
-                  <button class="btn primary" type="button" :disabled="voiceBusy || curMake.script_stale" @click="runMakeJob('voice')">{{ voiceBusy ? '切原声中…' : (curMake.voice.voice_key ? '重切原声' : '开始切原声') }}</button>
+                  <p class="muted">上传的原声整条直用、不切不改——本步只把<b>画面切点</b>对到原音的自然停顿处（转写钉词驱动）。成片音轨就是上传的原始音频。</p>
+                  <button class="btn primary" type="button" :disabled="voiceBusy || curMake.script_stale" @click="runMakeJob('voice')">{{ voiceBusy ? '对齐中…' : (curMake.audio && curMake.audio.timeline ? '重新对齐画面' : '开始对齐画面') }}</button>
                 </fieldset>
                 <p v-if="voiceBusy" class="muted">{{ voiceProgress && voiceProgress.message || '准备中…' }}</p>
                 <div v-for="(c, i) in audioCuts" :key="c.id" style="display:flex;gap:10px;align-items:center;padding:6px 0;border-bottom:1px solid var(--border)">
                   <span class="muted" style="min-width:110px;font-size:12px;font-family:monospace">{{ i + 1 }} · {{ fmtClock(c.start) }}–{{ fmtClock(c.end) }}</span>
-                  <span v-if="c.cut_mode==='hard'" class="badge yellow" style="font-size:10px">硬切</span>
+                  <span class="badge green" style="font-size:10px">原音</span>
                   <span class="muted" style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px">{{ c.text }}</span>
-                  <audio v-if="curMake.voice.voice_key" controls preload="none" style="width:260px;height:32px"
-                         :src="'/wb-api/video-voice/' + curMake.id + '/' + curMake.voice.voice_key + '/' + c.id + '.mp3'"></audio>
                 </div>
               </template>
               <template v-else>
@@ -2188,7 +2192,7 @@ WB.pages.video = {
             </div>
             <div class="card" v-if="makeSeen[5]" v-show="makeStep===5">
               <h3>视频生成 <span class="badge" :class="segBadge(4).cls">{{ segBadge(4).text }}</span></h3>
-              <p class="muted" style="font-size:11px;margin:0 0 8px">语音稿：{{ curMake.voice.voice_key || '尚无（语音在第四步生成）' }}<span v-if="!makeVoiceReady"> · 语音尚未就绪，可先做无声预览</span></p>
+              <p class="muted" style="font-size:11px;margin:0 0 8px">{{ isAudioRoute ? '原声主轨' : '语音稿' }}：{{ isAudioRoute ? ((curMake.audio && curMake.audio.timeline) ? '已对齐画面（成片音轨=上传原声，不切不改）' : '尚无（第四步对齐画面）') : (curMake.voice.voice_key || '尚无（语音在第四步生成）') }}<span v-if="!makeVoiceReady"> · 尚未就绪，可先做无声预览</span></p>
               <fieldset :disabled="makeBusy" style="border:0;min-width:0;padding:0">
                                 <div class="form-row"><label>画幅</label><select v-model="curMake.video.aspect" @change="changeMakeAspect"><option v-for="a in (presets && presets.aspects) || []" :key="a.id" :value="a.id">{{ a.label }} {{ a.dims.join('×') }}</option></select></div>
                 <div class="form-row"><label>帧率</label><div class="radio-group"><label v-for="fps in [30,60]" :key="fps"><input type="radio" :value="fps" v-model="curMake.video.fps" @change="saveMake()">{{ fps }} fps</label></div></div>

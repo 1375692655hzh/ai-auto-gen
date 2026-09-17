@@ -137,6 +137,66 @@ const ttsConf = (() => {
 	return { engine: "edge", voice: story.meta.voice ?? "zh-CN-XiaoxiaoNeural", customCfg: undefined };
 })();
 
+/* ---- 原音连续主轨(0917 用户裁决): audio 路线成片唯一音轨=用户上传原始音频 ----
+ * 本模式: 不 TTS/不逐幕音频/不 trim/无 lead/pad/最短幕长; 总帧数=主轨时长;
+ * Remotion 只渲静音画面(frame.audio 恒 null), 渲完 ffmpeg -c:a copy remux 原音收尾。
+ * (本段住 TTS 块内: tts-volc.test.mjs 按标记切片 vm 执行该块, 无 audioRoute 时 CONT 恒 false 零影响) */
+const audioRoute = project.settings?.audioRoute;
+const CONT = audioRoute?.mode === "original-continuous";
+let masterFile = null, masterTimeline = null, masterDurS = 0, masterCodec = "";
+if (CONT) {
+	if (ESTIMATE) {
+		console.error("✋ 音频路线不支持 --estimate 无声预估（时长本就由原音决定）");
+		process.exit(1);
+	}
+	const rel = String(audioRoute.master || "");
+	masterFile = path.resolve(projDir, rel);
+	if (!existsSync(masterFile)) {
+		console.error(`✋ 主轨缺失: ${rel}（workbench handoff 未拷贝？重新发起构建）`);
+		process.exit(1);
+	}
+	const projRoot = realpathSync(projDir).toLowerCase();
+	const resolvedMaster = realpathSync(masterFile).toLowerCase();
+	if (!resolvedMaster.startsWith(projRoot + path.sep)) {
+		console.error(`✋ 主轨文件越界: ${rel}`);
+		process.exit(1);
+	}
+	const tlRel = String(audioRoute.timeline || "audio/master.timeline.json");
+	const tlPath = path.resolve(projDir, tlRel);
+	if (!existsSync(tlPath)) {
+		console.error(`✋ 画面时间轴缺失: ${tlRel}`);
+		process.exit(1);
+	}
+	if (!realpathSync(tlPath).toLowerCase().startsWith(projRoot + path.sep)) {
+		console.error(`✋ 画面时间轴越界: ${tlRel}`);
+		process.exit(1);
+	}
+	try {
+		masterTimeline = JSON.parse(readFileSync(tlPath, "utf-8"));
+	} catch (e) {
+		console.error(`✋ 时间轴 JSON 损坏: ${e.message}`);
+		process.exit(1);
+	}
+	if (masterTimeline.schema !== "wb-original-continuous-timeline/v1") {
+		console.error(`✋ 时间轴 schema 不识别: ${masterTimeline.schema}`);
+		process.exit(1);
+	}
+	let probedDur = 0;
+	try { probedDur = probeDuration(masterFile); } catch { probedDur = 0; }
+	masterDurS = probedDur;
+	if (!(masterDurS > 0.5)) {
+		console.error(`✋ 主轨时长探测失败(文件损坏或不是音频?): ${rel}`);
+		process.exit(1);
+	}
+	const tlDur = Number(masterTimeline.duration_s || 0);
+	if (Math.abs(tlDur - masterDurS) > 0.5) {
+		console.error(`✋ 主轨时长(${masterDurS.toFixed(2)}s)与时间轴(${tlDur.toFixed(2)}s)不一致，请重新执行对齐`);
+		process.exit(1);
+	}
+	masterCodec = probeAudioCodec(masterFile);
+	console.log(`原音连续主轨: ${rel} · ${masterDurS.toFixed(2)}s · ${masterCodec} · ${audioRoute.delivery || "stream-copy"}`);
+}
+
 /** 用指定引擎补齐全部缺失音频；返回 {ok, made[], failedId} */
 async function synthAll(engine, voice, customCfg) {
 	const made = [];
@@ -161,7 +221,7 @@ async function synthAll(engine, voice, customCfg) {
 	return { ok: true, made };
 }
 
-if (!ESTIMATE) {
+if (!ESTIMATE && !CONT) {
 	console.log(`TTS 引擎: ${ttsConf.engine} · 音色 ${ttsConf.voice}`);
 	// 音频缓存清单: {sceneId: narration哈希}, 文本变了只重合成变的场景
 	const manifestPath = path.join(audioDir, "manifest.json");
@@ -207,6 +267,17 @@ function probeDuration(file) {
 		file,
 	]).toString();
 	return Number(out.trim());
+}
+
+/* 主轨音频流 codec+参数(remux 决策与 provenance 记录用) */
+function probeAudioCodec(file) {
+	try {
+		const out = execFileSync(FFPROBE, ["-v", "error", "-select_streams", "a:0",
+			"-show_entries", "stream=codec_name,sample_rate,channels", "-of", "csv=p=0", file]).toString().trim();
+		return out || "unknown";
+	} catch {
+		return "unknown";
+	}
 }
 
 /* ---- P1(2026-09-13 MoA四岗方案): TTS 头尾静默裁剪 ----
@@ -287,7 +358,7 @@ function shiftAudioTrack(track, head, newDur) {
  * 注意：本段位于 "/* ---- 测时长" 标记之后 —— tts-volc.test.mjs 按标记切片 vm 执行 TTS 块，勿移回。 ---- */
 const whisperReady = ["main.exe", "main"].some((name) =>
 	existsSync(path.join("node_modules", ".cache", "whisper-cpp", name)));
-if (!ESTIMATE && whisperReady) {
+if (!ESTIMATE && !CONT && whisperReady) {
 	const { ensurePhraseTimeline } = await import("./align.mjs");
 	for (const s of story.scenes) {
 		if (s.silent) continue;
@@ -318,13 +389,71 @@ if (!ESTIMATE && whisperReady) {
 			console.warn(`⚠ 对轴失败 ${s.id}: ${String(error?.message ?? error).slice(0, 120)}，字幕回退文本估算`);
 		}
 	}
-} else if (!ESTIMATE && !whisperReady) {
+} else if (!ESTIMATE && !CONT && !whisperReady) {
 	console.log("对轴：未检测到 whisper.cpp 本地组件，无线界引擎场景字幕按文本估算");
 }
 
 const frames = [];
 let totalFrames = 0;
-for (const s of story.scenes) {
+if (CONT) {
+	/* 原音连续: 场景边界由时间轴绝对秒直映射帧(非累加), 首 0 末 totalFrames, 相邻严格相接;
+	 * frame.audio 恒 null(Video.tsx 条件挂载自动跳过), 无 lead/pad/trim/最短幕长。 */
+	totalFrames = Math.ceil(masterDurS * fps);
+	const tlBeats = masterTimeline.beats || [];
+	if (tlBeats.length !== story.scenes.length) {
+		console.error(`✋ 时间轴幕数(${tlBeats.length})与 story 场景数(${story.scenes.length})不一致，请重新执行对齐`);
+		process.exit(1);
+	}
+	const bounds = [0];
+	for (let i = 0; i < tlBeats.length - 1; i++) bounds.push(Math.round(Number(tlBeats[i].end_s) * fps));
+	bounds.push(totalFrames);
+	for (let i = 0; i < story.scenes.length; i++) {
+		const s = story.scenes[i];
+		if (s.id !== tlBeats[i].id) {
+			console.error(`✋ 时间轴与场景错位: 第 ${i + 1} 幕 ${tlBeats[i].id} ≠ ${s.id}，请重新执行对齐`);
+			process.exit(1);
+		}
+		const from = bounds[i], end = bounds[i + 1];
+		if (end <= from) {
+			console.error(`✋ 场景 ${s.id} 量化后时长为 0（边界 ${from}→${end}），请重新执行对齐`);
+			process.exit(1);
+		}
+		const durS = (end - from) / fps;
+		const beatStartS = Number(tlBeats[i].start_s) || 0;
+		// 字幕: 全轨绝对秒 → 幕内相对秒 → captionTimeline(lead=0) 幕内帧; 短语即钉词产物, 与旁白必然一致
+		const segments = (tlBeats[i].phrases || [])
+			.map((p) => ({ t: p.t, start: p.start - beatStartS, end: p.end - beatStartS }))
+			.filter((p) => Number.isFinite(p.start) && Number.isFinite(p.end) && p.end > p.start && p.start >= -0.001)
+			.map((p) => ({ t: p.t, start: Math.max(0, p.start), end: Math.min(durS, p.end) }))
+			.filter((p) => p.end > p.start);
+		let subtitles;
+		try {
+			subtitles = s.silent ? { cues: [], method: "silent" } : captionTimeline({
+				text: s.narration, duration: durS, fps, lead: 0,
+				alignment: { unit: "seconds", origin: "audio",
+					source: masterTimeline.alignment === "estimated" ? "estimated" : "whisper",
+					segments },
+			});
+		} catch (e) {
+			console.error(`✋ 场景 ${s.id} 字幕对齐失效: ${String(e?.message ?? e).slice(0, 120)}（文稿或时间轴已变化，请重新执行第 4 步对齐）`);
+			process.exit(1);
+		}
+		if (masterTimeline.alignment === "estimated" && !s.silent) subtitles.method = "estimated-timeline";
+		frames.push({
+			id: s.id,
+			template: s.template,
+			audio: null,
+			caption: s.caption ?? null,
+			cues: subtitles.cues,
+			alignmentMethod: subtitles.method,
+			alignmentWarning: subtitles.warning,
+			visualDurationInFrames: end - from,
+			leadFrames: 0,
+			audioDuration: Number(durS.toFixed(3)),
+			durationInFrames: end - from,
+		});
+	}
+} else for (const s of story.scenes) {
 	let dur;
 	let audio = null;
 	let trimHead = 0;
@@ -395,7 +524,8 @@ writeFileSync(path.join(projDir, "out", "timeline.json"), JSON.stringify({fps, f
 /* ---- 生成 src/active-story.ts ---- */
 const active = {
 	meta: { fps, width: meta.width ?? 1920, height: meta.height ?? 1080, voice: meta.voice,
-		theme: meta.theme, layout: meta.layout },
+		theme: meta.theme, layout: meta.layout,
+		...(CONT ? { audioRoute: "original-continuous" } : {}) },
 	story,
 	frames,
 	totalFrames,
@@ -414,7 +544,7 @@ export interface ActiveFrame {
 	audioDuration: number;
 	durationInFrames: number;
 }
-type ActiveStory = { meta: { fps: number; width: number; height: number; voice: string; theme?: string; layout?: string }; story: Story; frames: ActiveFrame[]; totalFrames: number };
+type ActiveStory = { meta: { fps: number; width: number; height: number; voice: string; theme?: string; layout?: string; audioRoute?: string }; story: Story; frames: ActiveFrame[]; totalFrames: number };
 export const ACTIVE = ${JSON.stringify(active, null, "	")} as unknown as ActiveStory;
 `;
 writeFileSync(path.join("src", "active-story.ts"), ts);
@@ -540,14 +670,37 @@ if (SAMPLE) {
 
 const outFile = path.join(projDir, "out", ESTIMATE ? "preview-silent.mp4" : "final.mp4");
 mkdirSync(path.dirname(outFile), { recursive: true });
-console.log(`\n开始渲染 -> ${outFile}`);
+const renderTarget = CONT ? path.join(projDir, "out", "silent.mp4") : outFile;
+console.log(`\n开始渲染 -> ${renderTarget}${CONT ? "（静音画面，原音 remux 收尾）" : ""}`);
 const t0 = Date.now();
 execFileSync(
 	"npx",
-	["remotion", "render", compositionId, outFile, "--public-dir", projDir],
+	["remotion", "render", compositionId, renderTarget, "--public-dir", projDir],
 	{ stdio: "inherit", shell: true },
 );
 console.log(`\n✅ 完成，耗时 ${((Date.now() - t0) / 1000 / 60).toFixed(1)} 分钟`);
+
+/* ---- 原音连续收尾: 静音画面 + 主轨 remux(成片音轨=用户上传原始音频比特流) ---- */
+let masterDelivery = "";
+if (CONT) {
+	const codecHead = String(masterCodec).split(",")[0].trim();
+	const audioCopy = ["aac", "mp3", "alac"].includes(codecHead);   // 可直进 mp4 的编码; wav/pcm 转一次 AAC(诚实记录)
+	const ff = resolveTrimFfmpeg();
+	const remux = spawnSync(ff, ["-hide_banner", "-loglevel", "error", "-y",
+		"-i", renderTarget, "-i", masterFile,
+		"-map", "0:v:0", "-map", "1:a:0",
+		"-c:v", "copy", "-c:a", audioCopy ? "copy" : "aac",
+		...(audioCopy ? [] : ["-b:a", "192k"]),
+		"-shortest", outFile], { encoding: "utf8" });
+	if (remux.status !== 0 || !existsSync(outFile)) {
+		console.error(`✋ 原音 remux 失败: ${((remux.stderr || "") + (remux.stdout || "")).trim().slice(-200)}`);
+		process.exit(1);
+	}
+	masterDelivery = audioCopy ? `stream-copy(${codecHead})` : `transcode-aac(${codecHead}->aac)`;
+	rmSync(renderTarget, { force: true });
+	const finalDur = probeDuration(outFile);
+	console.log(`原音收尾: ${masterDelivery} · 成片 ${finalDur.toFixed(2)}s / 主轨 ${masterDurS.toFixed(2)}s`);
+}
 
 /* ---- 封面: 渲染开场标题帧（0.7 秒处动画已稳定，随 fps 缩放）作为当期封面 ---- */
 const coverFile = path.join(projDir, "out", "cover.png");
@@ -587,10 +740,13 @@ let qaStatus = "built";
 {
 	console.log("\nQA 自检:");
 	const qa = { file: path.relative(projDir, outFile), composition: compositionId,
-		mode: ESTIMATE ? "estimate" : "build", durationS: totalFrames / fps,
+		mode: ESTIMATE ? "estimate" : "build",
+		audioRoute: CONT ? "original-continuous" : "legacy",
+		durationS: totalFrames / fps,
 		checks: [], warnings: frames.filter((f) => f.alignmentWarning).map((f) => `${f.id}: ${f.alignmentWarning}`), errors: stillErrors, stills,
 		builtAt: new Date().toISOString() };
-	qa.checks.push(`最短场景 ${Math.min(...frames.map((f) => f.durationInFrames / fps)).toFixed(2)} 秒（模板感知兜底 ≥4.0，versus/stacked/vpoints ≥5.0）`);
+	if (CONT) qa.checks.push(`原音连续: ${frames.length} 幕画面边界全部来自主轨绝对时间轴(无 lead/pad/trim/切片)`);
+	else qa.checks.push(`最短场景 ${Math.min(...frames.map((f) => f.durationInFrames / fps)).toFixed(2)} 秒（模板感知兜底 ≥4.0，versus/stacked/vpoints ≥5.0）`);
 	qa.checks.push(`场景首帧 ${stills}/${frames.length}（out/keyframes）`);
 	const trimmedCount = frames.filter((f) => f.trimHead > 0).length;
 	if (trimmedCount) qa.checks.push(`TTS 静默裁剪 ${trimmedCount}/${frames.length} 幕（audio/trim/ 副本，原件保留）`);
@@ -604,6 +760,8 @@ let qaStatus = "built";
 	else qa.errors.push(`场景数不一致: 时间轴 ${frames.length} ≠ story ${story.scenes.length}`);
 	if (ESTIMATE) {
 		qa.checks.push("估算模式：无音轨，跳过音频齐全性检查");
+	} else if (CONT) {
+		qa.checks.push("原音连续模式：跳过逐幕 mp3 齐全性检查（成片音轨=主轨 remux）");
 	} else {
 		const missing = (story.scenes ?? [])
 			.filter((s) => !s.silent)
@@ -621,9 +779,44 @@ let qaStatus = "built";
 			else qa.errors.push(`分辨率 ${dims} ≠ 预期 ${expW}×${expH}`);
 		} catch (e) { qa.errors.push(`分辨率读取失败: ${String(e?.message ?? e).slice(0, 80)}`); }
 		const actualDur = probeDuration(outFile);
-		if (Math.abs(actualDur - totalFrames / fps) <= 1.5) qa.checks.push(`成片时长 ${actualDur.toFixed(1)}s ✓`);
+		const durTol = CONT ? 1 / fps + 0.05 : 1.5;   // 连续模式: 主轨时长就是契约, 容差=1帧+容器级
+		if (Math.abs(actualDur - totalFrames / fps) <= durTol) qa.checks.push(`成片时长 ${actualDur.toFixed(1)}s ✓`);
 		else qa.errors.push(`成片时长 ${actualDur.toFixed(1)}s ≠ 预期 ${(totalFrames / fps).toFixed(1)}s`);
-		if (!ESTIMATE) {
+		if (!ESTIMATE && CONT) {
+			// 原音连续门禁: 唯一音频流 + codec 与主轨一致 + 音频时长≈主轨时长
+			const streams = execFileSync(FFPROBE, ["-v", "error", "-select_streams", "a",
+				"-show_entries", "stream=codec_name", "-of", "csv=p=0", outFile]).toString().trim().split(/\s*\n\s*/).filter(Boolean);
+			if (streams.length === 1) qa.checks.push(`唯一音频流 ${streams[0]} ✓`);
+			else qa.errors.push(`音频流数 ${streams.length} ≠ 1（必须唯一主轨）`);
+			const finalCodec = probeAudioCodec(outFile).split(",")[0].trim();
+			const masterHead = String(masterCodec).split(",")[0].trim();
+			const expectCopy = ["aac", "mp3", "alac"].includes(masterHead);
+			if (expectCopy ? finalCodec === masterHead : finalCodec === "aac")
+				qa.checks.push(`音轨编码 ${finalCodec} = 主轨${expectCopy ? "原样拷贝" : "一次性转码"} ✓`);
+			else qa.errors.push(`音轨编码 ${finalCodec} 与主轨 ${masterHead} 不符`);
+			const audioDur = Number(execFileSync(FFPROBE, ["-v", "error", "-select_streams", "a:0",
+				"-show_entries", "stream=duration", "-of", "csv=p=0", outFile]).toString().trim());
+			if (Number.isFinite(audioDur) && Math.abs(audioDur - masterDurS) <= 0.15)
+				qa.checks.push(`音频时长 ${audioDur.toFixed(2)}s ≈ 主轨 ${masterDurS.toFixed(2)}s ✓`);
+			else if (Number.isFinite(audioDur)) qa.errors.push(`音频时长 ${audioDur.toFixed(2)}s ≠ 主轨 ${masterDurS.toFixed(2)}s（原音必须完整保留）`);
+			// provenance: 原音主轨审计链
+			writeFileSync(path.join(projDir, "out", "audio-provenance.json"), JSON.stringify({
+				policy: "original-upload-single-master",
+				mode: "original-continuous",
+				master: { file: audioRoute.master, codec: masterCodec, duration_s: Number(masterDurS.toFixed(3)),
+					hash8: audioRoute.audio_hash || "", delivery: masterDelivery },
+				segmentAudioUsedAsFinal: false,
+				masterTrimApplied: false,
+				sceneMappings: frames.map((f, i) => ({ id: f.id, sourceStart_s: Number(masterTimeline.beats[i].start_s),
+					sourceEnd_s: Number(masterTimeline.beats[i].end_s),
+					visualStart_f: frames.slice(0, i).reduce((a, x) => a + x.durationInFrames, 0),
+					visualDuration_f: f.durationInFrames })),
+				finalAudio: { streams: streams.length, codec: finalCodec,
+					duration_s: Number.isFinite(audioDur) ? Number(audioDur.toFixed(3)) : null },
+				builtAt: new Date().toISOString(),
+			}, null, 2));
+		}
+		if (!ESTIMATE && !CONT) {
 			const hasAudio = execFileSync(FFPROBE, ["-v", "error", "-select_streams", "a",
 				"-show_entries", "stream=codec_type", "-of", "csv=p=0", outFile]).toString().trim();
 			if (hasAudio) qa.checks.push("音轨存在 ✓");
