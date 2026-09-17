@@ -34,6 +34,7 @@ MAX_TEXT = 3400          # 飞书单条文本安全长度(留裕量)
 def _conf() -> dict:
     c = (_cfg_section().get("feishu") or {})
     return {"enabled": bool(c.get("enabled", False)),
+            "digest_enabled": bool(c.get("digest_enabled", True)),   # 摘要独立开关(2026-09-17 用户暂停)
             "app_id": str(c.get("app_id") or ""),
             "app_secret": str(c.get("app_secret") or ""),
             "chat_id": str(c.get("chat_id") or ""),
@@ -196,6 +197,9 @@ def run_digest(since_fetched_at: str) -> dict:
     rep = {"enabled": conf["enabled"], "sent": 0, "items": 0, "fallback": 0, "errors": []}
     if not conf["enabled"]:
         rep["errors"].append("未启用(sources.feishu.enabled)")
+        return rep
+    if not conf["digest_enabled"]:
+        rep["skipped"] = "摘要已暂停(sources.feishu.digest_enabled=false)"
         return rep
     conn = _store._connect()
     try:
