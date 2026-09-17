@@ -11,7 +11,7 @@ Type=simple
 User=ubuntu
 WorkingDirectory=@REPO@
 Environment=PYTHONUTF8=1
-Environment=ZEN_BRIDGE_PORT=20131
+Environment=ZEN_BRIDGE_PORT=20133
 Environment=ZEN_SERVE_PORT=4096
 # 住宅代理出口(配额按 IP 计): 日本静态住宅 IP(2026-09-16 接入, 实测通)
 Environment=HTTPS_PROXY=http://stcktvSAPvsoE:stc1sqFMOwpNX@103.27.82.240:7085
