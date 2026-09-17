@@ -1994,6 +1994,10 @@ WB.pages.video = {
                     <span class="muted" style="font-size:12px">{{ refName ? refName + ' · ' : '' }}{{ refText.length }} 字{{ refDirty ? ' · 保存中…' : '' }}</span>
                   </div>
                 </div>
+                <div v-if="presets && presets.asr && !presets.asr.has_key" class="notice" style="margin-top:10px">
+                  未配置语音识别(mimo ASR) —— 到 <a href="#/settings">设置 → 视频 → 语音识别</a> 填写接口地址与 API Key 后才能转写
+                  <span class="muted">（小米 mimo 开放平台注册, 与 TTS 同一把 key 通用; 模型/语言也可在设置页自选）</span>
+                </div>
                 <p class="muted" style="margin-top:8px">上传后到第 2 步「提取文字稿」。上传视频会自动抽取音轨（需要本机 ffmpeg）。更换文件会清空转写/脚本进度。</p>
               </template>
             </div>

@@ -3432,6 +3432,9 @@ def build_presets() -> dict:
             "collage_ready": shutil_which("arkcli"),
             "llm_ready": bool(_translate_cfg(config.load())),
             "video_env": video_env_summary(),
+            # 音频路线转写配置态(打码): 前端据此给未配置用户主动引导到设置页
+            "asr": {"has_key": bool((config.load().get("asr") or {}).get("api_key")),
+                    "model": str((config.load().get("asr") or {}).get("model") or "mimo-v2.5-asr")},
             "max_chars": 20000}
 
 
