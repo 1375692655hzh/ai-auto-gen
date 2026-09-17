@@ -33,6 +33,7 @@ WB.pages.video = {
       presets: null, narTab: 'a', narBrief: '', narDraftId: '', importId: '',
       makeRoute: 'script',   /* 制作路线: script=文案路线 audio=音频路线(上传录音→转写→切原声) */
       asrErr: '', asrBusy: false, asrProgress: null,
+      refText: '', refName: '', refDirty: false,   /* 参考稿(音频路线可选校准稿): 粘贴/文件双入口, 独立防抖保存 */
       makeStep: 1,           /* 生成卡内部步骤子页(0913a): 1项目名称/2口播/3脚本/4音频/5视频 */
       makeSeen: { 1: true }, /* 步骤懒挂载(0913c): 首次访问才建DOM(47拍分镜+47audio全量构建=载入慢的根因), 之后v-show保活 */
       narBusy: false, narProgress: null, storyBusy: false, storyProgress: null,
@@ -177,6 +178,17 @@ WB.pages.video = {
       return '/wb-api/videos/' + p.id + '/file/' + (p.mp4.includes('final.mp4') ? 'final.mp4' : p.mp4[0]);
     },
 
+  },
+  watch: {
+    /* 参考稿回显: 服务端制作单引用变化(切换/转写/换绑)时同步本地编辑态;
+       输入 refText 不改 curMake 引用, 不回环 */
+    curMake(m) {
+      const a = (m && m.audio) || {};
+      const text = a.script_text || '', name = a.script_name || '';
+      if (!this.refDirty && (this.refText !== text || this.refName !== name)) {
+        this.refText = text; this.refName = name;
+      }
+    },
   },
   methods: {
     /* 带参工具必须住 methods: 误放 computed 会被当无参 getter, 取值即炸(0913f 双列表
@@ -1007,6 +1019,78 @@ WB.pages.video = {
         await this.fetchMake(this.cur);
         WB.toast('音频已上传，点「提取文字稿」开始转写');
       } catch (e) { this.asrErr = this.makeError(e); }
+    },
+    /* ── 参考稿(音频路线可选校准, 2026-09-17): 粘贴/文件双入口, 独立防抖保存 ── */
+    saveRefScript() {
+      const m = this.curMake;
+      if (!m || !m.audio || !m.audio.asset_id) return;
+      m.audio.script_text = this.refText; m.audio.script_name = this.refName;
+      this.refDirty = true;
+      clearTimeout(this._refTimer);
+      this._refTimer = setTimeout(async () => {
+        try {
+          await WB.api.post('/video-makes', { id: m.id, audio: { script_text: this.refText, script_name: this.refName } });
+          this.refDirty = false;
+        } catch (e) { WB.toast('参考稿保存失败: ' + this.makeError(e)); }
+      }, 800);
+    },
+    importRefScript(ev) {
+      const f = ev.target.files && ev.target.files[0]; ev.target.value = '';
+      if (!f) return;
+      if (f.size > 1024 * 1024) { WB.toast('参考稿文件请控制在 1MB 以内'); return; }
+      const rd = new FileReader();
+      rd.onload = () => {
+        const buf = new Uint8Array(rd.result);
+        let text = new TextDecoder('utf-8').decode(buf);
+        const bad = (text.match(/\uFFFD/g) || []).length;   /* UTF-8 解码失败量 */
+        if (bad > 0 && bad / Math.max(1, text.length) > 0.002) {
+          try { text = new TextDecoder('gb18030').decode(buf); } catch (e) { /* 保留 utf-8 结果 */ }
+        }
+        this.refText = text.replace(/^\uFEFF/, '').trim();
+        this.refName = f.name;
+        this.saveRefScript();
+        WB.toast('参考稿已导入: ' + f.name + '（' + this.refText.length + ' 字）');
+      };
+      rd.readAsArrayBuffer(f);
+    },
+    clearRefScript() {
+      if (this.refText && !confirm('清空参考稿？（不影响已转写的文字稿）')) return;
+      this.refText = ''; this.refName = '';
+      this.saveRefScript();
+    },
+    splitSentZh(text) {   /* 句级切分, 与服务端 SPLIT_PUNCTS 同口径(含尾标点) */
+      const p = '，。；：？！、,.;:?!', e = p.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const re = new RegExp('[^' + e + ']+[' + e + ']?', 'gu');
+      return (String(text || '').match(re) || []).map((s) => s.trim()).filter(Boolean);
+    },
+    bigramSim(a, b) {     /* bigram Dice 相似度(0-1): 判断转写句与稿句是否"同一句" */
+      if (!a || !b) return 0;
+      if (a === b) return 1;
+      const grams = (s) => { const m = new Map(); for (let i = 0; i < s.length - 1; i++) { const g = s.slice(i, i + 2); m.set(g, (m.get(g) || 0) + 1); } return m; };
+      const ma = grams(a), mb = grams(b);
+      let hit = 0;
+      for (const [g, n] of ma) if (mb.has(g)) hit += Math.min(n, mb.get(g));
+      return (2 * hit) / (Math.max(1, a.length - 1) + Math.max(1, b.length - 1));
+    },
+    refDiffPairs() {      /* 转写稿 × 参考稿 句级 LCS 对照: same/near=两方都有(≈为措辞差异), asr=转写独有, ref=稿独有 */
+      const asr = this.splitSentZh((this.curMake && this.curMake.narration && this.curMake.narration.text) || '');
+      const ref = this.splitSentZh(this.refText);
+      if (!asr.length || !ref.length) return [];
+      const S = (i, j) => { const v = this.bigramSim(asr[i], ref[j]); return v >= 0.55 ? v : 0; };
+      const n = asr.length, m = ref.length;
+      const dp = Array.from({ length: n + 1 }, () => new Float64Array(m + 1));
+      for (let i = n - 1; i >= 0; i--) for (let j = m - 1; j >= 0; j--)
+        dp[i][j] = Math.max(dp[i + 1][j + 1] + S(i, j), dp[i + 1][j], dp[i][j + 1]);
+      const out = []; let i = 0, j = 0;
+      while (i < n && j < m) {
+        const s = S(i, j);
+        if (s > 0 && dp[i][j] === dp[i + 1][j + 1] + s) { out.push({ kind: s === 1 ? 'same' : 'near', text: asr[i], ref: ref[j] }); i++; j++; }
+        else if (dp[i + 1][j] >= dp[i][j + 1]) out.push({ kind: 'asr', text: asr[i++] });
+        else out.push({ kind: 'ref', text: ref[j++] });
+      }
+      while (i < n) out.push({ kind: 'asr', text: asr[i++] });
+      while (j < m) out.push({ kind: 'ref', text: ref[j++] });
+      return out;
     },
     async startAsr() {
       if (!this.curMake || this.asrBusy) return;
@@ -1894,6 +1978,16 @@ WB.pages.video = {
                 <audio v-if="curMake.audio && curMake.audio.asset_id" ref="asrAudio"
                        :src="'/wb-api/video-assets/' + curMake.audio.asset_id + '/file'"
                        controls preload="none" style="width:100%;height:36px;margin-top:6px"></audio>
+                <div v-if="curMake.audio && curMake.audio.asset_id" style="margin-top:10px;padding:8px;border:1px dashed var(--border);border-radius:8px">
+                  <div class="muted" style="font-size:12px;margin-bottom:4px">参考稿（可选——有原稿/提纲就贴进来，校对页会与转写稿逐句对照；<b>只作校对参考，不会替换转写</b>）：</div>
+                  <textarea v-model="refText" @input="saveRefScript()" rows="4" style="width:100%" placeholder="直接粘贴文字稿，或从 .txt / .md 文件导入"></textarea>
+                  <div class="form-row" style="margin-top:4px">
+                    <input type="file" accept=".txt,.md" ref="refScriptFile" style="display:none" @change="importRefScript">
+                    <button class="btn" type="button" @click="$refs.refScriptFile.click()">导入 .txt / .md</button>
+                    <button class="btn" type="button" v-if="refText" @click="clearRefScript">清空</button>
+                    <span class="muted" style="font-size:12px">{{ refName ? refName + ' · ' : '' }}{{ refText.length }} 字{{ refDirty ? ' · 保存中…' : '' }}</span>
+                  </div>
+                </div>
                 <p class="muted" style="margin-top:8px">上传后到第 2 步「提取文字稿」。上传视频会自动抽取音轨（需要本机 ffmpeg）。更换文件会清空转写/脚本进度。</p>
               </template>
             </div>
@@ -1914,6 +2008,16 @@ WB.pages.video = {
                       <p class="muted" style="margin:10px 0 4px">校对转写稿（<b>英文词</b>与<b>数字</b>最易错——数字请改回阿拉伯数字，画面数据卡要保持一致）。改完点「定稿」。</p>
                       <textarea v-model="curMake.narration.text" @input="saveMake()" rows="10" style="width:100%"></textarea>
                       <p class="muted">{{ narrationWords }} 字<span v-if="curMake.audio && curMake.audio.seconds"> · 音频约 {{ Math.round(curMake.audio.seconds) }} 秒 · 语速 {{ (narrationWords / curMake.audio.seconds).toFixed(1) }} 字/秒</span></p>
+                      <div v-if="refText" style="margin:8px 0">
+                        <div class="muted" style="font-size:12px;margin-bottom:4px">参考稿对照（<span style="color:var(--yellow)">黄=转写与稿不一致</span> · <span class="muted">灰=稿里有但没转出来</span> · 一致的不标色）——稿只作参考，以上方转写框为准：</div>
+                        <div style="max-height:200px;overflow:auto;border:1px solid var(--border);border-radius:8px;padding:6px;font-size:12px;line-height:1.7">
+                          <div v-for="(d, i) in refDiffPairs()" :key="i"
+                               :style="d.kind === 'asr' ? 'color:var(--yellow)' : d.kind === 'ref' ? 'opacity:.55' : d.kind === 'near' ? 'background:var(--accent-weak);border-radius:4px;padding:0 3px' : ''"
+                               :title="d.kind === 'near' ? ('稿作: ' + d.ref) : d.kind === 'same' ? '与稿一致' : d.kind === 'asr' ? '转写有·稿无(口播多说/稿删减)' : '稿有·转写无(漏识或没念)'">
+                            {{ d.kind === 'ref' ? '〔稿〕' : '' }}{{ d.text }}
+                          </div>
+                        </div>
+                      </div>
                       <div v-if="asrPhrases.length" style="margin:8px 0">
                         <div class="muted" style="font-size:12px;margin-bottom:4px">点时间跳播原声对照（{{ curMake.audio && curMake.audio.align_mode === 'estimated' ? '⚠ 时间轴为静音估算，句界近似±秒级' : '句级时间轴来自本地对齐' }}{{ curMake.audio && curMake.audio.match_rate != null ? ' · 匹配率 ' + Math.round(curMake.audio.match_rate * 100) + '%' : '' }}）：</div>
                         <div style="max-height:170px;overflow:auto;border:1px solid var(--border);border-radius:8px;padding:6px">

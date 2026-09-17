@@ -222,6 +222,103 @@ class AudioRouteTests(unittest.TestCase):
         self.assertEqual(phrases2, [])
         self.assertTrue(err2)
 
+    def test_make_upsert_script_text_semantics(self):
+        """参考稿(2026-09-17): 独立可写(不动状态机) + 换绑音频重置 + 截断保护。"""
+        row = vstudio.make_upsert({"route": "audio", "title": "参考稿单"})
+        row = vstudio.make_upsert({"id": row["id"], "audio": {"asset_id": "va1"}})
+        # 独立写入(无 asset_id): 不触发换绑重置
+        row["narration"]["text"] = "t" * 50
+        vstudio._make_save(row)
+        row = vstudio.make_upsert({"id": row["id"],
+                                   "audio": {"script_text": "原稿内容。", "script_name": "稿.txt"}})
+        self.assertEqual(row["audio"]["asset_id"], "va1")
+        self.assertEqual(row["audio"]["script_text"], "原稿内容。")
+        self.assertEqual(row["narration"]["text"], "t" * 50)
+        # 超长截断(100k 上限) + 空稿清名字
+        row = vstudio.make_upsert({"id": row["id"], "audio": {
+            "script_text": "x" * 150000, "script_name": "n" * 500}})
+        self.assertEqual(len(row["audio"]["script_text"]), 100000)
+        self.assertEqual(len(row["audio"]["script_name"]), 200)
+        row = vstudio.make_upsert({"id": row["id"], "audio": {"script_text": ""}})
+        self.assertEqual(row["audio"]["script_text"], "")
+        self.assertEqual(row["audio"]["script_name"], "")
+        # 换绑音频: 旧稿作废(重置后 payload 不带 script_text 即不保留)
+        row = vstudio.make_upsert({"id": row["id"], "audio": {"asset_id": "va2"}})
+        self.assertEqual(row["audio"]["asset_id"], "va2")
+        self.assertNotIn("script_text", row["audio"])
+        # 换绑+新稿同 payload: 重置后写入新稿
+        row = vstudio.make_upsert({"id": row["id"],
+                                   "audio": {"asset_id": "va3", "script_text": "新稿。"}})
+        self.assertEqual(row["audio"]["asset_id"], "va3")
+        self.assertEqual(row["audio"]["script_text"], "新稿。")
+
+    def test_plan_asr_segments(self):
+        """mimo 分段转写段规划: ≤160s 单段 / 超限按静音中点切 / 无静音硬切锚点。"""
+        from types import SimpleNamespace
+
+        def fake_ff(log_text):
+            def run(argv, **kw):
+                return SimpleNamespace(returncode=0, stdout="", stderr=log_text)
+            return run
+
+        src = self.tmp / "a.mp3"
+        src.write_bytes(b"x" * 100)
+        # 短音频(120s, 无静音行) → 单段直传
+        with (patch.object(vstudio, "_resolve_ffmpeg", return_value="ff"),
+              patch.object(vstudio.subprocess, "run",
+                           side_effect=fake_ff("Duration: 00:02:00.00\n"))):
+            segs, err = vstudio._plan_asr_segments(src)
+        self.assertEqual(err, "")
+        self.assertEqual(segs, [(0.0, 120.0)])
+        # 长音频(400s): 静音区 [118,122] 与 [238,242] → 段界取静音中点 120/240
+        log = ("Duration: 00:06:40.00\nsilence_start: 118\nsilence_end: 122\n"
+               "silence_start: 238\nsilence_end: 242\n")
+        with (patch.object(vstudio, "_resolve_ffmpeg", return_value="ff"),
+              patch.object(vstudio.subprocess, "run", side_effect=fake_ff(log))):
+            segs, err = vstudio._plan_asr_segments(src)
+        self.assertEqual(err, "")
+        self.assertEqual([round(s, 1) for s, _ in segs], [0.0, 120.0, 240.0])
+        self.assertEqual(round(segs[-1][1], 1), 400.0)
+        # 无静音 → 硬切在锚点(120s 间隔, 300s 只需 2 刀)
+        with (patch.object(vstudio, "_resolve_ffmpeg", return_value="ff"),
+              patch.object(vstudio.subprocess, "run",
+                           side_effect=fake_ff("Duration: 00:05:00.00\n"))):
+            segs, err = vstudio._plan_asr_segments(src)
+        self.assertEqual([round(s, 1) for s, _ in segs], [0.0, 120.0, 240.0])
+        self.assertEqual(round(segs[-1][1], 1), 300.0)   # 尾段 240→300(60s ≤160)
+        # 尾段静音无 silence_end → 补时长不崩
+        with (patch.object(vstudio, "_resolve_ffmpeg", return_value="ff"),
+              patch.object(vstudio.subprocess, "run",
+                           side_effect=fake_ff("Duration: 00:04:00.00\nsilence_start: 300\n"))):
+            segs, err = vstudio._plan_asr_segments(src)
+        self.assertEqual(err, "")
+        self.assertEqual(round(segs[-1][1], 1), 240.0)
+
+    def test_extract_audio_range_args(self):
+        """分段转写截取: -ss/-t 位于 -i 前(输入侧快进), 16k 单声道压缩档。"""
+        from types import SimpleNamespace
+        src = self.tmp / "s.mp3"
+        src.write_bytes(b"x" * 100)
+        dest = self.tmp / "seg0.mp3"
+        calls = {}
+
+        def fake_run(argv, **kw):
+            calls["argv"] = argv
+            dest.write_bytes(b"mp3" * 1000)
+            return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+        with (patch("shutil.which", return_value="C:/ff/ffmpeg.exe"),
+              patch.object(vstudio.subprocess, "run", side_effect=fake_run)):
+            self.assertEqual(
+                vstudio._extract_audio(src, dest, voice_grade=False, start_s=12.5, duration_s=98.3), "")
+        argv = calls["argv"]
+        i_ss, i_in = argv.index("-ss"), argv.index("-i")
+        self.assertLess(i_ss, i_in)                    # 输入侧快进
+        self.assertEqual(argv[i_ss + 1], "12.500")
+        self.assertEqual(argv[argv.index("-t") + 1], "98.300")
+        for flag in ("-ar", "16000", "-ac", "1"):
+            self.assertIn(flag, argv)
+
 
 if __name__ == "__main__":
     unittest.main()

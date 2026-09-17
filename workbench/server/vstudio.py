@@ -1321,6 +1321,15 @@ def make_upsert(payload: dict) -> dict | None:
                                   "source_narration_hash": ""}
             row["voice"].update(items={}, voice_key="")
             row["status"] = "editing_narration"
+        # 参考稿(可选校准, 2026-09-17): 粘贴或 .txt/.md 导入, 只进校对页对照面板——
+        # 稿与录音不一定逐字一致, 不能替换转写(音频才是时间轴真相), 不参与钉词/切幕
+        # 状态机; 换绑音频重置时旧稿随之作废(payload 不带 script_text 即不保留)
+        if "script_text" in payload["audio"]:
+            s_text = str(payload["audio"].get("script_text") or "")[:100000]
+            s_name = str(payload["audio"].get("script_name") or "")[:200] if s_text else ""
+            if isinstance(row.get("audio"), dict):
+                row["audio"]["script_text"] = s_text
+                row["audio"]["script_name"] = s_name
     if not row["narration"]["locked"]:
         # 0913g: llm_source/length_s/fidelity 此前被丢, 保存回显会把生成模型顶回链首
         for key in ("text", "ref_text", "style_id", "source", "llm_source", "fidelity"):
@@ -2174,7 +2183,7 @@ def _asr_pin(audio_path: Path, narration: str) -> tuple[list, str, dict]:
         return [], tail or "pin_result_missing", {}
     if not data.get("ok"):
         return [], str(data.get("error") or "align_failed"), {}
-    return data.get("phrases") or [], "", {"match_rate": data.get("match_rate"),
+    return data.get("phrases") or [], "", {"match_rate": data.get("matchRate"),   # mjs 侧驼峰
                                            "audio_duration": data.get("audioDuration")}
 
 
@@ -2209,16 +2218,21 @@ def _resolve_ffmpeg() -> str:
     return str(cands[0]) if cands else ""
 
 
-def _extract_audio(src: Path, dest_mp3: Path, voice_grade: bool = True) -> str:
+def _extract_audio(src: Path, dest_mp3: Path, voice_grade: bool = True,
+                   start_s: float = None, duration_s: float = None) -> str:
     """视频/大音频 → mp3。voice_grade=True 出片音质(原采样率 q:a 2, 供切原声);
     False 压缩档(16k 单声道 q:a 5, 供 mimo 转写——单请求 data ≤10MB, 原始须 ≤约 7MB)。
+    start_s/duration_s 可选截取区间(分段转写用, 段界在静音处无重叠)。
     返回错误文案(空=成功)。"""
     ff = _resolve_ffmpeg()
     if not ff:
         return ("未找到可用的 ffmpeg（抽音轨需要）：请安装完整版 ffmpeg 并加入 PATH，"
                 "或先手动抽出音频再传 mp3")
     dest_mp3.parent.mkdir(parents=True, exist_ok=True)
-    argv = [ff, "-hide_banner", "-loglevel", "error", "-y", "-i", str(src), "-vn"]
+    argv = [ff, "-hide_banner", "-loglevel", "error", "-y"]
+    if start_s is not None and duration_s:
+        argv += ["-ss", f"{float(start_s):.3f}", "-t", f"{float(duration_s):.3f}"]
+    argv += ["-i", str(src), "-vn"]
     if voice_grade:
         argv += ["-c:a", "libmp3lame", "-q:a", "2"]
     else:
@@ -2317,6 +2331,58 @@ def _estimate_phrases(src: Path, narration: str) -> tuple[list, str]:
     return phrases, ""
 
 
+def _plan_asr_segments(src: Path) -> tuple[list, str]:
+    """mimo 转写切段: 时长 ≤160s 单段直传; 超限按静音中点切(目标 120s, 段长区间
+    [40,160]s, 段界在停顿处无重叠, 与 _speech_regions 同口径 -40dB/0.35s)。
+
+    分段动因(2026-09-17 实测): mimo 单请求输出有截断上限——13min 整轨单发只回 1310 字
+    (实际内容 4053 字, 漏 68%); ≤160s 段单发完整(每段 350-750 字)。返回 ([(start,end)…],
+    错误文案); 错误时附带时长(供上层显示)。"""
+    ff = _resolve_ffmpeg()
+    if not ff:
+        return [], "no ffmpeg"
+    try:
+        proc = subprocess.run(
+            [ff, "-hide_banner", "-i", str(src), "-af",
+             "silencedetect=noise=-40dB:d=0.35", "-f", "null", "-"],
+            capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=900,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+    except subprocess.TimeoutExpired:
+        return [], "静音探测超时"
+    log = (proc.stdout or "") + (proc.stderr or "")
+    dm = re.search(r"Duration:\s*(\d+):(\d+):(\d+(?:\.\d+)?)", log)
+    if not dm:
+        return [], "无法读取音频时长"
+    duration = int(dm.group(1)) * 3600 + int(dm.group(2)) * 60 + float(dm.group(3))
+    if duration <= 160:
+        return [(0.0, duration)], ""
+    starts = [float(m) for m in re.findall(r"silence_start:\s*([\d.]+)", log)]
+    ends = [float(m) for m in re.findall(r"silence_end:\s*([\d.]+)", log)]
+    if len(starts) > len(ends):
+        ends.append(duration)
+    silences = sorted(zip(starts[:len(ends)], ends))
+    bounds, cursor = [], 0.0
+    while duration - cursor > 160:                  # 每个下界取交窗静音中点, 无静音则硬切锚点
+        anchor = cursor + 120.0
+        best = None
+        for s, e in silences:
+            lo, hi = max(s, cursor + 40.0), min(e, cursor + 160.0)
+            if hi <= lo:
+                continue
+            mid = (lo + hi) / 2
+            if best is None or abs(mid - anchor) < abs(best - anchor):
+                best = mid
+        cut = best if best is not None else anchor
+        bounds.append(cut)
+        cursor = cut
+    segs, prev = [], 0.0
+    for b in bounds:
+        segs.append((prev, b))
+        prev = b
+    segs.append((prev, duration))
+    return segs, ""
+
+
 def _run_asr(request: dict) -> tuple[dict, int]:
     """音频路线·转写: mimo 出文本(权威) → 写 narration(未锁, 进校对) → whisper 钉词 v1(校对页点句播)。
 
@@ -2346,17 +2412,45 @@ def _run_asr(request: dict) -> tuple[dict, int]:
         src.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(path, src)
     tick("asr", "mimo", 15, "mimo 转写中(约 20 倍速)")
-    # mimo 单请求 data(含 base64) ≤10MB → 原始须 ≤约 7MB; 超限压 16k 单声道转写副本
-    # (纯转码不裁时间轴, 时间戳与 source 一致; 切原声仍用高音质 source.mp3)
-    asr_copy = src
-    if src.stat().st_size > 7 * 1024 * 1024:
-        asr_copy = src.parent / "source.asr16k.mp3"
-        err = _extract_audio(src, asr_copy, voice_grade=False)
-        if err:
-            return {"error": "extract_failed", "hint": "压缩转写副本失败: " + err}, 3
-    result = vasr.transcribe_file(asr_copy)     # AsrError 抛给上层分类
-    tick("asr", "align", 55, "本地 whisper 句级对齐(首次自动装模型, 之后有缓存)")
-    phrases, align_err, meta = _asr_pin(src, result["text"])
+    # mimo 单请求输出有截断上限(2026-09-17 实测: 13min 整轨单发只回约 1/3 文本) →
+    # 长音频静音中点分段转写再拼(段界无重叠, 每段 ≤160s 单发完整); 段文件用完即删。
+    # 每段现压 16k 单声道转写档(段 ≤160s 约 ≤400KB, 远低于 10MB 请求限)。
+    segs, plan_err = _plan_asr_segments(src)
+    if not segs:
+        return {"error": "extract_failed", "hint": "音频段规划失败: " + plan_err}, 3
+    if len(segs) == 1:
+        # 单段: 沿用整文件直传路径(压缩副本只在高音质源超 7MB 时需要)
+        asr_copy = src
+        if src.stat().st_size > 7 * 1024 * 1024:
+            asr_copy = src.parent / "source.asr16k.mp3"
+            err = _extract_audio(src, asr_copy, voice_grade=False)
+            if err:
+                return {"error": "extract_failed", "hint": "压缩转写副本失败: " + err}, 3
+        result = vasr.transcribe_file(asr_copy)     # AsrError 抛给上层分类
+        text, seconds = result["text"], result.get("seconds")
+    else:
+        text_parts, seconds = [], None
+        for i, (seg_s, seg_e) in enumerate(segs):
+            seg_mp3 = src.parent / f"source.asrseg{i}.mp3"
+            err = _extract_audio(src, seg_mp3, voice_grade=False,
+                                 start_s=seg_s, duration_s=seg_e - seg_s)
+            if err:
+                seg_mp3.unlink(missing_ok=True)
+                return {"error": "extract_failed",
+                        "hint": f"转写段 {i + 1}/{len(segs)} 压缩失败: " + err}, 3
+            try:
+                seg_result = vasr.transcribe_file(seg_mp3)   # AsrError 抛给上层分类
+                text_parts.append(seg_result["text"].strip())
+                seconds = (seconds or 0) + (seg_result.get("seconds") or (seg_e - seg_s))
+            finally:
+                seg_mp3.unlink(missing_ok=True)
+            tick("asr", "mimo", 15 + int(25 * (i + 1) / len(segs)),
+                 f"mimo 分段转写 {i + 1}/{len(segs)}(段界在停顿处, 拼接无重叠)…")
+        text = "".join(text_parts)
+        if not text.strip():
+            return {"error": "empty", "hint": "分段转写结果为空，请确认音频中有清晰语音"}, 3
+    tick("asr", "align", 55, "本地 whisper 句级对齐(长音频自动分段, 首次装模型之后有缓存)")
+    phrases, align_err, meta = _asr_pin(src, text)
     align_mode = "whisper"
     if align_err:
         # 长音频 whisper 幻觉(token/旁白比出界)→ 静音比例估算降级: 句界近似但切点吸附静音,
@@ -2367,12 +2461,12 @@ def _run_asr(request: dict) -> tuple[dict, int]:
     current = make_get(row["id"])
     if not current or (current.get("audio") or {}).get("asset_id") != audio.get("asset_id"):
         return {"error": "make_changed", "hint": "转写期间更换了音频，请重试"}, 4
-    current["narration"].update(text=result["text"], source="asr", locked=False,
+    current["narration"].update(text=text, source="asr", locked=False,
                                 locked_at=None, hash="", llm_source="mimo-asr", style_id="")
     current["audio"] = {**(current.get("audio") or {}),
-                        "transcript": result["text"],
+                        "transcript": text,
                         "engine": str((config.load().get("asr") or {}).get("model") or ""),
-                        "seconds": result.get("seconds"),
+                        "seconds": seconds,
                         "file_hash": _file_hash8(src), "src_ext": "mp3",
                         "original_ext": ext, "from_video": from_video,
                         "phrases": phrases, "align_ok": not align_err, "align_mode": align_mode,
@@ -2383,7 +2477,7 @@ def _run_asr(request: dict) -> tuple[dict, int]:
     current["voice"].update(items={}, voice_key="")
     current["status"] = "editing_narration"
     _make_save(current)
-    report = {"text_head": result["text"][:60], "sentences": len(phrases),
+    report = {"text_head": text[:60], "sentences": len(phrases),
               "align_ok": not align_err, "match_rate": meta.get("match_rate"),
               "hint": ("句级对齐失败: " + align_err[:120] +
                        "——仍可校对定稿, 切原声时会用终稿重钉") if align_err else ""}
