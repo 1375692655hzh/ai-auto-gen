@@ -524,6 +524,7 @@ WB.pages.settings = {
         this.asrTest = { ok: true, text: '连接正常 · ' + (d.text_head || '') + (d.seconds ? ` (${d.seconds}s 样本)` : '') };
       } catch (e) {
         const msgs = { no_key: '未配置 base_url / API Key', http_401: 'API Key 无效', http_404: '接口路径不对(检查接口地址)',
+                       http_402: '账户余额不足(key 本身有效)——api.xiaomimimo.com 是按量计费端点, 需到平台「账户余额」充值; Token 订阅包用户请把接口地址换成 token-plan-cn.xiaomimimo.com/v1 并配 tp- 开头的 key',
                        network: '网络不通(代理拦截?)', empty: '转写返回空文本' };
         this.asrTest = { ok: false, text: (msgs[e.error] || e.error || '检测失败') + (e.hint ? ' — ' + e.hint : '') };
       }
@@ -1014,7 +1015,11 @@ WB.pages.settings = {
         ——注册后在「API Keys」创建(与 mimo TTS 同一平台, 同一把 key 通用)。<br>
         <b>说明:</b> 只服务视频制作「音频路线」(上传录音→提取文字稿→配画面出片); 转写只出文本,
         逐句时间轴由本机 whisper 自动对齐(首次使用自动下载模型, 无需配置)。<br>
-        <b>填写案例:</b> 地址=<code>https://token-plan-cn.xiaomimimo.com/v1</code> · 模型=<code>mimo-v2.5-asr</code> · 语言=中文
+        <b>填写案例(key 与地址配套, 二选一):</b><br>
+        · Token 订阅包(tp- 开头 key): 地址=<code>https://token-plan-cn.xiaomimimo.com/v1</code><br>
+        · 按量付费(sk- 开头 key): 地址=<code>https://api.xiaomimimo.com/v1</code> —— 需先到平台「账户余额」充值,
+        余额为 0 时任何模型都报 402(key 有效也叫不动)<br>
+        两种方式模型都填=<code>mimo-v2.5-asr</code> · 语言=中文
       </div>
       <div class="form-row"><label>接口地址</label>
         <input type="text" v-model="s.asr.base_url" style="width:340px"></div>
