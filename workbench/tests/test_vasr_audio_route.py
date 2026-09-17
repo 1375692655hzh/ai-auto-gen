@@ -163,7 +163,21 @@ class AudioRouteTests(unittest.TestCase):
         self.assertEqual(argv[0], "C:/ffmpeg/ffmpeg.exe")
         for flag in ("-vn", "-c:a", "libmp3lame", "-q:a", "2"):
             self.assertIn(flag, argv)
+        self.assertNotIn("-ar", argv)                    # 出片档保持原采样率
         self.assertIn(str(src), argv)
+        # 压缩档(转写副本): 16k 单声道
+        calls.clear()
+        dest2 = self.tmp / "out16k.mp3"
+        def fake_run2(argv, **kw):
+            calls["argv"] = argv
+            if "libmp3lame" in argv:
+                dest2.write_bytes(b"mp3" * 1000)
+            return SimpleNamespace(returncode=0, stdout="", stderr="")
+        with (patch("shutil.which", return_value="C:/ffmpeg/ffmpeg.exe"),
+              patch.object(vstudio.subprocess, "run", side_effect=fake_run2)):
+            self.assertEqual(vstudio._extract_audio(src, dest2, voice_grade=False), "")
+        for flag in ("-ar", "16000", "-ac", "1"):
+            self.assertIn(flag, calls["argv"])
         # lame 缺失 → 指引文案(不透传裸 stderr)
         def lame_fail(argv, **kw):
             return SimpleNamespace(returncode=1, stdout="",
@@ -177,6 +191,36 @@ class AudioRouteTests(unittest.TestCase):
         with patch.object(vstudio, "_resolve_ffmpeg", return_value=""):
             err2 = vstudio._extract_audio(src, self.tmp / "out3.mp3")
         self.assertIn("ffmpeg", err2)
+
+    def test_estimate_phrases_silence_allocation(self):
+        """长音频 whisper 幻觉降级: 语音区+字数比例分配, 句界落在语音区内且单调。"""
+        from types import SimpleNamespace
+        src = self.tmp / "long.mp3"
+        src.write_bytes(b"f")
+        fake_log = ("Duration: 00:01:00.00\n"
+                    "silence_start: 9.0\nsilence_end: 11.0\n"
+                    "silence_start: 19.0\nsilence_end: 21.5\n")
+        # 语音区=[0,9],[11,19],[21.5,60] 共 55.5s; 三句各 10 字 → 每句 55.5/3=18.5s? 不: 按字数
+        narration = "第一句十个字第一句十个字。第二句十个字第二句十个字！第三句十个字第三句十个字？"
+        with (patch.object(vstudio, "_resolve_ffmpeg", return_value="ff"),
+              patch.object(vstudio.subprocess, "run", return_value=SimpleNamespace(
+                  returncode=0, stdout="", stderr=fake_log))):
+            phrases, err = vstudio._estimate_phrases(src, narration)
+        self.assertEqual(err, "")
+        self.assertEqual(len(phrases), 3)
+        self.assertAlmostEqual(phrases[0]["start"], 0.0, places=2)
+        # 20 字/55.5s → 每句 ~18.5 平铺秒; 第一句末≈18.5 映射回真实: 跨过 [9,11] 静音 → 真实≈20.5
+        self.assertGreater(phrases[0]["end"], 11.0)
+        for a, b in zip(phrases, phrases[1:]):
+            self.assertGreaterEqual(b["start"], a["start"])
+            self.assertLessEqual(a["end"], 60.0 + 0.01)
+        # 静音探测不可用 → 报错不产出
+        with (patch.object(vstudio, "_resolve_ffmpeg", return_value="ff"),
+              patch.object(vstudio.subprocess, "run", return_value=SimpleNamespace(
+                  returncode=0, stdout="", stderr="Duration: 00:01:00.00\n"))):
+            phrases2, err2 = vstudio._estimate_phrases(src, narration)
+        self.assertEqual(phrases2, [])
+        self.assertTrue(err2)
 
 
 if __name__ == "__main__":

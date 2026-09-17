@@ -1915,7 +1915,7 @@ WB.pages.video = {
                       <textarea v-model="curMake.narration.text" @input="saveMake()" rows="10" style="width:100%"></textarea>
                       <p class="muted">{{ narrationWords }} 字<span v-if="curMake.audio && curMake.audio.seconds"> · 音频约 {{ Math.round(curMake.audio.seconds) }} 秒 · 语速 {{ (narrationWords / curMake.audio.seconds).toFixed(1) }} 字/秒</span></p>
                       <div v-if="asrPhrases.length" style="margin:8px 0">
-                        <div class="muted" style="font-size:12px;margin-bottom:4px">点时间跳播原声对照（句级时间轴来自本地对齐{{ curMake.audio && curMake.audio.match_rate != null ? ' · 匹配率 ' + Math.round(curMake.audio.match_rate * 100) + '%' : '' }}）：</div>
+                        <div class="muted" style="font-size:12px;margin-bottom:4px">点时间跳播原声对照（{{ curMake.audio && curMake.audio.align_mode === 'estimated' ? '⚠ 时间轴为静音估算，句界近似±秒级' : '句级时间轴来自本地对齐' }}{{ curMake.audio && curMake.audio.match_rate != null ? ' · 匹配率 ' + Math.round(curMake.audio.match_rate * 100) + '%' : '' }}）：</div>
                         <div style="max-height:170px;overflow:auto;border:1px solid var(--border);border-radius:8px;padding:6px">
                           <div v-for="(p, i) in asrPhrases" :key="i" style="display:flex;gap:8px;padding:2px 4px;font-size:12px;align-items:baseline">
                             <a href="javascript:void(0)" style="color:var(--accent);white-space:nowrap;font-family:monospace" @click="playPhrase(p)">{{ fmtClock(p.start) }}</a>

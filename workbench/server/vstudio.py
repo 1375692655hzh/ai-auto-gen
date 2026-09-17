@@ -2209,19 +2209,25 @@ def _resolve_ffmpeg() -> str:
     return str(cands[0]) if cands else ""
 
 
-def _extract_audio(src: Path, dest_mp3: Path) -> str:
-    """视频/非常规音频 → 抽音轨转 mp3(-vn + libmp3lame VBR 高质); 返回错误文案(空=成功)。"""
+def _extract_audio(src: Path, dest_mp3: Path, voice_grade: bool = True) -> str:
+    """视频/大音频 → mp3。voice_grade=True 出片音质(原采样率 q:a 2, 供切原声);
+    False 压缩档(16k 单声道 q:a 5, 供 mimo 转写——单请求 data ≤10MB, 原始须 ≤约 7MB)。
+    返回错误文案(空=成功)。"""
     ff = _resolve_ffmpeg()
     if not ff:
         return ("未找到可用的 ffmpeg（抽音轨需要）：请安装完整版 ffmpeg 并加入 PATH，"
                 "或先手动抽出音频再传 mp3")
     dest_mp3.parent.mkdir(parents=True, exist_ok=True)
+    argv = [ff, "-hide_banner", "-loglevel", "error", "-y", "-i", str(src), "-vn"]
+    if voice_grade:
+        argv += ["-c:a", "libmp3lame", "-q:a", "2"]
+    else:
+        argv += ["-ar", "16000", "-ac", "1", "-c:a", "libmp3lame", "-q:a", "5"]
+    argv.append(str(dest_mp3))
     try:
-        proc = subprocess.run(
-            [ff, "-hide_banner", "-loglevel", "error", "-y", "-i", str(src),
-             "-vn", "-c:a", "libmp3lame", "-q:a", "2", str(dest_mp3)],
-            capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=900,
-            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+        proc = subprocess.run(argv, capture_output=True, text=True, encoding="utf-8",
+                              errors="replace", timeout=900,
+                              creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
     except subprocess.TimeoutExpired:
         return "抽音轨超时（视频过长?），可先手动抽出音频传 mp3"
     if proc.returncode != 0 or not dest_mp3.is_file() or dest_mp3.stat().st_size < 1024:
@@ -2230,6 +2236,85 @@ def _extract_audio(src: Path, dest_mp3: Path) -> str:
             return "本机 ffmpeg 缺 mp3 编码器（libmp3lame）：请安装完整版 ffmpeg 后重试"
         return "抽音轨失败: " + (tail or "ffmpeg 无输出（视频里可能没有音轨?）")
     return ""
+
+
+def _speech_regions(src: Path) -> tuple[list, str]:
+    """silencedetect 语音区(静音补集, -40dB/0.35s 长音频档); 合并碎隙、丢碎区。
+    供钉词失败时的比例估算时间轴——切点吸附静音的音轨完整性不受影响。"""
+    ff = _resolve_ffmpeg()
+    if not ff:
+        return [], "no ffmpeg"
+    try:
+        proc = subprocess.run(
+            [ff, "-hide_banner", "-i", str(src), "-af",
+             "silencedetect=noise=-40dB:d=0.35", "-f", "null", "-"],
+            capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=900,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+    except subprocess.TimeoutExpired:
+        return [], "静音探测超时"
+    log = (proc.stdout or "") + (proc.stderr or "")
+    dm = re.search(r"Duration:\s*(\d+):(\d+):(\d+(?:\.\d+)?)", log)
+    if not dm or "silence_" not in log:
+        return [], "静音探测不可用(ffmpeg 缺滤镜?)"
+    duration = int(dm.group(1)) * 3600 + int(dm.group(2)) * 60 + float(dm.group(3))
+    starts = [float(m) for m in re.findall(r"silence_start:\s*([\d.]+)", log)]
+    ends = [float(m) for m in re.findall(r"silence_end:\s*([\d.]+)", log)]
+    if len(starts) > len(ends):                 # 尾段静音直到 EOF(无 silence_end) → 补时长
+        ends.append(duration)
+    silences = sorted(zip(starts[:len(ends)], ends))
+    regions, cursor = [], 0.0
+    for s, e in silences:                       # 静音补集 = 语音区
+        if s - cursor >= 0.5:
+            regions.append([cursor, s])
+        cursor = max(cursor, e)
+    if duration - cursor >= 0.5:
+        regions.append([cursor, duration])
+    merged = []                                 # 合并 <0.4s 碎隙(呼吸停顿)
+    for s, e in regions:
+        if merged and s - merged[-1][1] < 0.4:
+            merged[-1][1] = e
+        else:
+            merged.append([s, e])
+    return merged, ""
+
+
+def _estimate_phrases(src: Path, narration: str) -> tuple[list, str]:
+    """钉词失败兜底: 语音区 + 按字数比例分配句级时间轴(与 align.mjs 同款逗号级分句)。
+    句界误差随区内长度累积(典型 ±1-3s), 但切点吸附静音、字幕精度由 build 期逐幕
+    whisper 保证(每幕 8-25s 短音频无幻觉问题), 只影响点句跳播/切点近似度。"""
+    regions, err = _speech_regions(src)
+    if not regions:
+        return [], err or "未探测到语音区"
+    puncts = "，。；：？！、,.;:?!"
+    texts = [t for t in (m.group(0).strip() for m in re.finditer(
+        r"[^%s]+[%s]?" % (re.escape(puncts), re.escape(puncts)), narration)) if t]
+    if not texts:
+        return [], "文稿为空"
+    costs = [len(re.sub(r"\s+", "", t)) for t in texts]
+    total_chars, total_s = sum(costs), sum(e - s for s, e in regions)
+    if total_chars < 10 or total_s < 1:
+        return [], "文稿/语音区过短"
+    rate = total_chars / total_s                # 字/秒(只按语音区计)
+    # 语音区摊平成连续轴分配, 再映射回真实时间(区内比例漂移, 区界自动归零)
+    flat, acc = [], 0.0
+    for s, e in regions:
+        flat.append((acc, acc + (e - s), s, e))
+        acc += e - s
+
+    def to_real(x: float) -> float:
+        for fs, fe, rs, re_ in flat:
+            if x <= fe:
+                return rs + (x - fs)
+        return flat[-1][3]
+
+    phrases, cursor = [], 0.0
+    for i, (text, cost) in enumerate(zip(texts, costs)):
+        end = min(cursor + cost / rate, acc)
+        start_r, end_r = to_real(cursor), to_real(end)
+        phrases.append({"id": i, "text": text,
+                        "start": round(start_r, 3), "end": round(max(end_r, start_r + 0.3), 3)})
+        cursor = end
+    return phrases, ""
 
 
 def _run_asr(request: dict) -> tuple[dict, int]:
@@ -2261,9 +2346,24 @@ def _run_asr(request: dict) -> tuple[dict, int]:
         src.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(path, src)
     tick("asr", "mimo", 15, "mimo 转写中(约 20 倍速)")
-    result = vasr.transcribe_file(src)          # AsrError 抛给上层分类
+    # mimo 单请求 data(含 base64) ≤10MB → 原始须 ≤约 7MB; 超限压 16k 单声道转写副本
+    # (纯转码不裁时间轴, 时间戳与 source 一致; 切原声仍用高音质 source.mp3)
+    asr_copy = src
+    if src.stat().st_size > 7 * 1024 * 1024:
+        asr_copy = src.parent / "source.asr16k.mp3"
+        err = _extract_audio(src, asr_copy, voice_grade=False)
+        if err:
+            return {"error": "extract_failed", "hint": "压缩转写副本失败: " + err}, 3
+    result = vasr.transcribe_file(asr_copy)     # AsrError 抛给上层分类
     tick("asr", "align", 55, "本地 whisper 句级对齐(首次自动装模型, 之后有缓存)")
     phrases, align_err, meta = _asr_pin(src, result["text"])
+    align_mode = "whisper"
+    if align_err:
+        # 长音频 whisper 幻觉(token/旁白比出界)→ 静音比例估算降级: 句界近似但切点吸附静音,
+        # 字幕精度由 build 期逐幕 whisper 保证(短音频无幻觉)
+        phrases, _est_err = _estimate_phrases(src, result["text"])
+        if phrases:
+            align_mode, align_err = "estimated", ""
     current = make_get(row["id"])
     if not current or (current.get("audio") or {}).get("asset_id") != audio.get("asset_id"):
         return {"error": "make_changed", "hint": "转写期间更换了音频，请重试"}, 4
@@ -2275,7 +2375,7 @@ def _run_asr(request: dict) -> tuple[dict, int]:
                         "seconds": result.get("seconds"),
                         "file_hash": _file_hash8(src), "src_ext": "mp3",
                         "original_ext": ext, "from_video": from_video,
-                        "phrases": phrases, "align_ok": not align_err,
+                        "phrases": phrases, "align_ok": not align_err, "align_mode": align_mode,
                         "match_rate": meta.get("match_rate")}
     current["script"] = None
     current["script_meta"] = {"locked": False, "locked_at": None, "hash": "",
@@ -2326,10 +2426,15 @@ def _run_slice(request: dict):
     beats = row["script"]["beats"]
     tick("voice", "align", 10, "终稿句级对齐(校对改文会自动重钉)")
     phrases, align_err, _meta = _asr_pin(src, row["narration"]["text"])
+    align_mode = "whisper"
     if align_err:
-        return {"error": "align_failed",
-                "hint": "钉词失败(校对改写幅度过大?): " + align_err[:120]
-                        + "；请把改写控制在与原文相近长度后重试"}, 3
+        # 全轨钉词失败(长音频幻觉) → 静音比例估算降级, 放宽切窗让边界尽量落在静音
+        phrases, _est_err = _estimate_phrases(src, row["narration"]["text"])
+        if not phrases:
+            return {"error": "align_failed",
+                    "hint": "钉词失败(校对改写幅度过大?): " + align_err[:120]
+                            + "；请把改写控制在与原文相近长度后重试"}, 3
+        align_mode = "estimated"
     groups = _assign_phrases(beats, phrases)
     cuts = []
     for beat, group in zip(beats, groups):
@@ -2346,8 +2451,9 @@ def _run_slice(request: dict):
     out_dir = _safe_path(voice_root(), row["id"], vkey)
     out_dir.mkdir(parents=True, exist_ok=True)
     tick("voice", "cut", 40, f"切原声({len(cuts)} 幕, 静音窗下刀/硬切兜底)")
+    win, expand = (0.8, 3.0) if align_mode == "estimated" else (0.3, 0.6)
     plan = {"source": str(src.resolve()), "out_dir": str(out_dir.resolve()), "cuts": cuts,
-            "window": 0.3, "expand": 0.6, "fade_ms": 10,
+            "window": win, "expand": expand, "fade_ms": 10,
             "result_file": str((out_dir / "_cutresult.json").resolve())}
     (out_dir / "_cutresult.json").unlink(missing_ok=True)
     _atomic_json(out_dir / "_cutplan.json", plan)
@@ -2380,7 +2486,7 @@ def _run_slice(request: dict):
                              "duration_s": item.get("duration") or 0}
     current["voice"].update(profile_id="", voice="", voice_key=vkey, items=items)
     current["audio"] = {**(current.get("audio") or {}), "cuts": data.get("cuts") or [],
-                        "match_rate": _meta.get("match_rate")}
+                        "match_rate": _meta.get("match_rate"), "align_mode": align_mode}
     current["status"] = "voice_ready" if not voice_missing(current) else "script_locked"
     _make_save(current)
     result = {"make_id": row["id"], "voice_key": vkey,
