@@ -24,7 +24,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 BRIDGE_PORT = int(os.environ.get("ZEN_BRIDGE_PORT", "20133"))
 SERVE_PORT = int(os.environ.get("ZEN_SERVE_PORT", "4096"))
 SERVE_BASE = f"http://127.0.0.1:{SERVE_PORT}"
-UPSTREAM_TIMEOUT = int(os.environ.get("ZEN_BRIDGE_UPSTREAM_TIMEOUT", "240"))
+UPSTREAM_TIMEOUT = int(os.environ.get("ZEN_BRIDGE_UPSTREAM_TIMEOUT", "75"))  # 快于调用方90s: 桶抽风→快速502→链落下一桶
 _serve_proc = None
 
 
