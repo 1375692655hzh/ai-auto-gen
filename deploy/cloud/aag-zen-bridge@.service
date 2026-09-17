@@ -1,0 +1,27 @@
+# aag-zen-bridge@.service — zen 官方客户端桥(模板实例化, 2026-09-17)
+# 每个实例=一个住宅 IP 出口=一个独立配额桶(zen 免费层配额按出口 IP 计)。
+# 实例名即桶名: aag-zen-bridge@jp / @hk / @us...; 各实例的代理与端口放在
+#   @REPO@/data/zen-bridge-<实例名>.env   (data/ 不进 git——代理凭证绝不能进仓库)
+# 内容形如:
+#   HTTPS_PROXY=http://user:pass@host:port
+#   ZEN_BRIDGE_PORT=20133
+#   ZEN_SERVE_PORT=4096
+# 轮换=调用方链式 fallback: 链位 [桥JP, 桥HK, ...] 各自挂同模型, 某桶 429/超时
+# 自动落下一桶(translate.py/x_surge 链语义内建)。
+[Unit]
+Description=aag zen bridge %i (opencode serve + OpenAI-compat adapter)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=@REPO@
+Environment=PYTHONUTF8=1
+EnvironmentFile=@REPO@/data/zen-bridge-%i.env
+ExecStart=@REPO@/.venv/bin/python deploy/cloud/zen_bridge.py
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
