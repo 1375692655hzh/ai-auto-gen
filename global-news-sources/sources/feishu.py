@@ -106,21 +106,59 @@ def send_text(conf: dict, text: str) -> tuple[bool, str]:
 
 
 # ── A. 15min 情报摘要 ───────────────────────────────────────────────────────
-_SYS = """你是财经情报摘要员。输入是 15 分钟内 X(推特)上财经账号的新帖(JSON)。
+_SYS = """你是财经情报摘要员。输入是 15 分钟内 X(推特)上财经账号的新帖(JSON, 含浏览量v/点赞lk)。
 输出要求:
-1. 开头一行: 【X热点 · {标题时间}】 一句话总览全局(20字内)。
+1. 开头一行: 【15min-X热帖 · {标题时间}】 一句话总览全局(20字内)。
 2. 按话题聚合同类帖, 列出 3-8 条热点, 每条一行:
-   🔥<一句话说清事件/观点(中文)> — @主账号(等N账号)
-   排序以流量为主: 同题账号数多(传播热度高)的排最前; 同题 ≥3 账号标🔥🔥;
-   热度相当时再参考事件影响面。不预设题材优先级。
+   🔥<一句话说清事件/观点(中文)> — @主账号 浏览量N(等N账号)
+   行尾必须标注账号与其浏览量(如 浏览量1.2万, 万以下直接数字); 多账号同题再列其他账号。
+   排序以流量为主: 浏览量高/同题账号多的排最前; 同题 ≥3 账号标🔥🔥。
 3. 不要逐条罗列账号废话, 不要解释你的过程。
 4. 末尾附: 详情→ {board_url}"""
 
 
+def _enrich_stats(items: list[dict], max_handles: int = 12) -> None:
+    """FxTwitter 现拉浏览量(v)/点赞(lk): 按作者聚合一次时间线调用, sid 匹配回填。
+    失败/超 max_handles 静默缺省(LLM 会省略未标注字段)。"""
+    try:
+        from fetchers.basic import _tw_fetch_statuses
+    except Exception:
+        return
+    by_handle: dict[str, dict[str, tuple]] = {}
+    for it in items:
+        h = (it.get("author_handle") or "").strip()
+        sid = str(it.get("url") or "").rstrip("/").split("/")[-1]
+        if h and sid.isdigit():
+            by_handle.setdefault(h, {})[sid] = None
+    for h in list(by_handle)[:max_handles]:
+        try:
+            for s in _tw_fetch_statuses(h, 20, False):
+                posts = s.get("statuses") or [] if s.get("type") == "thread" else [s]
+                for p in posts:
+                    sid = str(p.get("id") or "")
+                    if sid in by_handle[h]:
+                        by_handle[h][sid] = (p.get("views"), p.get("likes"))
+        except Exception:
+            continue
+    for it in items:
+        h = (it.get("author_handle") or "").strip()
+        sid = str(it.get("url") or "").rstrip("/").split("/")[-1]
+        hit = by_handle.get(h, {}).get(sid) if sid.isdigit() else None
+        if hit:
+            it["views"], it["likes"] = hit[0], hit[1]
+
+
 def _digest_prompt(items: list[dict], bj: str) -> str:
     board = "https://board.haiwai.ltd/#k=vb_9a80545a5ce190ea"
-    lines = [{"h": (it.get("author_handle") or it.get("source") or "?"),
-              "t": ((it.get("text_zh") or it.get("text") or ""))[:400]} for it in items]
+    lines = []
+    for it in items:
+        d = {"h": (it.get("author_handle") or "?"),
+             "t": ((it.get("text_zh") or it.get("text") or ""))[:400]}
+        if it.get("views") is not None:
+            d["v"] = it["views"]
+        if it.get("likes") is not None:
+            d["lk"] = it["likes"]
+        lines.append(d)
     return (f"时间: {bj}\n看板链接: {board}\n新帖JSON:\n"
             + json.dumps(lines, ensure_ascii=False))
 
@@ -173,14 +211,16 @@ def run_digest(since_fetched_at: str) -> dict:
         rep["skipped"] = f"新增 {len(items)} 条 < 下限 {conf['min_items']}, 静默"
         return rep
     bj = time.strftime("%m-%d %H:%M")
+    _enrich_stats(items)
     text = _llm_digest(conf, _digest_prompt(items, bj))
     if not text:
         rep["fallback"] = 1
         board = "https://board.haiwai.ltd/#k=vb_9a80545a5ce190ea"
-        lines = [f"【X热点 · {bj}】近15分钟 {len(items)} 条新帖(LLM 暂挂, 规则直列):"]
-        for it in items[:6]:
+        lines = [f"【15min-X热帖 · {bj}】近15分钟 {len(items)} 条新帖(LLM 暂挂, 规则直列):"]
+        for it in sorted(items, key=lambda x: -(x.get("views") or 0))[:6]:
             t = (it.get("text_zh") or it.get("text") or "")[:120].replace("\n", " ")
-            lines.append(f"· @{it.get('author_handle') or '?'}: {t}")
+            v = f" 浏览量{it['views']}" if it.get("views") is not None else ""
+            lines.append(f"· @{it.get('author_handle') or '?'}{v}: {t}")
         lines.append(f"详情→ {board}")
         text = "\n".join(lines)
     ok, err = send_text(conf, text)
