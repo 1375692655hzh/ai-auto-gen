@@ -108,7 +108,8 @@ def send_text(conf: dict, text: str) -> tuple[bool, str]:
 # ── A. 15min 情报摘要 ───────────────────────────────────────────────────────
 _SYS = """你是财经情报摘要员。输入是 15 分钟内 X(推特)上财经账号的新帖(JSON, 含浏览量v/点赞lk)。
 输出要求:
-1. 开头一行: 【15min-X热帖 · {标题时间}】 一句话总览全局(20字内)。
+1. 开头一行: 【15min-X热帖】 {标题时间}
+一句话总览全局(20字内)。
 2. 按话题聚合同类帖, 列出 3-8 条热点, 每条一行:
    🔥<一句话说清事件/观点(中文)> — @主账号 浏览量N(等N账号)
    行尾必须标注账号与其浏览量(如 浏览量1.2万, 万以下直接数字); 多账号同题再列其他账号。
@@ -216,7 +217,8 @@ def run_digest(since_fetched_at: str) -> dict:
     if not text:
         rep["fallback"] = 1
         board = "https://board.haiwai.ltd/#k=vb_9a80545a5ce190ea"
-        lines = [f"【15min-X热帖 · {bj}】近15分钟 {len(items)} 条新帖(LLM 暂挂, 规则直列):"]
+        lines = [f"【15min-X热帖】 {bj}
+近15分钟 {len(items)} 条新帖(LLM 暂挂, 规则直列):"]
         for it in sorted(items, key=lambda x: -(x.get("views") or 0))[:6]:
             t = (it.get("text_zh") or it.get("text") or "")[:120].replace("\n", " ")
             v = f" 浏览量{it['views']}" if it.get("views") is not None else ""
