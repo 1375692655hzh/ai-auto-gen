@@ -217,8 +217,7 @@ def run_digest(since_fetched_at: str) -> dict:
     if not text:
         rep["fallback"] = 1
         board = "https://board.haiwai.ltd/#k=vb_9a80545a5ce190ea"
-        lines = [f"【15min-X热帖】 {bj}
-近15分钟 {len(items)} 条新帖(LLM 暂挂, 规则直列):"]
+        lines = [f"【15min-X热帖】 {bj}\n近15分钟 {len(items)} 条新帖(LLM 暂挂, 规则直列):"]
         for it in sorted(items, key=lambda x: -(x.get("views") or 0))[:6]:
             t = (it.get("text_zh") or it.get("text") or "")[:120].replace("\n", " ")
             v = f" 浏览量{it['views']}" if it.get("views") is not None else ""
