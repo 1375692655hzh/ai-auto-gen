@@ -219,87 +219,25 @@ def publish_status(json_out: bool = False) -> int:
     return EXIT_OK
 
 
-def _cfg_local_path():
-    """config.local.yaml 与 sources._cfg_section 同源: generator/config.yaml 同目录。"""
-    p = ROOT / "ai-workflow" / "generator" / "config.yaml"
-    if not p.exists():
-        p = GNS / "config.yaml"
-    return p.with_name("config.local.yaml")
-
-
-def _yaml_set_enabled(text: str, sid: str, on: bool) -> str:
-    """行级编辑 sources.<sid>.enabled, 保留注释与其他段——config.local.yaml 是用户手维护
-    的模板(key 等), 不能整文件 safe_dump 重写(会丢注释)。原子写由调用方负责。"""
-    import re as _re
-    val = "true" if on else "false"
-    lines = text.splitlines(keepends=True) if text else []
-    if lines and not lines[-1].endswith("\n"):
-        lines[-1] += "\n"
-    src_i = next((i for i, l in enumerate(lines)
-                  if _re.match(r"^sources:\s*(#.*)?$", l.rstrip("\n"))), None)
-    if src_i is None:                       # 无 sources 段: 文件尾新开一段
-        if not text:
-            lines.append("# 本机覆盖(gitignored, 不入库) — sources 启停由 cli.py sources enable 维护\n")
-        elif lines and lines[-1] != "\n":
-            lines.append("\n")
-        lines += ["sources:\n", f"  {sid}:\n", f"    enabled: {val}\n"]
-        return "".join(lines)
-    j, sid_i = src_i + 1, None
-    while j < len(lines):
-        l = lines[j].rstrip("\n")
-        if l.strip() and not l[0].isspace():
-            break                           # 下一个顶层键: sources 段结束
-        if _re.match(r"^  " + _re.escape(sid) + r":\s*(#.*)?$", l):
-            sid_i = j
-            break
-        j += 1
-    if sid_i is None:                       # 段内无该源: 紧跟 sources: 后插入
-        lines.insert(src_i + 1, f"  {sid}:\n    enabled: {val}\n")
-        return "".join(lines)
-    k, en_i = sid_i + 1, None
-    while k < len(lines):
-        l = lines[k].rstrip("\n")
-        if l.strip() and (not l[0].isspace() or len(l) - len(l.lstrip()) <= 2):
-            break                           # 顶层键或 sources 下别的子键: sid 块结束
-        if _re.match(r"^ {4}enabled:", l):
-            en_i = k
-            break
-        k += 1
-    if en_i is None:
-        lines.insert(sid_i + 1, f"    enabled: {val}\n")
-    else:
-        lines[en_i] = _re.sub(r"(enabled:)\s*(true|false)?", rf"\1 {val}", lines[en_i])
-    return "".join(lines)
-
-
 def sources_enable_cmd(sid: str, state, as_json: bool) -> int:
+    # 写内核在 sources/ctl.py(2026-09-11 单一事实源): cli 与数据站写端点共用同一套
+    # 行级编辑 + 原子写, 两入口行为永远一致。
     sys.path.insert(0, str(GNS))
-    from sources import list_sources
-    cur = next((m["enabled"] for m in list_sources() if m["id"] == sid), None)
-    if cur is None:
+    from sources import ctl
+    on = {"on": True, "off": False}.get(state)
+    try:
+        out = ctl.set_enabled(sid, on)
+    except KeyError:
         msg = f"未知来源: {sid}"
         print(json.dumps({"error": msg}, ensure_ascii=False)
               if as_json else msg, file=sys.stderr)
         return EXIT_CONFIG
-    on = (state == "on") if state else (not cur)
-    import tempfile
-    loc = _cfg_local_path()
-    new_text = _yaml_set_enabled(loc.read_text(encoding="utf-8") if loc.exists() else "",
-                                 sid, on)
-    loc.parent.mkdir(parents=True, exist_ok=True)
-    fd, tmp = tempfile.mkstemp(dir=str(loc.parent), suffix=".tmp")
-    with os.fdopen(fd, "w", encoding="utf-8") as f:
-        f.write(new_text)
-    os.replace(tmp, loc)
-    now = next((m["enabled"] for m in list_sources() if m["id"] == sid), None)
-    ok = (now == on)
     if as_json:
-        print(json.dumps({"id": sid, "enabled": now, "ok": ok, "file": str(loc)},
-                         ensure_ascii=False))
+        print(json.dumps(out, ensure_ascii=False))
     else:
-        mark = "✅" if ok else "❌"
-        print(f"{mark} {sid} → {'启用' if now else '停用'} (config.local.yaml)")
-    return EXIT_OK if ok else EXIT_FAIL
+        mark = "✅" if out["ok"] else "❌"
+        print(f"{mark} {out['id']} → {'启用' if out['enabled'] else '停用'} (config.local.yaml)")
+    return EXIT_OK if out["ok"] else EXIT_FAIL
 
 
 def sources_cmd(args) -> int:

@@ -230,7 +230,8 @@ WB.pages.news = {
         s.enabled = d.enabled;
         this.regMsg = `${s.id} → ${d.enabled ? "启用" : "停用"}`;
         this.loadStats();                  // 注册表状态变化, 重拉统计(服务端已失效缓存)
-      } catch (e) { this.regMsg = (e && e.error) || "启停失败"; }
+      } catch (e) { this.regMsg = (e && e.error) || "启停失败";
+        if (e && e.hint) this.regMsg += " — " + e.hint; }   /* 401/403/404 带数据站侧修法 */
       finally { this.busyId = ""; }
       setTimeout(() => { this.regMsg = ""; }, 2500);
     },

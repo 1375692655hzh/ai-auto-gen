@@ -68,22 +68,31 @@ class UpstreamError(Exception):
         self.code = code
 
 
+def _base_and_headers() -> tuple[str | None, dict]:
+    """settings.source → (base_url, 注入 Key 的 headers); base 未配置返回 (None, {})。"""
+    cfg = config.load()["source"]
+    base = (cfg.get("base_url") or "").rstrip("/")
+    if not base:
+        return None, {}
+    if cfg.get("mode") == "cloud" and (config.load()["cloud"].get("endpoint")):
+        base = config.load()["cloud"]["endpoint"].rstrip("/")   # 云端演进缝: mode=cloud 换端点
+    headers = {}
+    if cfg.get("api_key"):
+        headers["Authorization"] = f"Bearer {cfg['api_key']}"
+    return base, headers
+
+
 def fetch_json(path_qs: str):
     """服务端内部调 /v1/{path_qs} 并返回解析后的 JSON(带 Key 注入, 与 forward 同通道)。"""
     import json
 
-    cfg = config.load()["source"]
-    base = (cfg.get("base_url") or "").rstrip("/")
+    base, headers = _base_and_headers()
     if not base:
         raise UpstreamError("未配置数据源地址: 到 设置 → 信息源连接 填写数据站地址")
-    if cfg.get("mode") == "cloud" and (config.load()["cloud"].get("endpoint")):
-        base = config.load()["cloud"]["endpoint"].rstrip("/")
-    headers = {}
-    if cfg.get("api_key"):
-        headers["Authorization"] = f"Bearer {cfg['api_key']}"
+    timeout = float(config.load()["source"].get("timeout_s") or 15)
     req = urllib.request.Request(f"{base}/v1/{path_qs}", headers=headers, method="GET")
     try:
-        with urllib.request.urlopen(req, timeout=float(cfg.get("timeout_s") or 15)) as r:
+        with urllib.request.urlopen(req, timeout=timeout) as r:
             return json.loads(r.read())
     except urllib.error.HTTPError as e:
         hint = "数据源要求鉴权: 到 设置 → 信息源连接 填 API Key" if e.code == 401 else ""
@@ -91,3 +100,31 @@ def fetch_json(path_qs: str):
     except Exception as e:
         raise UpstreamError(f"数据源不可达({base}): {type(e).__name__} "
                             f"——确认数据站已启动: python cli.py sources serve")
+
+
+def post_json(path: str, payload: dict) -> dict:
+    """服务端内部 POST /v1/{path}(唯一写面: 数据站源启停, 2026-09-11)→ 解析后 JSON。
+    三接入形态统一走数据站(数据站才是源配置所有者; 旧 spawn 本机 cli 只在
+    "数据站=本机"时碰巧正确, 局域网/云端全写错文件)。HTTP 错抛 UpstreamError 带 code。"""
+    import json
+
+    base, headers = _base_and_headers()
+    if not base:
+        raise UpstreamError("未配置数据源地址: 到 设置 → 信息源连接 填写数据站地址")
+    headers.setdefault("Content-Type", "application/json")
+    req = urllib.request.Request(f"{base}/v1/{path}",
+                                 data=json.dumps(payload).encode("utf-8"),
+                                 headers=headers, method="POST")
+    timeout = float(config.load()["source"].get("timeout_s") or 15)
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            return json.loads(r.read())
+    except urllib.error.HTTPError as e:
+        try:
+            detail = json.loads(e.read()).get("error") or ""
+        except Exception:
+            detail = ""
+        raise UpstreamError(f"HTTP {e.code}: {detail or e.reason}", code=e.code)
+    except Exception as e:
+        raise UpstreamError(f"数据站不可达({base}): {type(e).__name__} "
+                            f"——确认数据站已启动且已升级到含写端点的版本")

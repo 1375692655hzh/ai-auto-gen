@@ -1,6 +1,8 @@
-"""只读 HTTP 供数服务(单机数据站读侧, 拍板 2026-09-01)。
+"""只读为主 HTTP 供数服务(单机数据站读侧, 拍板 2026-09-01)。
 
-- 全 GET、零写端点、零触发抓取端点——刷新只由任务计划/管理员发起
+- 全 GET 读端点 + 唯一写端点 POST /v1/sources/{sid}/enabled(源启停, 2026-09-11:
+  工作台「来源详情」启停开关透传落地——数据站是配置所有者, 三接入形态统一走 HTTP;
+  权限 = key 定义含 "admin": true 或本机(loopback)来源)——刷新仍只由任务计划/管理员发起
 - 默认绑 127.0.0.1; 对外须显式 --bind 0.0.0.0(跨网走 Tailscale/隧道, 不裸开公网)
 - 鉴权: Bearer Key(config/api_keys.local.json, gitignored); localhost 可免密
 - 配额: 每键 RPM/日条数; 快照接口单独按次限流; 超限 429 + Retry-After
@@ -200,6 +202,28 @@ def create_app():
         return {"refresh": ledger, "store": _store.stats(),
                 "health_dead": [k for k, v in _health.report().items()
                                 if v.get("status") == "dead"]}
+
+    # ── 唯一写端点: 源启停(2026-09-11)。数据站是源配置的所有者, 工作台本地/局域网/
+    #    云端三接入形态统一经此启停(旧工作台 spawn 本机 cli 只对"数据站在本机"成立)。
+    #    权限: key 定义含 "admin": true, 或本机(loopback)调用; 普通分发 key 403。──
+    @app.post("/v1/sources/{sid}/enabled")
+    async def source_enabled(sid: str, request: Request):
+        from sources import ctl
+        kdef = request.state.kdef
+        host = request.client.host if request.client else ""
+        if not (kdef.get("admin") or host in ("127.0.0.1", "::1")):
+            return JSONResponse({"error": "forbidden: 源启停需 admin key 或在数据站本机操作",
+                                 "hint": "数据站 config/api_keys.local.json 的 key 定义加 \"admin\": true"},
+                                status_code=403)
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+        on = body.get("on")                 # 缺省 = 翻转(对齐 cli sources enable)
+        try:
+            return ctl.set_enabled(sid, on)
+        except KeyError:
+            return JSONResponse({"error": f"unknown source: {sid}"}, status_code=404)
 
     return app
 
