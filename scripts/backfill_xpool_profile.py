@@ -37,10 +37,14 @@ FETCH_SLEEP = 0.4
 LLM_BATCH = 10
 LLM_TIMEOUT = 180
 
-_SYS = """你是财经账号分析师。根据给出的 X(Twitter) 账号资料(bio 与最近帖子), 为每个账号输出:
-- positioning: 一句话定位, 简体中文, 不超过20字, 描述该账号主要发什么内容(例: "美股宏观快评"、"苹果供应链一手信息"、"土耳其股市数据播报")
-- tags: 3~5个概念词, 简体中文短词(例: ["宏观","美联储","情绪"])
-只输出 JSON 数组 [{"handle":"不带@的账号名","positioning":"...","tags":["..."]}], 不要任何多余文字或代码块标记以外的内容。"""
+_SYS = """你是财经账号简介员。输入为一批 X(Twitter) 账号的 bio(个人简介)。对每个账号输出:
+- positioning: 一句话中文介绍(≤20字), 只陈述 bio 里的事实——这个账号是谁/做什么内容;
+  bio 没有的信息一律不编; bio 空泛就写最简事实句(如"财经博主")。
+- tags: 从下列一级概念词表中选 1~3 个, 只能用词表里的词, 一般 1 个市场 + 0~2 个领域:
+  AI / 科技 / 加密 / 美股 / A股 / 港股 / 日股 / 韩股 / 台股
+只输出 JSON 数组 [{"handle":"...","positioning":"...","tags":["..."]}], 不要任何多余文字。"""
+
+_TAG_VOCAB = {"AI", "科技", "加密", "美股", "A股", "港股", "日股", "韩股", "台股"}
 
 
 # ── 池文件读写(文本级, 保格式) ────────────────────────────────────────────────
@@ -91,19 +95,38 @@ def apply_updates(updates: dict, dry_run: bool = False) -> int:
         end = j
         while end > i and not lines[end - 1].strip():      # 越过块尾空行再插
             end -= 1
-        have = set()
-        for ln in lines[i:end]:
+        # 三字段: 已有行就地替换(--force 覆盖语义; 旧纯插入逻辑盖不上旧值, 2026-09-19 修复),
+        # 块内没有的字段照旧块尾插入。
+        desired = {}
+        if upd.get("followers") is not None:
+            desired["followers"] = upd["followers"]
+        if upd.get("positioning"):
+            desired["positioning"] = str(upd["positioning"])
+        if "tags" in upd:                # 重新生成后空标签=明确清空旧自由词(2026-09-19 裁决)
+            desired["tags"] = [str(t) for t in upd["tags"]][:5]
+        changed = False
+        body = lines[i:end]
+        for k, ln in enumerate(body):
             m = re.match(r"^  ([A-Za-z_][\w-]*):", ln)
-            if m:
-                have.add(m.group(1))
+            if m and m.group(1) in desired:
+                key = m.group(1)
+                val = desired.pop(key)
+                if key == "followers":
+                    val = int(val)
+                new_lines = _scalar_lines(key, val)
+                # 连旧列表项(- item 行)整体替换, 否则旧 tags 残留(2026-09-19 修复)
+                j = k + 1
+                while j < len(body) and re.match(r"^  -\s", body[j]):
+                    j += 1
+                if body[k:j] != new_lines:
+                    body[k:j] = new_lines
+                    changed = True
+        if changed:
+            lines[i:end] = body
         add = []
-        if upd.get("followers") is not None and "followers" not in have:
-            add += _scalar_lines("followers", int(upd["followers"]))
-        if upd.get("positioning") and "positioning" not in have:
-            add += _scalar_lines("positioning", str(upd["positioning"]))
-        if upd.get("tags") and "tags" not in have:
-            add += _scalar_lines("tags", [str(t) for t in upd["tags"]][:5])
-        if not add:
+        for key, val in desired.items():
+            add += _scalar_lines(key, val)
+        if not (add or changed):
             continue
         lines[end:end] = add
         patched += 1
@@ -279,9 +302,10 @@ def norm_tags(v) -> list:
     out, seen = [], set()
     for t in v or []:
         t = str(t or "").strip().strip("#")
-        if t and t.lower() not in seen:
+        # 一级概念词表硬过滤(2026-09-19 用户裁决): 词表外的自由词一律丢弃
+        if t and t in _TAG_VOCAB and t.lower() not in seen:
             seen.add(t.lower())
-            out.append(t[:12])
+            out.append(t)
     return out[:5]
 
 
@@ -318,7 +342,7 @@ def main() -> int:
         if stop:
             return
         h, x = item
-        need_posts = not (str(x.get("positioning") or "").strip() and x.get("tags"))
+        need_posts = a.force or not (str(x.get("positioning") or "").strip() and x.get("tags"))
         try:
             fetched[h] = fetch_one(h, need_posts=need_posts)
             time.sleep(FETCH_SLEEP)                        # 每账号节流(与池抓取同纪律)
@@ -383,6 +407,35 @@ def main() -> int:
         print(f"  [write] 累计写回 {n} 个账号(批{bi//LLM_BATCH+1}/"
               f"{(len(pending)+LLM_BATCH-1)//LLM_BATCH})")
 
+    # 空标签补枪(2026-09-19): 新标签被词表全滤空的账号, 单号强约束重试一次——
+    # 该留空的(土耳其/宏观等词表外领域)保持空, 该给桶的(美股/科技)捞回来。
+    empties = [h for h, u in updates.items()
+               if u.get("positioning") and not u.get("tags") and h not in llm_fail]
+    for h in empties:
+        if not chain:
+            break
+        prof = dict(fetched.get(h) or {})
+        user = (_llm_item(h, prof)
+                + "\n注意: tags 只允许从词表选(可只选1个; 实在没有匹配就返回空数组[]): "
+                + " / ".join(sorted(_TAG_VOCAB)))
+        try:
+            raw = llm_chat(chain, sticky, user)
+        except RuntimeError:
+            raw = ""
+        row = None
+        for r in _parse_json_arr(raw):
+            if isinstance(r, dict):
+                row = r
+                break
+        tags = norm_tags((row or {}).get("tags"))
+        if tags:
+            updates[h]["tags"] = tags
+            print(f"  [llm-retry] @{h}: tags={','.join(tags)}")
+    if empties:
+        n = apply_updates({k: {kk: vv for kk, vv in u.items() if kk != "_llm"}
+                           for k, u in updates.items()}, dry_run=a.dry_run)
+        print(f"  [write] 补枪后累计写回 {n} 个账号")
+
     ok_n = sum(1 for u in updates.values() if u.get("followers") is not None)
     rep = {"todo": len(todo), "fetched": len(fetched), "followers_filled": ok_n,
            "llm_fail": sorted(set(llm_fail)), "pool": str(POOL), "dry_run": a.dry_run}
@@ -391,8 +444,12 @@ def main() -> int:
 
 
 def _llm_item(h: str, prof: dict) -> str:
-    posts = "\n".join(f"  - {t}" for t in prof["posts"]) or "  - (无 recent 帖)"
-    return f"账号 @{h}\n  bio: {prof['bio'] or '(无)'}\n  最近帖子:\n{posts}"
+    # 定位纯 bio(2026-09-19 用户裁决: 帖子当周热点会把模型带歪, 只取 bio 事实);
+    # bio 为空的少数账号(semianalysis_/zerohedge 等档案接口不给简介)才用近期帖子佐证。
+    if prof["bio"]:
+        return f"账号 @{h}\n  bio: {prof['bio']}"
+    posts = "\n".join(f"  - {t}" for t in prof["posts"]) or "  - (无)"
+    return f"账号 @{h}\n  bio: (空)\n  近期帖子(bio 为空, 仅此佐证):\n{posts}"
 
 
 if __name__ == "__main__":
