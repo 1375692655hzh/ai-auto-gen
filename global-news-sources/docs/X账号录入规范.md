@@ -267,3 +267,70 @@ accounts:
 | cnYES | 20749201 | 台湾 | media | zh | low | 2026-09-02 | 鉅亨網(1305粉): 台湾财经门户, X号基本挂机; 近17月未发帖; 验号时已6076天未发帖(低活跃观察) |
 | StockFeel | 2593661953 | 台湾 | media | zh | low | 2026-09-02 | 股感(9粉): 名存实亡, 仅存档观察; 验号时已4448天未发帖(低活跃观察) |
 | HAOHONG_CFA | 41902408 | 全球/台湾 | analyst | en | low | 2026-09-02 | 洪灝(35万粉): 华语圈唯一X破30万宏观, 以英文为主 |
+
+## 九、2026-09-17 同事收集批次录入（58 新账号）
+
+> 来源: 同事收集的 X 大V清单(华尔街观察/缺德道人/熬鹰资本/郭明錤群等), 用户裁决入数据源池。
+> FxTwitter v2 批量验号 58/61 通过(3 个已在册跳过: HAOHONG_CFA/jukan05/mingchikuo); 1 个拼写勘误: MichealDell→**MichaelDell**(uid 58560480, 817万粉, Dell 创始人 CEO); 1 个失败待用户找同事核实: `Jack Kellogg@Jackaroo Trades`(handle 带空格非法)。
+> 统一参数: role=kol(进 twitter_kol_views 观点流)/markets=[全球]/priority=medium/risk=medium/replies=false/扩展层(未标 tier)。
+
+| handle | uid | 市场 | role | 语言 | risk | 录入日 | 备注 |
+|---|---|---|---|---|---|---|---|
+|cnfinancewatch|137332930|全球|kol|zh|medium|2026-09-17|粉丝12万|
+|TraderS18|1663749852965240834|全球|kol|zh|medium|2026-09-17|粉丝6万|
+|thankUcrypto|705564530936418304|全球|kol|zh|medium|2026-09-17|粉丝17万|
+|feifan7686|1369089513473990658|全球|kol|zh|medium|2026-09-17|粉丝4万|
+|WangNextDoor2|1378320364376219655|全球|kol|zh|medium|2026-09-17|粉丝10万|
+|yiguxia|885782951786446848|全球|kol|zh|medium|2026-09-17|粉丝7万|
+|qinbafrank|1338075202798809089|全球|kol|zh|medium|2026-09-17|粉丝15万|
+|TJ_Research|1620475218627121153|全球|kol|zh|medium|2026-09-17|粉丝9万|
+|hanking66|1355223833137930240|全球|kol|zh|medium|2026-09-17|粉丝4万|
+|CausMoney|1305905708018348032|全球|kol|zh|medium|2026-09-17|粉丝4万|
+|fxtrader|1059638356609396736|全球|kol|zh|medium|2026-09-17|粉丝40万|
+|wangwatchworld|31083308|全球|kol|zh|medium|2026-09-17|粉丝24万|
+|BullTheoryio|815942827968495616|全球|kol|en|medium|2026-09-17|粉丝24万|
+|niniSweet88|842008997913845760|全球|kol|zh|medium|2026-09-17|粉丝1万|
+|LordWilliamUK|1503029991986155525|全球|kol|zh|medium|2026-09-17|粉丝2万|
+|Alpha_Cat|1455865812942688265|全球|kol|zh|medium|2026-09-17|粉丝2万|
+|Banana3Stocks|1098312581951807488|全球|kol|en|medium|2026-09-17|粉丝15万|
+|LeopoldTracker_|1539998845718781953|全球|kol|en|medium|2026-09-17|粉丝70万|
+|PhotonCap|1917312438858588161|全球|kol|en|medium|2026-09-17|粉丝6万|
+|Young852560|1999426877119942656|全球|kol|zh|medium|2026-09-17|粉丝2万|
+|pelositracker|1303681404631502849|全球|kol|en|medium|2026-09-17|粉丝4万|
+|JohnsonZ91127|1853471066410414080|全球|kol|zh|medium|2026-09-17|粉丝2万|
+|IamRamenPanda|1008162403|全球|kol|zh|medium|2026-09-17|粉丝9万|
+|SVScholar|79766814|全球|kol|zh|medium|2026-09-17|粉丝10万|
+|ChineseWSJ|46574977|全球|kol|zh|medium|2026-09-17|粉丝333万|
+|RichTerry123|1901844074250080256|全球|kol|zh|medium|2026-09-17|粉丝3万|
+|Kay2289123|2058239737522204672|全球|kol|zh|medium|2026-09-17|粉丝3万|
+|SemiconductorsX|731152829289762816|全球|kol|en|medium|2026-09-17|粉丝1万|
+|tuolaji2024|2202853256|全球|kol|zh|medium|2026-09-17|粉丝5万|
+|Satyanadella|20571756|全球|kol|en|medium|2026-09-17|粉丝927万|
+|Benshapiro|17995040|全球|kol|en|medium|2026-09-17|粉丝886万|
+|Saylor|18744656|全球|kol|en|medium|2026-09-17|粉丝4万|
+|Rumoreconomy|2888086214|全球|kol|zh|medium|2026-09-17|粉丝93万|
+|LZRationalnvest|1995690021521948674|全球|kol|zh|medium|2026-09-17|粉丝2万|
+|yijiangren|1959136480535908352|全球|kol|zh|medium|2026-09-17|粉丝2万|
+|CryptoPainter|1056818658|全球|kol|zh|medium|2026-09-17|粉丝9万|
+|Agujiaofu|2209650961|全球|kol|zh|medium|2026-09-17|粉丝3万|
+|Print_kbar|1786641012087214080|全球|kol|zh|medium|2026-09-17|粉丝1万|
+|phyrexNi|555634740|全球|kol|zh|medium|2026-09-17|粉丝40万|
+|web3annie|1291222903552319488|全球|kol|zh|medium|2026-09-17|粉丝6万|
+|bboczeng|215939847|全球|kol|zh|medium|2026-09-17|粉丝22万|
+|dotey|3178231|全球|kol|zh|medium|2026-09-17|粉丝24万|
+|yuanshan0626|1479293966|全球|kol|zh|medium|2026-09-17|粉丝2万|
+|BTCdayu|1403881130802225152|全球|kol|zh|medium|2026-09-17|粉丝32万|
+|xiaomustock|1507631541303713793|全球|kol|zh|medium|2026-09-17|粉丝28万|
+|MacroMargin|890076269580341248|全球|kol|zh|medium|2026-09-17|粉丝19万|
+|Tychozzz|1556577100693651456|全球|kol|zh|medium|2026-09-17|粉丝9万|
+|Summer_trading|1726112138068959232|全球|kol|zh|medium|2026-09-17|粉丝1万|
+|Walden779|1312603407400660992|全球|kol|zh|medium|2026-09-17|粉丝2万|
+|_pblanknews|15843059|全球|kol|en|medium|2026-09-17|粉丝40万|
+|lidangzzz|28940967|全球|kol|zh|medium|2026-09-17|粉丝160万|
+|hellosuoha|1401718840535379970|全球|kol|zh|medium|2026-09-17|粉丝18万|
+|KotlinerBTC|3039828572|全球|kol|zh|medium|2026-09-17|粉丝1万|
+|xtony1314|1589272961235619840|全球|kol|zh|medium|2026-09-17|粉丝12万|
+|yuyy614893671|1597654998971604992|全球|kol|zh|medium|2026-09-17|粉丝7万|
+|MosesWang16|1533166798937407492|全球|kol|zh|medium|2026-09-17|粉丝0万|
+|aleabitoreddit|1940360837547565056|全球|kol|en|medium|2026-09-17|粉丝103万|
+|MichaelDell|58560480|全球|kol|en|medium|2026-09-17|粉丝817万|

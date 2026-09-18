@@ -1,5 +1,3 @@
-# twitter_pool.yaml —— X 账号池（X账号录入规范.md 的结构化形态）
-# markets 一律用新体系市场值（全球/美国/A股/香港/台湾/日本/韩国/土耳其，2026-09-03 双标签制）
 defaults:
   per_account_limit: 50
   account_delay_seconds: 1
@@ -1687,11 +1685,764 @@ accounts:
   risk: low
   replies: false
   note: 'Doug O''Laughlin 半导体通讯品牌号(3.4万粉, SemiAnalysis 团伙): 化工/材料/半导体深度; 个人号 @FoolAllTheTime 私密不活跃(FxTwitter 500), 公开发言集中此号'
-defaults:
-  per_account_limit: 50
-  account_delay_seconds: 1
-  window: yesterday_start_to_now
-  min_priority: low
+- handle: cnfinancewatch
+  uid: '137332930'
+  name: 华尔街观察 Xtrader
+  homepage: https://x.com/cnfinancewatch
+  markets:
+  - 全球
+  role: kol
+  lang: zh
+  priority: medium
+  risk: medium
+  replies: false
+  note: '同事收集批次(2026-09-17); 粉丝12万; bio: PhD | Professor | Investor |中美股市事件、研报、资金'
+- handle: TraderS18
+  uid: '1663749852965240834'
+  name: TraderS | 缺德道人
+  homepage: https://x.com/TraderS18
+  markets:
+  - 全球
+  role: kol
+  lang: zh
+  priority: medium
+  risk: medium
+  replies: false
+  note: '同事收集批次(2026-09-17); 粉丝6万; bio: 宏观 × 美股 × Crypto 交易员
+
+    拆解美联储、战争与全球资金流
+
+    捕捉 美'
+- handle: thankUcrypto
+  uid: '705564530936418304'
+  name: allincrypto 熬鹰资本 🇨🇳
+  homepage: https://x.com/thankUcrypto
+  markets:
+  - 全球
+  role: kol
+  lang: zh
+  priority: medium
+  risk: medium
+  replies: false
+  note: '同事收集批次(2026-09-17); 粉丝17万; bio: |PNL 120K—10M|助理:@xiaoweio9983
+
+    币安：https:'
+- handle: feifan7686
+  uid: '1369089513473990658'
+  name: 飞凡
+  homepage: https://x.com/feifan7686
+  markets:
+  - 全球
+  role: kol
+  lang: zh
+  priority: medium
+  risk: medium
+  replies: false
+  note: '同事收集批次(2026-09-17); 粉丝4万; bio: 只输出价值 ｜纯宏观与金融行业内容 | 长期主义 | 宏观 | 二级 | 加密圈'
+- handle: WangNextDoor2
+  uid: '1378320364376219655'
+  name: WangNextDoor
+  homepage: https://x.com/WangNextDoor2
+  markets:
+  - 全球
+  role: kol
+  lang: zh
+  priority: medium
+  risk: medium
+  replies: false
+  note: '同事收集批次(2026-09-17); 粉丝10万; bio: Engineer/entrepreneur in CA, Tesla/NVDA/'
+- handle: yiguxia
+  uid: '885782951786446848'
+  name: 易先森聊财经📈
+  homepage: https://x.com/yiguxia
+  markets:
+  - 全球
+  role: kol
+  lang: zh
+  priority: medium
+  risk: medium
+  replies: false
+  note: '同事收集批次(2026-09-17); 粉丝7万; bio: 谈谈股市，讲讲段子，看过一堆废纸，也有几斤故事。每晚更新（个人复盘心得，不作为任'
+- handle: qinbafrank
+  uid: '1338075202798809089'
+  name: qinbafrank
+  homepage: https://x.com/qinbafrank
+  markets:
+  - 全球
+  role: kol
+  lang: zh
+  priority: medium
+  risk: medium
+  replies: false
+  note: '同事收集批次(2026-09-17); 粉丝15万; bio: Investor in AI、Crypto、TMT，跟踪最前沿科技趋势、野生宏观'
+- handle: TJ_Research
+  uid: '1620475218627121153'
+  name: 投资TALK君
+  homepage: https://x.com/TJ_Research
+  markets:
+  - 全球
+  role: kol
+  lang: zh
+  priority: medium
+  risk: medium
+  replies: false
+  note: '同事收集批次(2026-09-17); 粉丝9万; bio: AI观察员；美联储观察员；资管打工人.
+
+    美股，宏观，偶尔CRYPTO
+
+    油管17万'
+- handle: hanking66
+  uid: '1355223833137930240'
+  name: 美股仙人（全网吹存第一人）
+  homepage: https://x.com/hanking66
+  markets:
+  - 全球
+  role: kol
+  lang: zh
+  priority: medium
+  risk: medium
+  replies: false
+  note: '同事收集批次(2026-09-17); 粉丝4万; bio: 十年美股投资经验，复利收益2800%
+
+    Discord：https://disco'
+- handle: CausMoney
+  uid: '1305905708018348032'
+  name: 加美财经caus.com
+  homepage: https://x.com/CausMoney
+  markets:
+  - 全球
+  role: kol
+  lang: zh
+  priority: medium
+  risk: medium
+  replies: false
+  note: '同事收集批次(2026-09-17); 粉丝4万; bio: 加美财经是中文小众政经商业媒体，为全球华人提供来自主流媒体的新闻新论新知，适合愿'
+- handle: fxtrader
+  uid: '1059638356609396736'
+  name: 外汇交易员
+  homepage: https://x.com/fxtrader
+  markets:
+  - 全球
+  role: kol
+  lang: zh
+  priority: medium
+  risk: medium
+  replies: false
+  note: '同事收集批次(2026-09-17); 粉丝40万; bio: 盯紧市场，把握时机。理性客观，利益永恒。'
+- handle: wangwatchworld
+  uid: '31083308'
+  name: 王海滨的财经闲谈
+  homepage: https://x.com/wangwatchworld
+  markets:
+  - 全球
+  role: kol
+  lang: zh
+  priority: medium
+  risk: medium
+  replies: false
+  note: '同事收集批次(2026-09-17); 粉丝24万; bio: 宏观经济，大宗商品，油管视频号搜王海滨的财经闲谈。'
+- handle: BullTheoryio
+  uid: '815942827968495616'
+  name: Bull Theory
+  homepage: https://x.com/BullTheoryio
+  markets:
+  - 全球
+  role: kol
+  lang: en
+  priority: medium
+  risk: medium
+  replies: false
+  note: '同事收集批次(2026-09-17); 粉丝24万; bio: News, Research, and all other Global mar'
+- handle: niniSweet88
+  uid: '842008997913845760'
+  name: 妮妮要翻倍
+  homepage: https://x.com/niniSweet88
+  markets:
+  - 全球
+  role: kol
+  lang: zh
+  priority: medium
+  risk: medium
+  replies: false
+  note: '同事收集批次(2026-09-17); 粉丝1万; bio: 02年大学生｜all in web3｜大学生炒币联盟创始人｜坚定的多头战士｜ 请'
+- handle: LordWilliamUK
+  uid: '1503029991986155525'
+  name: Lord William｜UK
+  homepage: https://x.com/LordWilliamUK
+  markets:
+  - 全球
+  role: kol
+  lang: zh
+  priority: medium
+  risk: medium
+  replies: false
+  note: '同事收集批次(2026-09-17); 粉丝2万; bio: Founder of 1024 Capital, Investor, Phila'
+- handle: Alpha_Cat
+  uid: '1455865812942688265'
+  name: Alpha Cat
+  homepage: https://x.com/Alpha_Cat
+  markets:
+  - 全球
+  role: kol
+  lang: zh
+  priority: medium
+  risk: medium
+  replies: false
+  note: '同事收集批次(2026-09-17); 粉丝2万; bio: 投资笔记｜AI前瞻｜美企洞察｜国际局势
+
+    本人无任何投资群组，谨防诈骗'
+- handle: Banana3Stocks
+  uid: '1098312581951807488'
+  name: Banana3
+  homepage: https://x.com/Banana3Stocks
+  markets:
+  - 全球
+  role: kol
+  lang: en
+  priority: medium
+  risk: medium
+  replies: false
+  note: '同事收集批次(2026-09-17); 粉丝15万; bio: Professional Trader/Investor, 25yrs expe'
+- handle: LeopoldTracker_
+  uid: '1539998845718781953'
+  name: Leopold Stock Tracker
+  homepage: https://x.com/LeopoldTracker_
+  markets:
+  - 全球
+  role: kol
+  lang: en
+  priority: medium
+  risk: medium
+  replies: false
+  note: '同事收集批次(2026-09-17); 粉丝70万; bio: Tracking Leopold Aschenbrenner''s trades '
+- handle: PhotonCap
+  uid: '1917312438858588161'
+  name: Photon Capital
+  homepage: https://x.com/PhotonCap
+  markets:
+  - 全球
+  role: kol
+  lang: en
+  priority: medium
+  risk: medium
+  replies: false
+  note: '同事收集批次(2026-09-17); 粉丝6万; bio: Seeing tech through a different waveleng'
+- handle: Young852560
+  uid: '1999426877119942656'
+  name: Young
+  homepage: https://x.com/Young852560
+  markets:
+  - 全球
+  role: kol
+  lang: zh
+  priority: medium
+  risk: medium
+  replies: false
+  note: '同事收集批次(2026-09-17); 粉丝2万; bio: 女交易员｜币圈九年
+
+    专注比特币、黄金、美股盘面解析
+
+    用 K 线读懂资本博弈，过滤'
+- handle: pelositracker
+  uid: '1303681404631502849'
+  name: Chris Josephs
+  homepage: https://x.com/pelositracker
+  markets:
+  - 全球
+  role: kol
+  lang: en
+  priority: medium
+  risk: medium
+  replies: false
+  note: '同事收集批次(2026-09-17); 粉丝4万; bio: Co-Founder @joinautopilot 💰 Run the @pel'
+- handle: JohnsonZ91127
+  uid: '1853471066410414080'
+  name: 潘驴邓晓闲缺一
+  homepage: https://x.com/JohnsonZ91127
+  markets:
+  - 全球
+  role: kol
+  lang: zh
+  priority: medium
+  risk: medium
+  replies: false
+  note: '同事收集批次(2026-09-17); 粉丝2万; bio: 美股&区块链资深交易员，  美股15年，持 btc 10年
+
+    公众号：潘大的投研笔'
+- handle: IamRamenPanda
+  uid: '1008162403'
+  name: RamenPanda
+  homepage: https://x.com/IamRamenPanda
+  markets:
+  - 全球
+  role: kol
+  lang: zh
+  priority: medium
+  risk: medium
+  replies: false
+  note: '同事收集批次(2026-09-17); 粉丝9万; bio: 2017年入圈加密的老OG。老粉们从推到微博（15万粉）再到推，跟我很多年了
+
+
+    '
+- handle: SVScholar
+  uid: '79766814'
+  name: 硅谷居士
+  homepage: https://x.com/SVScholar
+  markets:
+  - 全球
+  role: kol
+  lang: zh
+  priority: medium
+  risk: medium
+  replies: false
+  note: '同事收集批次(2026-09-17); 粉丝10万; bio: 清华本科，美国计算机博士，硅谷软件工程师兼经理。
+
+    拥有20多年美股投资经验。过去'
+- handle: ChineseWSJ
+  uid: '46574977'
+  name: 华尔街日报中文网
+  homepage: https://x.com/ChineseWSJ
+  markets:
+  - 全球
+  role: kol
+  lang: zh
+  priority: medium
+  risk: medium
+  replies: false
+  note: '同事收集批次(2026-09-17); 粉丝333万; bio: 感谢您关注华尔街日报中文网。我们有上千位专业记者与资深编辑遍布全球，为读者提供2'
+- handle: RichTerry123
+  uid: '1901844074250080256'
+  name: Terry
+  homepage: https://x.com/RichTerry123
+  markets:
+  - 全球
+  role: kol
+  lang: zh
+  priority: medium
+  risk: medium
+  replies: false
+  note: '同事收集批次(2026-09-17); 粉丝3万; bio: Trader | 私募基金PM
+
+    市场投研 |  写文章讲故事'
+- handle: Kay2289123
+  uid: '2058239737522204672'
+  name: 美研芒格君
+  homepage: https://x.com/Kay2289123
+  markets:
+  - 全球
+  role: kol
+  lang: zh
+  priority: medium
+  risk: medium
+  replies: false
+  note: '同事收集批次(2026-09-17); 粉丝3万; bio: 小红书也是这个id @Kay2289123，
+
+    x仅此一号，完全没有助理。
+
+    没wh'
+- handle: SemiconductorsX
+  uid: '731152829289762816'
+  name: Semiconductor Insider
+  homepage: https://x.com/SemiconductorsX
+  markets:
+  - 全球
+  role: kol
+  lang: en
+  priority: medium
+  risk: medium
+  replies: false
+  note: '同事收集批次(2026-09-17); 粉丝1万; bio: Semiconductor Insider • Independent news'
+- handle: tuolaji2024
+  uid: '2202853256'
+  name: 拖拉机
+  homepage: https://x.com/tuolaji2024
+  markets:
+  - 全球
+  role: kol
+  lang: zh
+  priority: medium
+  risk: medium
+  replies: false
+  note: '同事收集批次(2026-09-17); 粉丝5万; bio: 15 years of experience in the technology'
+- handle: Satyanadella
+  uid: '20571756'
+  name: Satya Nadella
+  homepage: https://x.com/Satyanadella
+  markets:
+  - 全球
+  role: kol
+  lang: en
+  priority: medium
+  risk: medium
+  replies: false
+  note: '同事收集批次(2026-09-17); 粉丝927万; bio: Chairman and CEO at Microsoft'
+- handle: Benshapiro
+  uid: '17995040'
+  name: Ben Shapiro
+  homepage: https://x.com/Benshapiro
+  markets:
+  - 全球
+  role: kol
+  lang: en
+  priority: medium
+  risk: medium
+  replies: false
+  note: '同事收集批次(2026-09-17); 粉丝886万; bio: Daily Wire co-founder, host of @benshapi'
+- handle: Saylor
+  uid: '18744656'
+  name: Phong Le
+  homepage: https://x.com/Saylor
+  markets:
+  - 全球
+  role: kol
+  lang: en
+  priority: medium
+  risk: medium
+  replies: false
+  note: '同事收集批次(2026-09-17); 粉丝4万; bio: @Strategy CEO | #Bitcoin | $MSTR $STRC'
+- handle: Rumoreconomy
+  uid: '2888086214'
+  name: 财经真相
+  homepage: https://x.com/Rumoreconomy
+  markets:
+  - 全球
+  role: kol
+  lang: zh
+  priority: medium
+  risk: medium
+  replies: false
+  note: '同事收集批次(2026-09-17); 粉丝93万; bio: 黄金'
+- handle: LZRationalnvest
+  uid: '1995690021521948674'
+  name: 李志 | Rational Investing
+  homepage: https://x.com/LZRationalnvest
+  markets:
+  - 全球
+  role: kol
+  lang: zh
+  priority: medium
+  risk: medium
+  replies: false
+  note: '同事收集批次(2026-09-17); 粉丝2万; bio: 🐶金融行业底层人士。
+
+    📈美股行情观察 & 数字游民分享 & 出海探索。
+
+    🏃‍♂️'
+- handle: yijiangren
+  uid: '1959136480535908352'
+  name: Metamental | 方外之域
+  homepage: https://x.com/yijiangren
+  markets:
+  - 全球
+  role: kol
+  lang: zh
+  priority: medium
+  risk: medium
+  replies: false
+  note: '同事收集批次(2026-09-17); 粉丝2万; bio: 01年 / UI/UX Designer / Trader / INTJ
+
+    8年交'
+- handle: CryptoPainter
+  uid: '1056818658'
+  name: Crypto_Painter
+  homepage: https://x.com/CryptoPainter
+  markets:
+  - 全球
+  role: kol
+  lang: zh
+  priority: medium
+  risk: medium
+  replies: false
+  note: '同事收集批次(2026-09-17); 粉丝9万; bio: 老朋友叫我“画师”，技术\数据分析和量化交易，提供各种刁钻角度看市场，AI重度用'
+- handle: Agujiaofu
+  uid: '2209650961'
+  name: A股教父·宏观情绪周期
+  homepage: https://x.com/Agujiaofu
+  markets:
+  - 全球
+  role: kol
+  lang: zh
+  priority: medium
+  risk: medium
+  replies: false
+  note: '同事收集批次(2026-09-17); 粉丝3万; bio: 分享龙头、情绪、超短、中长线的贴子以及复盘、风险点位提示。做美股关注@Huawe'
+- handle: Print_kbar
+  uid: '1786641012087214080'
+  name: P K B 【BTC/黄金/A/美股】
+  homepage: https://x.com/Print_kbar
+  markets:
+  - 全球
+  role: kol
+  lang: zh
+  priority: medium
+  risk: medium
+  replies: false
+  note: '同事收集批次(2026-09-17); 粉丝1万; bio: ｜前私募基金经理｜
+
+    ｜做好每一笔交易｜
+
+    ｜加入小群请私信｜
+
+    ｜商务合作TG: P'
+- handle: phyrexNi
+  uid: '555634740'
+  name: Phyrex
+  homepage: https://x.com/phyrexNi
+  markets:
+  - 全球
+  role: kol
+  lang: zh
+  priority: medium
+  risk: medium
+  replies: false
+  note: '同事收集批次(2026-09-17); 粉丝40万; bio: 只是个搬砖的，偶尔恰饭
+
+    不奢求，不浪费
+
+    没有群也不收费，所有内容均不构成投资建议'
+- handle: web3annie
+  uid: '1291222903552319488'
+  name: Annie 所长
+  homepage: https://x.com/web3annie
+  markets:
+  - 全球
+  role: kol
+  lang: zh
+  priority: medium
+  risk: medium
+  replies: false
+  note: "同事收集批次(2026-09-17); 粉丝6万; bio: 关注我的都发财 \U0001F64F \nAI & 股票研究所 | Meme @memewizd |"
+- handle: bboczeng
+  uid: '215939847'
+  name: 勃勃OC
+  homepage: https://x.com/bboczeng
+  markets:
+  - 全球
+  role: kol
+  lang: zh
+  priority: medium
+  risk: medium
+  replies: false
+  note: '同事收集批次(2026-09-17); 粉丝22万; bio: 美股投资日报：https://boist.org，免费订阅即可阅读，东半球最理性'
+- handle: dotey
+  uid: '3178231'
+  name: 宝玉
+  homepage: https://x.com/dotey
+  markets:
+  - 全球
+  role: kol
+  lang: zh
+  priority: medium
+  risk: medium
+  replies: false
+  note: '同事收集批次(2026-09-17); 粉丝24万; bio: AI Engineer, dedicated to learning and d'
+- handle: yuanshan0626
+  uid: '1479293966'
+  name: 远山洞见
+  homepage: https://x.com/yuanshan0626
+  markets:
+  - 全球
+  role: kol
+  lang: zh
+  priority: medium
+  risk: medium
+  replies: false
+  note: '同事收集批次(2026-09-17); 粉丝2万; bio: 宏观周期 |  加密投研 |  美股研究 |  AI x Crypto
+
+    Cycl'
+- handle: BTCdayu
+  uid: '1403881130802225152'
+  name: 大宇
+  homepage: https://x.com/BTCdayu
+  markets:
+  - 全球
+  role: kol
+  lang: zh
+  priority: medium
+  risk: medium
+  replies: false
+  note: '同事收集批次(2026-09-17); 粉丝32万; bio: FOMO，合规安全，秒买币股
+
+    http://fomo.family/r/BTCd'
+- handle: xiaomustock
+  uid: '1507631541303713793'
+  name: 川沐｜Trumoo🐮
+  homepage: https://x.com/xiaomustock
+  markets:
+  - 全球
+  role: kol
+  lang: zh
+  priority: medium
+  risk: medium
+  replies: false
+  note: '同事收集批次(2026-09-17); 粉丝28万; bio: 一个自由的AI股票大宗期权纯二级韭菜交易员 -所有内容不构成任何投资建议-不会参'
+- handle: MacroMargin
+  uid: '890076269580341248'
+  name: 宏观边际MacroMargin
+  homepage: https://x.com/MacroMargin
+  markets:
+  - 全球
+  role: kol
+  lang: zh
+  priority: medium
+  risk: medium
+  replies: false
+  note: '同事收集批次(2026-09-17); 粉丝19万; bio: Macro Analyst ，聚焦中国宏观政策、美联储风向，跟踪分析边际变化。欢'
+- handle: Tychozzz
+  uid: '1556577100693651456'
+  name: Nico投资有道
+  homepage: https://x.com/Tychozzz
+  markets:
+  - 全球
+  role: kol
+  lang: zh
+  priority: medium
+  risk: medium
+  replies: false
+  note: '同事收集批次(2026-09-17); 粉丝9万; bio: 爱投资的一枚程序员。投资导航作者，必备一站式导航网站：http://invest'
+- handle: Summer_trading
+  uid: '1726112138068959232'
+  name: Summer 在交易
+  homepage: https://x.com/Summer_trading
+  markets:
+  - 全球
+  role: kol
+  lang: zh
+  priority: medium
+  risk: medium
+  replies: false
+  note: '同事收集批次(2026-09-17); 粉丝1万; bio: 全职美股/加密交易员 📈
+
+    主攻：美股期权策略 | Pre-IPO | 宏观流动性'
+- handle: Walden779
+  uid: '1312603407400660992'
+  name: 贝塔酱
+  homepage: https://x.com/Walden779
+  markets:
+  - 全球
+  role: kol
+  lang: zh
+  priority: medium
+  risk: medium
+  replies: false
+  note: '同事收集批次(2026-09-17); 粉丝2万; bio: 📈 US Stocks & Crypto | 🏋️Fitness | 💜INTJ'
+- handle: _pblanknews
+  uid: '15843059'
+  name: HealthRanger
+  homepage: https://x.com/_pblanknews
+  markets:
+  - 全球
+  role: kol
+  lang: en
+  priority: medium
+  risk: medium
+  replies: false
+  note: '同事收集批次(2026-09-17); 粉丝40万; bio: IQ 150+ polymath.  Founder of all Bright'
+- handle: lidangzzz
+  uid: '28940967'
+  name: lidang 立党 （劝人卖房/学CS/买SP500/纳100/OpenAI/Anthrop第一人）
+  homepage: https://x.com/lidangzzz
+  markets:
+  - 全球
+  role: kol
+  lang: zh
+  priority: medium
+  risk: medium
+  replies: false
+  note: '同事收集批次(2026-09-17); 粉丝160万; bio: co-founder @HedgehogLabHQ @Project_DARC
+
+    '
+- handle: hellosuoha
+  uid: '1401718840535379970'
+  name: 梭教授说
+  homepage: https://x.com/hellosuoha
+  markets:
+  - 全球
+  role: kol
+  lang: zh
+  priority: medium
+  risk: medium
+  replies: false
+  note: '同事收集批次(2026-09-17); 粉丝18万; bio: 世界是一个巨大的楚门世界
+
+    TG：@hellosuoha'
+- handle: KotlinerBTC
+  uid: '3039828572'
+  name: Curry_TW
+  homepage: https://x.com/KotlinerBTC
+  markets:
+  - 全球
+  role: kol
+  lang: zh
+  priority: medium
+  risk: medium
+  replies: false
+  note: '同事收集批次(2026-09-17); 粉丝1万; bio: 我不會預測股價漲跌，但我翻譯交易數據的竊竊私語，讓你明白他們在想什麼。'
+- handle: xtony1314
+  uid: '1589272961235619840'
+  name: 逍遥XTony（2分钟版）
+  homepage: https://x.com/xtony1314
+  markets:
+  - 全球
+  role: kol
+  lang: zh
+  priority: medium
+  risk: medium
+  replies: false
+  note: '同事收集批次(2026-09-17); 粉丝12万; bio: 前摩根高管 | 独立交易员 | 干学创始人 | 抽象艺术家
+
+    历史成绩：实盘 5W'
+- handle: yuyy614893671
+  uid: '1597654998971604992'
+  name: 金融汪
+  homepage: https://x.com/yuyy614893671
+  markets:
+  - 全球
+  role: kol
+  lang: zh
+  priority: medium
+  risk: medium
+  replies: false
+  note: '同事收集批次(2026-09-17); 粉丝7万; bio: 油管频道：金融汪 ，网址：https://www.youtube.com/@sh'
+- handle: MosesWang16
+  uid: '1533166798937407492'
+  name: Alpha投资频道_专注美股
+  homepage: https://x.com/MosesWang16
+  markets:
+  - 全球
+  role: kol
+  lang: zh
+  priority: medium
+  risk: medium
+  replies: false
+  note: '同事收集批次(2026-09-17); 粉丝0万; bio: 专注科技与关键产业链的美股市场分析；跟踪财报、政策、地缘局势与资金动向；分享高质'
+- handle: aleabitoreddit
+  uid: '1940360837547565056'
+  name: Serenity
+  homepage: https://x.com/aleabitoreddit
+  markets:
+  - 全球
+  role: kol
+  lang: en
+  priority: medium
+  risk: medium
+  replies: false
+  note: '同事收集批次(2026-09-17); 粉丝103万; bio: Only on X, don’t trust fake accs
+
+
+    AI/Sem'
+- handle: MichaelDell
+  uid: '58560480'
+  name: Michael Dell
+  homepage: https://x.com/MichaelDell
+  markets:
+  - 全球
+  role: kol
+  lang: en
+  priority: medium
+  risk: medium
+  replies: false
+  note: '同事收集批次(2026-09-17); 粉丝817万; bio: Founder, Chairman and CEO Dell Technolog'
 filters:
   include_keywords:
   - piyasa
