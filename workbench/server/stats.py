@@ -56,6 +56,13 @@ def aggregate() -> dict:
     cutoff_48 = _fmt(time.time() - _SECTORS_WINDOW_HOURS * 3600)
     raw_items, truncated = _fetch_items(cutoff_48)      # 翻页到 48h 下界即提前收工
 
+    # 本机视图隐藏的源不出现在任何条目统计(客户级开关, 2026-09-18; 来源详情表
+    # 仍列出该源并标记 local_disabled, 用户可随时开回)
+    from . import source_prefs
+    hidden = source_prefs.disabled()
+    if hidden:
+        raw_items = [i for i in raw_items if i.get("source_id") not in hidden]
+
     # 预测市场类源会把结算日(数年后)写进 time, 聚合前剔除(看板同款处理);
     # 48h 窗口内再切出 24h 子集供条目类统计
     items_48 = [i for i in raw_items if cutoff_48 <= (i.get("time") or "") <= now]
@@ -94,9 +101,10 @@ def aggregate() -> dict:
         sources_detail.append({
             "id": s["id"], "title": s.get("title") or s["id"],
             "kind": s.get("kind", ""), "channel": s.get("channel", ""),
-            "positioning": s.get("positioning", ""), "brief": s.get("brief", ""),
+            "positioning": s.get("positioning"), "brief": s.get("brief", ""),
             "markets": s.get("markets") or [], "health": s.get("health", ""),
             "enabled": bool(s.get("enabled", True)), "ttl_min": s.get("ttl_min"),
+            "local_disabled": s["id"] in hidden,   # 本机视图隐藏(客户级开关)
             "ms": r.get("ms"), "round_items": r.get("items"), "round_new": r.get("new"),
             "count": per_source.get(s["id"], 0),
             "pool_accounts": xaccounts.pool_account_count(s["id"]),

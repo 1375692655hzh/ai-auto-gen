@@ -579,24 +579,13 @@ def create_app(bind_host: str = "127.0.0.1") -> FastAPI:
     async def source_enabled(sid: str, request: Request):
         body = await request.json()
         on = bool(body.get("on"))
-        # 2026-09-11 改造: 启停透传数据站写端点(数据站是源配置所有者)。旧实现 spawn
-        # 本机 cli 写本机 config.local.yaml——只在"数据站=本机"碰巧正确, 局域网/云端
-        # 接入时写的文件没人读, 开关弹回即用户报的"来源详情关不掉"。
-        try:
-            out = proxy.post_json(f"sources/{sid}/enabled", {"on": on})
-        except proxy.UpstreamError as e:
-            if e.code in (401, 403):
-                return JSONResponse(
-                    {"error": "数据站拒绝启停: " + str(e),
-                     "hint": "远端数据站需 admin 权限: api_keys.local.json 对应 key 加 \"admin\": true;"
-                             "本机数据站自动放行"}, status_code=e.code or 502)
-            if e.code == 404:
-                return JSONResponse(
-                    {"error": "源不存在, 或数据站版本过旧(无写端点)",
-                     "hint": "云端/局域网数据站请 git pull 重启数据站服务"}, status_code=404)
-            return JSONResponse({"error": str(e)}, status_code=e.code or 502)
-        stats.invalidate()                  # 60s 统计缓存立即作废, 注册表状态即时生效
-        return {"id": sid, "enabled": out.get("enabled")}
+        # 2026-09-18 用户裁决: 工作台是客户级工具, 开关 = 本机视图隐藏/显示该源
+        # (source_prefs.json), 零网络写、不影响数据站采集与其他接入者。数据站真启停
+        # (影响采集)是管理员操作, 入口在数据站控制台/cli, 工作台不提供该通道。
+        from . import source_prefs
+        out = source_prefs.set_enabled(sid, on)
+        stats.invalidate()                  # 60s 统计缓存立即作废, 视图状态即时生效
+        return out
 
     # ── 图文页【推荐信息】数据面: 全 X 条目 + 互动快照五选排序 ────────────────
     @app.get("/wb-api/x-surge")

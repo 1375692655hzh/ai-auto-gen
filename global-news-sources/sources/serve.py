@@ -1,8 +1,8 @@
 """只读为主 HTTP 供数服务(单机数据站读侧, 拍板 2026-09-01)。
 
-- 全 GET 读端点 + 唯一写端点 POST /v1/sources/{sid}/enabled(源启停, 2026-09-11:
-  工作台「来源详情」启停开关透传落地——数据站是配置所有者, 三接入形态统一走 HTTP;
-  权限 = key 定义含 "admin": true 或本机(loopback)来源)——刷新仍只由任务计划/管理员发起
+- 全 GET 读端点 + 唯一写端点 POST /v1/sources/{sid}/enabled(源启停——管理员远程运维
+  通道, 权限 = key 定义含 "admin": true 或本机(loopback); 工作台(客户级)不走此端点,
+  其「来源详情」开关是本机视图过滤, 2026-09-18 用户裁决)——刷新仍只由任务计划/管理员发起
 - 默认绑 127.0.0.1; 对外须显式 --bind 0.0.0.0(跨网走 Tailscale/隧道, 不裸开公网)
 - 鉴权: Bearer Key(config/api_keys.local.json, gitignored); localhost 可免密
 - 配额: 每键 RPM/日条数; 快照接口单独按次限流; 超限 429 + Retry-After

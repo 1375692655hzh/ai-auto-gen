@@ -2,7 +2,9 @@
 
 前端永不直连 8787: Key 只存在服务端 settings.json, 由本模块注入 Authorization;
 切局域网/云端 = 设置页改 base_url, 前端零改动。
-只转发 GET(供数契约本身就是全 GET 零写); 错误统一翻译成 {error, hint}。
+只转发 GET(供数契约本身全 GET 读; 工作台无任何数据站写通道, 2026-09-18 用户裁决:
+客户级工具不操作服务端配置——「来源详情」开关是本机视图过滤, 见 source_prefs)。
+items 类请求注入本机启用源白名单(数据站 enabled ∩ 非本机隐藏); 错误统一 {error, hint}。
 """
 
 import urllib.error
@@ -17,17 +19,69 @@ from . import config
 # 允许透传的响应头(快照下载需要 Content-Disposition)
 _PASS_HEADERS = ("content-type", "content-disposition", "retry-after")
 
+# 数据站启用源 id 缓存(60s; items 白名单注入用, 避免每请求拉注册表)
+_src_cache: dict = {"at": 0.0, "ids": None}
+
+
+def _enabled_source_ids() -> list | None:
+    """数据站 enabled 源 id 清单(拉失败返回 None = 放弃注入, 不挡原请求)。"""
+    import time
+    if _src_cache["ids"] is not None and time.time() - _src_cache["at"] < 60:
+        return _src_cache["ids"]
+    try:
+        srcs = fetch_json("sources?fields=id,enabled").get("sources") or []
+    except Exception:
+        return None
+    ids = [s["id"] for s in srcs if s.get("enabled", True)]
+    _src_cache.update(at=time.time(), ids=ids)
+    return ids
+
+
+def _filtered_query(query: str) -> str | None:
+    """items 请求注入本机启用源白名单。返回 None=原 query 不动(无隐藏/拉不到清单);
+    返回 ""=全被隐藏(调用方直接回空列表); 其余=重组后的 query。
+
+    数据站 /v1/items 的 sources 参数是白名单语义(serve→store.query.source_ids)。
+    用户手选过 sources 时取交集(手选了已被隐藏的源 → 交集为空, 合理)。
+    """
+    from . import source_prefs
+    hidden = source_prefs.disabled()
+    if not hidden:
+        return None
+    allow = [i for i in (_enabled_source_ids() or []) if i not in hidden]
+    if not allow:
+        return ""
+    qs = urllib.parse.parse_qsl(query, keep_blank_values=True)
+    out = []
+    for k, v in qs:
+        if k == "sources" and v:
+            picked = [s for s in (v.split(",") if isinstance(v, str) else []) if s in allow]
+            if not picked:
+                return ""
+            out.append(("sources", ",".join(picked)))
+        else:
+            out.append((k, v))
+    if not any(k == "sources" for k, _ in qs):
+        out.append(("sources", ",".join(allow)))
+    return urllib.parse.urlencode(out)
+
 
 def forward(request: Request, path: str) -> Response:
     cfg = config.load()["source"]
     base = (cfg.get("base_url") or "").rstrip("/")
     if not base:
-        return JSONResponse({"error": "未配置数据源地址",
+        return JSONResponse({"error": "未配置数据站地址",
                              "hint": "到 设置 → 信息源连接 填写数据站地址"}, status_code=400)
     if cfg.get("mode") == "cloud" and (config.load()["cloud"].get("endpoint")):
         base = config.load()["cloud"]["endpoint"].rstrip("/")   # 云端演进缝: mode=cloud 换端点
     url = f"{base}/v1/{path}"
-    if request.url.query:
+    if path == "items":                       # 本机视图过滤: 隐藏源条目不进信息筛选
+        fq = _filtered_query(request.url.query)
+        if fq == "":
+            return JSONResponse({"total": 0, "next_cursor": "", "items": []})
+        if fq is not None:
+            url += "?" + fq
+    elif request.url.query:
         url += "?" + request.url.query
 
     headers = {}
@@ -100,31 +154,3 @@ def fetch_json(path_qs: str):
     except Exception as e:
         raise UpstreamError(f"数据源不可达({base}): {type(e).__name__} "
                             f"——确认数据站已启动: python cli.py sources serve")
-
-
-def post_json(path: str, payload: dict) -> dict:
-    """服务端内部 POST /v1/{path}(唯一写面: 数据站源启停, 2026-09-11)→ 解析后 JSON。
-    三接入形态统一走数据站(数据站才是源配置所有者; 旧 spawn 本机 cli 只在
-    "数据站=本机"时碰巧正确, 局域网/云端全写错文件)。HTTP 错抛 UpstreamError 带 code。"""
-    import json
-
-    base, headers = _base_and_headers()
-    if not base:
-        raise UpstreamError("未配置数据源地址: 到 设置 → 信息源连接 填写数据站地址")
-    headers.setdefault("Content-Type", "application/json")
-    req = urllib.request.Request(f"{base}/v1/{path}",
-                                 data=json.dumps(payload).encode("utf-8"),
-                                 headers=headers, method="POST")
-    timeout = float(config.load()["source"].get("timeout_s") or 15)
-    try:
-        with urllib.request.urlopen(req, timeout=timeout) as r:
-            return json.loads(r.read())
-    except urllib.error.HTTPError as e:
-        try:
-            detail = json.loads(e.read()).get("error") or ""
-        except Exception:
-            detail = ""
-        raise UpstreamError(f"HTTP {e.code}: {detail or e.reason}", code=e.code)
-    except Exception as e:
-        raise UpstreamError(f"数据站不可达({base}): {type(e).__name__} "
-                            f"——确认数据站已启动且已升级到含写端点的版本")

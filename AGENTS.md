@@ -22,7 +22,7 @@
 | `python cli.py sources list/check/fetch <id>` | 来源库（110 源+四标签+健康+缓存，list 支持 --markets/--channels/--forms 过滤） | `check/fetch` 会请求外网 |
 | `python cli.py sources gather [--markets/--ids/--fresh] [--json]` | 按标签聚合抓取（显式 --ids 不受 enabled 约束） | 会请求外网（TTL 内走缓存） |
 | `python cli.py sources refresh [--dry-run]` | 数据站写侧：到期源调度刷新→SQLite 服务库+快照（详见 global-news-sources/docs/供数服务.md）；单实例锁（撞锁跳过 exit 0）+12min 抓取预算+3min 收尾预算 | **真抓外网**，任务计划每 15min 触发 |
-| `python cli.py sources serve [--bind/--port]` | 数据站读侧：HTTP 供数（默认 127.0.0.1:8787，Bearer Key 鉴权；全 GET 读 + 唯一写端点 POST /v1/sources/{id}/enabled 源启停=admin key 或本机，工作台三接入形态统一经此启停） | 常驻进程 |
+| `python cli.py sources serve [--bind/--port]` | 数据站读侧：HTTP 供数（默认 127.0.0.1:8787，Bearer Key 鉴权；全 GET 读 + 唯一写端点 POST /v1/sources/{id}/enabled 源启停=管理员远程运维通道（admin key 或本机），工作台「来源详情」开关是本机视图过滤不走此端点） | 常驻进程 |
 | `python cli.py sources console [--bind/--port 8786]` | 数据站运维控制台（进程/任务计划/刷新轮/存储；loopback 免密，对外绑定走 Bearer key） | 常驻进程 |
 | `python cli.py sources enable <id> [on\|off]` | 启停来源（行级写 config.local.yaml 覆盖段，保留注释；缺省=翻转当前状态） | 改 config.local.yaml |
 | `python cli.py flows list/lint/run <wf>/status/new/export/import` | 生成工作流（断点续跑/审核挂起 exit 2） | `run` 会调 LLM |

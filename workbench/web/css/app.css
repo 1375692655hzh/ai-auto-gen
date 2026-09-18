@@ -419,6 +419,8 @@ td.num { font-family: var(--mono); font-variant-numeric: tabular-nums; text-alig
 table.reg tbody tr.off td { opacity: .55; }
 table.reg tbody tr.off td.state-cell { opacity: 1; }
 table.reg tbody tr.off td:nth-child(4) { color: var(--text-mute); }
+/* 站内停用行(数据站管理员操作, 本机只读): 比 off 更弱的斜体提示, 不与本地隐藏混淆 */
+table.reg tbody tr.stoff td:nth-child(4) { color: var(--text-mute); font-style: italic; }
 
 /* ── 图文/视频页 ────────────────────────────────────────────────────────── */
 .two-col { display: grid; grid-template-columns: 300px minmax(0, 1fr); gap: var(--s4);

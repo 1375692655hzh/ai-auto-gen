@@ -104,6 +104,8 @@ WB.pages.news = {
       let t = st.sources.length + " 源 · 存活 " +
         (rf.sources_ok != null ? rf.sources_ok : "-") + " · 熔断 " + (st.dead || []).length +
         " · 关注 " + this.followed.length;
+      const nh = (st.sources || []).filter((s) => s.local_disabled).length;
+      if (nh) t += " · 我的视图隐藏 " + nh;
       if (this.regQ.trim()) t += " · 匹配 " + this.regRows.length;
       return t;
     },
@@ -223,15 +225,15 @@ WB.pages.news = {
     async toggleEnabled(s) {
       if (this.busyId) return;
       this.busyId = s.id;
-      this.regMsg = `${s.enabled ? "停用" : "启用"} ${s.id} …`;
+      this.regMsg = `${s.local_disabled ? "显示" : "隐藏"} ${s.id} …`;
       try {
         const d = await WB.api.post(`/sources/${encodeURIComponent(s.id)}/enabled`,
-                                    { on: !s.enabled });
-        s.enabled = d.enabled;
-        this.regMsg = `${s.id} → ${d.enabled ? "启用" : "停用"}`;
+                                    { on: !!s.local_disabled });
+        s.local_disabled = d.hidden;
+        this.regMsg = `${s.id} → ${d.hidden ? "已在我的视图隐藏" : "已恢复显示"}`;
         this.loadStats();                  // 注册表状态变化, 重拉统计(服务端已失效缓存)
-      } catch (e) { this.regMsg = (e && e.error) || "启停失败";
-        if (e && e.hint) this.regMsg += " — " + e.hint; }   /* 401/403/404 带数据站侧修法 */
+      } catch (e) { this.regMsg = (e && e.error) || "操作失败";
+        if (e && e.hint) this.regMsg += " — " + e.hint; }
       finally { this.busyId = ""; }
       setTimeout(() => { this.regMsg = ""; }, 2500);
     },
@@ -349,15 +351,17 @@ WB.pages.news = {
       this.sortKey = key;
       this.sortDir = ["count", "ttl_min", "ms", "round_new"].includes(key) ? -1 : 1;
     },
-    /* 健康列: 停用优先于健康状态展示 */
+    /* 健康列: 本机隐藏 > 数据站停用(只读展示, 管理员操作) > 健康状态 */
     pillClass(s) {
+      if (s.local_disabled) return "off";
       if (s.enabled === false) return "off";
       if (s.health === "ok") return "ok";
       if (s.health === "dead") return "dead";
       return "unknown";
     },
     pillText(s) {
-      if (s.enabled === false) return "停用";
+      if (s.local_disabled) return "已隐藏";
+      if (s.enabled === false) return "站内停用";
       if (s.health === "ok") return "正常";
       if (s.health === "dead") return "熔断";
       return "未知";
@@ -650,7 +654,7 @@ WB.pages.news = {
               </tr>
             </thead>
             <tbody>
-              <tr v-for="s in regRows" :key="s.id" :class="{off: s.enabled === false}">
+              <tr v-for="s in regRows" :key="s.id" :class="{off: s.local_disabled, stoff: !s.local_disabled && s.enabled === false}">
                 <td class="num">{{ s.count != null ? s.count : '-' }}</td>
                 <td><span class="star" :class="{on: isFollowed(s.id)}" :title="isFollowed(s.id) ? '取消关注' : '关注该源'" @click="toggleFollow(s.id)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg></span></td>
                 <td><span class="mono">{{ s.id }}</span></td>
@@ -658,7 +662,7 @@ WB.pages.news = {
                 <td><span class="badge">{{ s.kind }}</span></td>
                 <td>{{ (s.markets || []).join('、') }}</td>
                 <td>{{ s.positioning }}</td>
-                <td class="state-cell"><span class="state-wrap"><span class="switch" :class="{on: s.enabled !== false, busy: busyId === s.id}" role="switch" tabindex="0" :aria-checked="s.enabled === false ? 'false' : 'true'" :title="(s.enabled === false ? '启用' : '停用') + ' ' + s.id" @click="toggleEnabled(s)" @keydown.enter="toggleEnabled(s)"></span><span class="pill" :class="pillClass(s)">{{ pillText(s) }}</span></span></td>
+                <td class="state-cell"><span class="state-wrap"><span class="switch" :class="{on: !s.local_disabled, busy: busyId === s.id}" role="switch" tabindex="0" :aria-checked="s.local_disabled ? 'false' : 'true'" :title="(s.local_disabled ? '在我的视图显示' : '在我的视图隐藏') + ' ' + s.id + '（仅本机, 不影响数据站采集）'" @click="toggleEnabled(s)" @keydown.enter="toggleEnabled(s)"></span><span class="pill" :class="pillClass(s)">{{ pillText(s) }}</span></span></td>
                 <td class="num">{{ s.ttl_min != null ? s.ttl_min + 'm' : '-' }}</td>
                 <td class="num">{{ s.ms != null ? s.ms + ' ms' : '-' }}</td>
                 <td class="num">{{ s.round_new != null ? s.round_new : '-' }}</td>
