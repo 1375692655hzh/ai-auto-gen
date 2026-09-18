@@ -75,9 +75,18 @@ def _pool_mtime() -> float:
 
 
 def _acct_view(a: dict, pos_map: dict) -> dict:
-    """池账号行 → 前端视图。load_accounts / manage_payload 共用的单一映射源。"""
+    """池账号行 → 前端视图。load_accounts / manage_payload 共用的单一映射源。
+
+    positioning: 池内 per-account 一句话定位(2026-09-18 回填)优先, 缺失回退
+    role → ROLE_TO_POSITIONING(旧口径, 池里还没回填的账号仍有着落)。
+    tags = 池内概念词列表(3~5个, 回填脚本产出); followers = 池内粉丝量(回填, 可 0)。
+    """
     handle = str(a.get("handle") or "").strip().lstrip("@")
     role = str(a.get("role") or "")
+    try:
+        followers = int(a.get("followers") or 0)
+    except (TypeError, ValueError):
+        followers = 0
     return {
         "handle": handle,
         "uid": str(a.get("uid") or ""),
@@ -85,7 +94,9 @@ def _acct_view(a: dict, pos_map: dict) -> dict:
         "homepage": str(a.get("homepage") or f"https://x.com/{handle}"),
         "markets": [str(m) for m in (a.get("markets") or [])],
         "role": role,
-        "positioning": pos_map.get(role, ""),
+        "positioning": str(a.get("positioning") or "").strip() or pos_map.get(role, ""),
+        "tags": [str(t).strip() for t in (a.get("tags") or []) if str(t).strip()],
+        "followers": followers,
         "lang": str(a.get("lang") or ""),
         "tier": str(a.get("tier") or ""),
         "priority": str(a.get("priority") or ""),
@@ -114,12 +125,21 @@ def load_accounts(force: bool = False) -> dict:
     return out
 
 
+def invalidate() -> None:
+    """本机偏好(xpool_prefs)变更后手动失效 load_accounts 缓存——偏好文件不进
+    mtime 键, 不失效的话 stats/资讯页要等池文件变化才看到停用生效。"""
+    _cache["mtime"] = 0.0
+    _cache["accounts"] = None
+
+
 def _pref_disabled_handles() -> set:
-    """本地偏好里被停用的 handle 集(x_account_prefs.json 的 enabled=False 键)。"""
-    from . import config as wb_config
+    """本地偏好里被停用的 handle 集: xpool_prefs.json(现行写口, 2026-09-18)
+    ∪ x_account_prefs.json(旧写口, 只读兼容存量数据, 不再新写)。"""
+    from . import config as wb_config, xpool_prefs
+    off = xpool_prefs.disabled_handles()
     prefs = wb_config.load_x_prefs()
-    return {h for h, p in prefs.items()
-            if isinstance(p, dict) and p.get("enabled") is False}
+    return off | {h for h, p in prefs.items()
+                  if isinstance(p, dict) and p.get("enabled") is False}
 
 
 def disabled_handles() -> set:
@@ -134,26 +154,51 @@ def disabled_handles() -> set:
 
 
 def set_enabled(handle: str, on: bool) -> dict:
-    """看与不看开关(板块四自有写口 x_account_prefs.json, 池文件保持只读守红线7)。
+    """看与不看开关(板块四自有写口 xpool_prefs.json, 池文件保持只读守红线7)。
 
-    三态语义: on=True 恢复看(清本地停用标记, 池内原本启用的账号回到启用);
-    on=False 停看(本地标记 enabled=False, 推荐信息/蹭蹭流量/采集候选全部过滤)。
+    本机视图过滤语义(同 source_prefs 模式, 2026-09-18): on=False 停看——推荐信息/
+    蹭蹭流量/账号管理全部隐藏该账号; on=True 恢复看(清本地停用标记, 回池默认)。
     """
-    from . import config as wb_config
+    from . import xpool_prefs
     key = str(handle or "").strip().lstrip("@").lower()
     if key not in pool_handles():
         raise KeyError(key)
-    prefs = wb_config.load_x_prefs()
-    p = prefs.setdefault(key, {})
+    out = xpool_prefs.set_enabled(key, on)
+    invalidate()                                         # 停用立即对 stats/资讯页生效
+    return out
+
+
+def set_note(handle: str, note: str) -> dict:
+    """备注覆盖层(写 xpool_prefs.json, 展示时覆盖池内 note; 池文件只读)。"""
+    from . import xpool_prefs
+    key = str(handle or "").strip().lstrip("@").lower()
+    if key not in pool_handles():
+        raise KeyError(key)
+    return xpool_prefs.set_note(key, note)
+
+
+def set_follow(handle: str, on: bool) -> dict:
+    """关注开关 = 映射 X 账号追踪(追踪页 X 模块数据面): on 加进追踪库
+    (x_track.add_account, 复用其结构与写口), off 移出; 关注状态 = 是否在追踪库。"""
+    from . import x_track
+    key = str(handle or "").strip().lstrip("@").lower()
+    if key not in pool_handles():
+        raise KeyError(key)
     if on:
-        p.pop("enabled", None)                           # 回归池默认(恢复"看")
+        row, err = x_track.add_account(key, note="")
+        if err and "已在追踪列表" not in str(err.get("error") or ""):
+            raise RuntimeError(str(err.get("error") or "add_failed"))
+        if row is not None and not row.get("name"):        # 补池内名称(追踪页展示用)
+            src = load_accounts().get(key) or {}
+            if src.get("name"):
+                with x_track.store_locked():
+                    store = x_track.load_store()
+                    if key in store["accounts"] and not store["accounts"][key].get("name"):
+                        store["accounts"][key]["name"] = src["name"]
+                        x_track.save_store(store)
     else:
-        p["enabled"] = False
-    p["updated_at"] = time.strftime("%Y-%m-%d %H:%M:%S")
-    if not any(k in p for k in ("follow", "note", "enabled")):
-        prefs.pop(key, None)                             # 空偏好不落孤儿键
-    wb_config.save_x_prefs(prefs)
-    return {"handle": key, "enabled": key not in _pref_disabled_handles()}
+        x_track.remove_account(key)
+    return {"handle": key, "follow": on}
 
 
 def pool_handles() -> set:
@@ -167,17 +212,20 @@ def pool_handles() -> set:
 
 
 def manage_payload() -> dict:
-    """账号管理页数据面: 全池(含停用) + grok 档案(followers/verified) + 本地偏好。
+    """账号管理页数据面: 全池(含停用) + 档案增强 + 本机偏好合成的行数据。
 
-    启用部分复用 load_accounts()(单一映射源), 仅停用账号补 _acct_view 映射;
-    关注/备注写 data/workbench/x_account_prefs.json(板块四唯一写口, 红线7),
-    池内字段只读——启停/角色/市场须改池文件或 local 覆盖。
+    列契约(2026-09-18 用户裁决九列): 账号名/@handle/市场/定位/标签/粉丝量/启用/关注/备注。
+    - 定位/标签/粉丝量: 池内回填字段(_acct_view), 粉丝缺失回退 grok 档案缓存。
+    - 启用/备注写 xpool_prefs.json, 关注映射账号追踪(x_track 库)——三者都是板块四
+      自有写口(红线7), twitter_pool.yaml 只读。
+    - note_effective = 本机备注覆盖 || 池内 note(展示口径); note_local 只存覆盖值。
     """
-    from . import config as wb_config, x_profile_enricher    # 函数级 import 防环
+    from . import config as wb_config, x_profile_enricher, x_track, xpool_prefs  # 函数级 import 防环
     live = load_accounts()
     pos_map = _role_positioning_map()
     profiles = x_profile_enricher.load_cache()["profiles"]
-    prefs = wb_config.load_x_prefs()
+    prefs = xpool_prefs.load()
+    followed = set((x_track.load_store().get("accounts") or {}).keys())
     pref_off = _pref_disabled_handles()
     rows = []
     for a in (_load_raw().get("accounts") or []):
@@ -193,14 +241,16 @@ def manage_payload() -> dict:
             enabled = False
         prof = profiles.get(key) or {}
         pref = prefs.get(key) or {}
+        note_local = str(pref.get("note") or "") if isinstance(pref, dict) else ""
         row.update({
-            "enabled": pool_on and key not in pref_off,      # 生效状态(池 ∧ 本地)
+            "enabled": pool_on and key not in pref_off,      # 生效状态(池 ∧ 本机)
             "pool_enabled": pool_on,                         # 池内原生状态(UI 区分停用来源)
-            "followers": int(prof.get("followers") or 0),
+            "followers": row.get("followers") or int(prof.get("followers") or 0),
             "verified": bool(prof.get("verified")),
             "bio": str(prof.get("bio") or ""),
-            "follow": bool(pref.get("follow")),
-            "local_note": str(pref.get("note") or ""),       # 与池内 note 严格区分
+            "follow": key in followed,                       # 关注 = 在账号追踪库
+            "note_local": note_local,                        # 本机覆盖值(编辑框回显)
+            "note_effective": note_local or row.get("note", ""),  # 展示口径
         })
         rows.append(row)
     rows.sort(key=lambda r: (not r["follow"], -(r["followers"] or 0), r["handle"]))

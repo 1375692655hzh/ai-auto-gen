@@ -15,8 +15,9 @@ WB.pages.article = {
       dict: { markets: [] },
       tagEnums: { positionings: ["官方", "机构", "大V", "快讯源", "新闻源"],
                   item_types: ["聚合", "快讯", "资讯", "分析"] },
-      /* ── 账号管理(全 X 池只读 + 本地偏好 x_account_prefs.json) ── */
-      xaccts: { items: [], meta: {}, q: "", pos: "", followOnly: false, loading: false },
+      /* ── 账号管理(全 X 池只读 + 本机偏好 xpool_prefs.json + 关注=账号追踪) ── */
+      xaccts: { items: [], meta: {}, q: "", mkt: "", posQ: "", tagQ: "",
+                followOnly: false, loading: false },
       xBusyId: "",   /* 看与不看开关进行中的 handle */
       /* ── 推荐信息/蹭蹭流量(X 统一数据面: 同一加载器, 两份预设状态) ──
          reco=选素材视角(默认时间序), surge=卡位视角(默认起爆序); 全部只显示 X 条目 */
@@ -29,8 +30,8 @@ WB.pages.article = {
       xExpanded: {},                     /* 长文卡片展开态: status_id → bool(3行折叠↔全文) */
       /* 蹭蹭流量 = SoPilot 热帖 RSS(唯一来源, 不走数据站) */
       xfSurge: { sort: "prob", items: [], total: 0, meta: {}, loading: false },
-      /* 一键采集(纯工作台部署无计划任务, 空态直接拉数, xsurge_ctl) */
-      xc: { collecting: false, scheduled: false, busy: false, msg: "", timer: null },
+      /* 一键采集(纯工作台部署无计划任务, 空态直接拉数, xsurge_ctl; autoTried=首访自动采一次) */
+      xc: { collecting: false, scheduled: false, busy: false, msg: "", timer: null, autoTried: false },
       rssSortOpts: [["prob", "爆火概率"], ["views", "浏览量"], ["exposure", "评论曝光"], ["time", "时间"]],
       basketIds: {},                     // 已在素材池的条目 id(「已加入」态)
       /* X 池账号档案(与资讯页同源: /x-accounts + /x-profiles) + 正文截断状态 */
@@ -81,6 +82,8 @@ WB.pages.article = {
       /* 人设库(settings x_reply.personas): 统一用户卡 {id,label,one_liner,prompt},
          预设播种后人人平等可删改; prompt 非空时服务端直接当整段提示词用 */
       userPersonas: [],
+      /* ── 施工中子页(用户标注 0911): 列表内的子页显示占位不显示功能; 摘掉 id 即恢复 ── */
+      wipTabs: ["pub", "auto"],
       flows: [], template: "",
       editingId: "", editorTitle: "", editorContent: "",
       drafts: [], runs: [],
@@ -100,17 +103,40 @@ WB.pages.article = {
     tab(t) { if (t === "gen" && !this.historyLoaded) this.loadGenHistory(); },
   },
   computed: {
-    /* 账号管理行过滤: 关键词(名称/handle/市场) + 定位 chips + 仅看关注; 排序服务端已定 */
+    /* 账号管理行过滤: 关键词(名称/handle) + 市场/定位/标签三列筛选 + 仅看关注;
+       排序服务端已定(关注优先→粉丝降级) */
     xacctRows() {
-      const q = this.xaccts.q.trim().toLowerCase();
-      let rows = this.xaccts.items;
-      if (this.xaccts.pos) rows = rows.filter((a) => a.positioning === this.xaccts.pos);
-      if (this.xaccts.followOnly) rows = rows.filter((a) => a.follow);
+      const st = this.xaccts;
+      const q = st.q.trim().toLowerCase();
+      const mkt = st.mkt.trim();
+      const posQ = st.posQ.trim().toLowerCase();
+      const tagQ = st.tagQ.trim().toLowerCase();
+      let rows = st.items;
+      if (mkt) rows = rows.filter((a) => (a.markets || []).includes(mkt));
+      if (posQ) rows = rows.filter((a) => (a.positioning || "").toLowerCase().includes(posQ));
+      if (tagQ) rows = rows.filter((a) =>
+        (a.tags || []).some((t) => t.toLowerCase().includes(tagQ)));
+      if (st.followOnly) rows = rows.filter((a) => a.follow);
       if (q) rows = rows.filter((a) =>
         (a.name || "").toLowerCase().includes(q) ||
-        (a.handle || "").toLowerCase().includes(q) ||
-        (a.markets || []).some((m) => m.toLowerCase().includes(q)));
+        (a.handle || "").toLowerCase().includes(q));
       return rows;
+    },
+    /* 筛选候选: 市场 chips / 定位与标签 datalist(取池内实际值去重) */
+    xacctMarkets() {
+      const s = new Set();
+      for (const a of this.xaccts.items) (a.markets || []).forEach((m) => s.add(m));
+      return [...s].sort();
+    },
+    xacctPositionings() {
+      const s = new Set();
+      for (const a of this.xaccts.items) if (a.positioning) s.add(a.positioning);
+      return [...s].sort();
+    },
+    xacctTags() {
+      const s = new Set();
+      for (const a of this.xaccts.items) (a.tags || []).forEach((t) => s.add(t));
+      return [...s].sort();
     },
     /* 当前人设: 用户卡 > 内置卡 > 自填 */
     curPersona() {
@@ -124,6 +150,12 @@ WB.pages.article = {
     },
     /* 选中卡的响应式引用(编辑面板 v-model 就地改, 保存时整库 PUT) */
     curCard() { return this.userPersonas.find((p) => p.id === this.persona.id) || null; },
+    /* SoPilot RSS 上次采集失败信息(meta.last_fetch.ok === false 才算, 成功后自动消失) */
+    rssFetchError() {
+      const lf = (this.xfSurge.meta || {}).last_fetch;
+      return lf && lf.ok === false ? (lf.error || "unknown") : "";
+    },
+    rssFetchErrorShort() { return this.rssFetchError.slice(0, 40); },
     wordCount() { return (this.editorContent || "").length; },
     onModules() { return this.modules.filter((m) => m.on).map((m) => m.id); },
     /* X 计权字数(与 server gcompose.weighted_len 同规则: CJK/emoji×2, URL 恒=23) */
@@ -185,10 +217,10 @@ WB.pages.article = {
         { id: "gen", title: "内容生成", cnt: this.materials.length || "",
           icon: I('<path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/>'),
           onPick: () => { this.tab = "gen"; } },
-        { id: "pub", title: "内容发布", cnt: this.drafts.length || "",
+        { id: "pub", title: "内容发布 🏗", cnt: "",
           icon: I('<path d="M22 2 11 13"/><path d="M22 2 15 22l-4-9-9-4Z"/>'),
           onPick: () => { this.tab = "pub"; } },
-        { id: "auto", title: "自动化任务", cnt: this.tasks.length || "",
+        { id: "auto", title: "自动化任务 🏗", cnt: "",
           icon: I('<circle cx="12" cy="12" r="9"/><polyline points="12 7 12 12 15.5 14"/>'),
           onPick: () => { this.tab = "auto"; } },
         { id: "xaccts", title: "账号管理", cnt: this.xaccts.meta.count || "",
@@ -196,7 +228,7 @@ WB.pages.article = {
           onPick: () => { this.tab = "xaccts"; } },
       ], this.tab);
     },
-    /* ── 账号管理: 全池只读, 关注/本地备注写 data/workbench/x_account_prefs.json ── */
+    /* ── 账号管理: 全池只读; 启用/备注写 xpool_prefs.json, 关注=账号追踪(x_track 库) ── */
     async loadXaccts() {
       this.xaccts.loading = true;
       try {
@@ -211,17 +243,24 @@ WB.pages.article = {
       this.xaccts.loading = false;
       this.registerSubs();
     },
-    async saveXPref(a, patch) {
-      try { await WB.api.post("/x-account-pref", { handle: a.handle, ...patch }); }
-      catch (e) { WB.toast("保存失败: " + (e.error || "")); }
-    },
     toggleXFollow(a) {
-      a.follow = !a.follow;                              // 乐观更新, 失败由 toast 提示
+      a.follow = !a.follow;                              // 乐观更新, 失败刷新纠正
       this.xaccts.meta.followed_n = (this.xaccts.meta.followed_n || 0) + (a.follow ? 1 : -1);
-      this.saveXPref(a, { follow: a.follow });
+      WB.api.post("/x-accounts/" + a.handle + "/follow", { on: a.follow })
+        .then(() => WB.toast(a.follow ? "已加入账号追踪(追踪页可看粉丝/增粉曲线)"
+                                      : "已移出账号追踪(其日快照一并删除)"))
+        .catch(async (e) => {
+          WB.toast("切换失败: " + (e.error || ""));
+          await this.loadXaccts();                       // 服务端为准, 回读纠正乐观态
+        });
     },
-    saveXNote(a) { this.saveXPref(a, { note: a.local_note }); },
-    /* 看与不看: 停用后该账号内容从推荐信息/蹭蹭流量消失且不再采集(本地偏好, 池文件不动) */
+    saveXNote(a) {
+      WB.api.post("/x-accounts/" + a.handle + "/note", { note: a.note_local || "" })
+        .then(() => { a.note_effective = (a.note_local || "") || (a.note || ""); })
+        .catch((e) => WB.toast("备注保存失败: " + (e.error || "")));
+    },
+    /* 看与不看(本机视图过滤, 写 xpool_prefs.json): 停用后该账号从推荐信息/蹭蹭流量/
+       账号管理消失, 不影响数据站采集与其他接入者(同来源详情开关语义) */
     async toggleXEnabled(a) {
       if (!a.pool_enabled) { WB.toast("该账号在池内被停用, 须改池文件或 local 覆盖启用"); return; }
       this.xBusyId = a.handle;
@@ -288,6 +327,14 @@ WB.pages.article = {
         const d = await WB.api.get("/x-surge-rss?sort=" + st.sort);
         if (mySeq !== st.reqSeq || this.disposed) return;
         st.items = d.items; st.total = d.total; st.meta = d.meta || {};
+        /* 首访自动采集: 缓存从未拉过(无 updated_at) → 免点按钮, 后台自动采一轮;
+           服务端 collect 幂等, 定时任务用户缓存常满不会触发 */
+        if (!st.items.length && !(st.meta || {}).updated_at &&
+            !this.xc.autoTried && !this.xc.collecting) {
+          this.xc.autoTried = true;
+          WB.toast("首次自动采集 SoPilot 热帖(约 2-5 分钟), 完成后本页自动刷新…");
+          this.collectNow();
+        }
       } catch (e) {
         if (mySeq !== st.reqSeq || this.disposed) return;
         st.items = [];
@@ -385,6 +432,7 @@ WB.pages.article = {
     },
     copyReply(c) { WB.copyText(c.text); WB.toast("已复制，点「去评论 ↗」直接卡位"); },
     copyPostLink(r) { WB.copyText(r.reply_url); WB.toast("已复制帖子链接"); },
+    xfCopy(r) { WB.copyText(r.text_zh || r.text); },   /* 29cab41 迁移时方法体丢失, 模板引用悬空 → 0918d 找回 */
     /* 评论人设: 选预设/自填存 settings(服务端生成时读; 人设进缓存 key, 换人设自动重生成) */
     async pickPersona(id) {
       this.persona.id = id;
@@ -886,23 +934,52 @@ WB.pages.article = {
     },
     async saveTask() {
       if (!this.autoForm.name.trim()) { WB.toast("先填任务名称"); return; }
-      await WB.api.post("/automation", {
+      const d = await WB.api.post("/automation", {
         name: this.autoForm.name, note: this.autoForm.note,
         template: this.autoForm.template, modules: this.autoModules,
         schedule: { kind: this.autoForm.scheduleKind, time: this.autoForm.time,
                     weekday: this.autoForm.scheduleKind === "weekly" ? this.autoForm.weekday : null },
         publish: { target: this.autoForm.target },
       });
-      WB.toast("任务已保存(调度器本期留桩, 不会到点真跑)");
+      const sch = d.schedule || {};
+      WB.toast(sch.ok ? "任务已保存并登记计划调度" : "任务已保存; " + (sch.msg || "调度登记失败"));
       this.autoForm.name = ""; this.autoForm.note = "";
       this.loadTasks();
     },
     async delTask(t) { await WB.api.del("/automation/" + t.id); this.loadTasks(); },
+    async toggleTask(t) {
+      try { await WB.api.put("/automation/" + t.id + "/enabled", { on: !t.enabled }); }
+      catch (e) { WB.toast("启停失败"); return; }
+      WB.toast(t.enabled ? "已停用(计划任务同步禁用)" : "已启用(计划任务同步恢复)");
+      this.loadTasks();
+    },
+    async runTaskNow(t) {
+      try {
+        const d = await WB.api.post("/automation/" + t.id + "/run", {});
+        WB.toast(d.note || "已开始执行");
+        setTimeout(() => this.loadTasks(), 20000);   // 成稿约 1-3 分钟, 稍后自动刷结果
+        setTimeout(() => this.loadTasks(), 60000);
+      } catch (e) { WB.toast((e && e.error) || "拉起失败"); }
+    },
     scheduleText(t) {
       const s = t.schedule || {};
       const wk = ["", "周一", "周二", "周三", "周四", "周五", "周六", "周日"][s.weekday] || "";
       return s.kind === "weekly" ? wk + " " + s.time
            : s.kind === "workday" ? "工作日 " + s.time : "每天 " + s.time;
+    },
+    targetText(t) {
+      return { draft: "草稿箱", queue: "待发队列", direct: "生成+人工确认发布" }
+        [((t.publish || {}).target) || "draft"] || "草稿箱";
+    },
+    async enqueuePubDraft() {
+      if (!this.pubDraft) { WB.toast("先选择一篇草稿"); return; }
+      try {
+        const d = await WB.api.post("/publish-enqueue", { draft_id: this.pubDraft.id });
+        WB.toast(`已推入待发队列: ${d.file}`);
+        this.loadLedger();
+      } catch (e) {
+        WB.toast((e && (e.hint || e.error)) || "入队失败");
+      }
     },
     moduleTitles(ids) {
       const all = { retrieve: "信息检索", snapshot: "快照抓取", tech: "技术分析", aggregate: "聚合分析" };
@@ -1160,15 +1237,21 @@ WB.pages.article = {
         <template v-if="xfSurge.meta.updated_at">RSS 抓取 {{ xfSurge.meta.updated_at }} ·
           在榜 {{ xfSurge.total }} 帖(48h 保留)</template>
         <template v-else>暂无数据 —— 点下方「立即采集」拉 SoPilot 热帖</template>
+        <span v-if="rssFetchError" class="badge red" style="margin-left:8px"
+              :title="rssFetchError">RSS 上次采集失败: {{ rssFetchErrorShort }}</span>
         <span class="muted" style="margin-left:8px">{{ xfSurge.meta.rule }}</span>
       </p>
       <div v-if="!xfSurge.items.length && !xfSurge.loading" class="empty">
-        暂无数据<template v-if="!xc.scheduled">(纯工作台部署没有定时采集任务)</template> —
+        <template v-if="rssFetchError">
+          SoPilot RSS 当前拉不到({{ rssFetchErrorShort }}) — 它服务端波动, 不是你的配置问题</template>
+        <template v-else>暂无数据<template v-if="!xc.scheduled">(纯工作台部署没有定时采集任务)</template></template>
+        —
         <span class="act" :class="{ 'act-done': xc.collecting }"
               @click="xc.collecting ? null : collectNow()">
           {{ xc.collecting ? '⏳ 采集中, 完成后自动刷新…' : '⚡ 立即采集' }}</span>
-        <template v-if="!xc.scheduled"> ·
+        <template v-if="!xc.scheduled && !rssFetchError"> ·
           <span class="act" @click="enableSchedule">开启每 15 分钟自动采集</span></template>
+        <template v-if="rssFetchError"> · 服务恢复后点采集即出数</template>
       </div>
       <div class="feed">
         <div v-for="(r, i) in xfSurge.items" :key="r.status_id" class="news-card">
@@ -1480,7 +1563,17 @@ WB.pages.article = {
     </div>
 
     <!-- ═══ 子页3: 内容发布(草稿 + 发布面板 + 发布记录) ═══ -->
-    <div v-show="tab==='pub'">
+    <!-- ═══ 施工中子页占位(pub/auto 在 wipTabs 时显示这里, 功能内容整体隐藏) ═══ -->
+    <div v-if="wipTabs.includes(tab)" class="wip-page">
+      <div class="card wip-card">
+        <div class="wip-icon">🏗️</div>
+        <h2>施工中</h2>
+        <p class="muted">「{{ tab === 'pub' ? '内容发布' : '自动化任务' }}」子页功能建设中, 暂未开放。</p>
+        <p class="muted">可先用: 推荐信息 · 蹭蹭流量 · 内容生成 · 账号管理</p>
+      </div>
+    </div>
+
+    <div v-show="tab==='pub' && !wipTabs.includes('pub')">
       <div class="card">
         <h3>草稿箱(点击「继续编辑」回内容生成页)</h3>
         <div v-if="!drafts.length" class="muted">暂无草稿 —— 到「内容生成」存一篇</div>
@@ -1527,10 +1620,11 @@ WB.pages.article = {
           </div>
         </div>
         <div class="stub-wrap">
-          <button class="btn primary stub" disabled>确认发布</button>
+          <button class="btn primary" @click="enqueuePubDraft">推入待发队列</button>
           <button class="btn" @click="saveDraft">保存发布偏好到草稿</button>
-          <div class="stub-tip">红线: 真发必须先 <code>python cli.py publish run --draft</code> 验证,
-            用户确认后才去掉 --draft; XAI / Bit 两种方式本期均留桩</div>
+          <div class="stub-tip">已写入发布仓 <code>autopub/articles/</code>; 真发走
+            <code>python cli.py publish run --draft</code> 验证 → 你确认后去掉 --draft(红线:
+            发布期间 Chrome 调试浏览器被接管, 勿手动操作)</div>
         </div>
       </div>
 
@@ -1556,7 +1650,7 @@ WB.pages.article = {
     </div>
 
     <!-- ═══ 子页4: 自动化任务(建立任务 → 建立工作流 → 选择时间 → 内容发布) ═══ -->
-    <div v-show="tab==='auto'" class="two-col">
+    <div v-show="tab==='auto' && !wipTabs.includes('auto')" class="two-col">
       <div>
         <div class="card">
           <h3>任务列表({{ tasks.length }})</h3>
@@ -1565,13 +1659,19 @@ WB.pages.article = {
             <div class="t">{{ t.name }}
               <span class="badge" :class="t.enabled ? 'green' : ''" style="float:right">
                 {{ t.enabled ? '启用' : '停用' }}</span></div>
-            <div class="s">{{ scheduleText(t) }} · {{ t.template || '无模板' }}</div>
-            <div class="s">{{ moduleTitles(t.modules) }}</div>
+            <div class="s">{{ scheduleText(t) }} · {{ t.template || '无模板' }}
+              <template v-if="t.next_run"> · 下次 {{ t.next_run }}</template></div>
+            <div class="s">{{ moduleTitles(t.modules) }} · 产物: {{ targetText(t) }}</div>
             <div class="s" v-if="t.note">{{ t.note }}</div>
-            <div class="s" style="margin-top:4px"><a @click="delTask(t)">删除</a></div>
+            <div class="s muted" v-if="t.last_run_at">上次 {{ t.last_run_at }} ·
+              {{ t.last_status === 'done' ? '✓ ' + (t.last_result || '') : '✗ ' + (t.last_result || '失败') }}</div>
+            <div class="s" style="margin-top:4px">
+              <a @click="toggleTask(t)">{{ t.enabled ? '停用' : '启用' }}</a>
+              <a style="margin-left:10px" @click="runTaskNow(t)">立即运行</a>
+              <a style="margin-left:10px" @click="delTask(t)">删除</a></div>
           </div>
-          <p class="muted" style="margin-top:10px">调度器本期留桩: 任务定义已真实保存,
-            到点执行未来接 Windows 任务计划(对齐 bin/refresh_task.bat 模式)</p>
+          <p class="muted" style="margin-top:10px">调度=Windows 计划任务(aag-wb-auto-*, pyw 无窗);
+            到点取当日种子(数据站优先, 退 SoPilot 热帖)→成稿→按产物去向落位</p>
         </div>
       </div>
       <div>
@@ -1618,9 +1718,11 @@ WB.pages.article = {
           <div class="form-row"><label>产物去向</label>
             <div class="radio-group">
               <label><input type="radio" value="draft" v-model="autoForm.target"> 只存草稿</label>
-              <label><input type="radio" value="queue" v-model="autoForm.target"> 推入待发队列(桩)</label>
-              <label><input type="radio" value="direct" v-model="autoForm.target"> 按配置发布(桩)</label>
+              <label><input type="radio" value="queue" v-model="autoForm.target"> 推入待发队列</label>
+              <label><input type="radio" value="direct" v-model="autoForm.target"> 按配置发布(须人工确认)</label>
             </div></div>
+          <div class="muted" style="margin-left:90px;font-size:12px">
+            direct 到点只生成并提示; 真发必须 <code>python cli.py publish run --draft</code> 验证 + 你确认后去 --draft(红线)</div>
 
           <div style="margin-top:16px">
             <button class="btn primary" @click="saveTask">保存任务</button>
@@ -1629,27 +1731,34 @@ WB.pages.article = {
       </div>
     </div>
 
-    <!-- ═══ 子页6: 账号管理(全 X 池账号信息来源; 池只读, 关注/备注为板块四自有偏好) ═══ -->
+    <!-- ═══ 子页6: 账号管理(全 X 池账号信息来源; 池只读, 启用/备注/关注为板块四自有偏好) ═══ -->
     <div v-show="tab==='xaccts'">
       <div class="card">
         <h3>X 账号池({{ xaccts.meta.count || 0 }})
           <span class="muted">关注 {{ xaccts.meta.followed_n || 0 }} ·
             停用 {{ xaccts.meta.disabled_n || 0 }} · 显示 {{ xacctRows.length }}</span>
           <span v-if="xaccts.meta.err" class="badge red" style="margin-left:8px">{{ xaccts.meta.err }}</span></h3>
-        <div class="feed-toolbar">
-          <input type="text" v-model="xaccts.q" class="mat-search" placeholder="搜索(名称/handle/市场)" style="width:220px">
-          <span class="chip" :class="{on: !xaccts.pos}" @click="xaccts.pos=''">全部</span>
-          <span v-for="p in tagEnums.positionings" :key="p" class="chip"
-                :class="{on: xaccts.pos === p}" @click="xaccts.pos = xaccts.pos === p ? '' : p">{{ p }}</span>
+        <div class="feed-toolbar" style="flex-wrap:wrap">
+          <input type="text" v-model="xaccts.q" class="mat-search" placeholder="搜索(名称/handle)" style="width:180px">
+          <span class="chip" :class="{on: !xaccts.mkt}" @click="xaccts.mkt=''">全部市场</span>
+          <span v-for="m in xacctMarkets" :key="m" class="chip"
+                :class="{on: xaccts.mkt === m}" @click="xaccts.mkt = xaccts.mkt === m ? '' : m">{{ m }}</span>
+          <input type="text" v-model="xaccts.posQ" list="xacct-pos-list" placeholder="定位筛选"
+                 style="width:150px;font-size:12px">
+          <input type="text" v-model="xaccts.tagQ" list="xacct-tag-list" placeholder="标签筛选"
+                 style="width:110px;font-size:12px">
           <span class="chip" :class="{on: xaccts.followOnly}" @click="xaccts.followOnly=!xaccts.followOnly">★ 仅看关注</span>
           <span style="flex:1"></span>
           <button class="btn" @click="loadXaccts">{{ xaccts.loading ? '刷新中…' : '刷新' }}</button>
+          <datalist id="xacct-pos-list"><option v-for="p in xacctPositionings" :key="p" :value="p"></option></datalist>
+          <datalist id="xacct-tag-list"><option v-for="t in xacctTags" :key="t" :value="t"></option></datalist>
         </div>
         <div class="muted" style="margin:6px 0 10px">
-          池数据来自板块一 twitter_pool.yaml(只读); 启用开关=本机偏好(停用后推荐信息/蹭蹭流量
-          不再出现该账号内容, 也不再采集), 关注与备注同样只存 data/workbench/。</div>
+          池数据来自板块一 twitter_pool.yaml(只读)。启用=本机视图过滤(停用后推荐信息/蹭蹭流量
+          隐藏该账号, 不影响数据站采集); 关注=加入账号追踪(追踪页看粉丝/增粉曲线);
+          备注为本机覆盖层(留空显示池内备注)。三者只存 data/workbench/。</div>
         <table class="tbl">
-          <thead><tr><th>账号</th><th>市场</th><th>定位</th><th>标签</th><th>粉丝</th><th>启用</th><th>关注</th><th>备注</th></tr></thead>
+          <thead><tr><th>账号名</th><th>账号ID</th><th>市场</th><th>定位</th><th>标签</th><th>粉丝量</th><th>启用</th><th>关注</th><th>备注</th></tr></thead>
           <tbody>
             <tr v-for="a in xacctRows" :key="a.handle"
                 :style="{background: a.follow ? 'var(--accent-weak)' : '',
@@ -1657,28 +1766,30 @@ WB.pages.article = {
               <td>
                 <a :href="a.homepage" target="_blank" rel="noopener"><b>{{ a.name || '@'+a.handle }}</b></a>
                 <span v-if="a.verified" class="badge blue" title="X 认证账号" style="margin-left:4px">✓</span>
-                <div class="muted" style="font-size:11px">@{{ a.handle }}<template v-if="a.bio"> · {{ a.bio }}</template></div>
+                <div class="muted" style="font-size:11px" v-if="a.bio" :title="a.bio">{{ a.bio.slice(0, 30) }}</div>
               </td>
+              <td class="mono" style="font-size:11.5px">@{{ a.handle }}</td>
               <td><span v-for="m in a.markets" :key="m" class="badge" style="margin-right:4px">{{ m }}</span></td>
-              <td><span v-if="a.positioning" class="badge blue">{{ a.positioning }}</span>
-                <div class="muted" style="font-size:11px" v-if="a.role">{{ a.role }}</div></td>
-              <td><span v-if="a.tier" class="badge yellow">{{ a.tier }}</span>
-                <span v-if="a.priority" class="badge" style="margin-left:4px">{{ a.priority }}</span>
-                <div class="muted" style="font-size:11px" v-if="a.note" :title="a.note">{{ a.note.slice(0, 24) }}</div></td>
+              <td><span v-if="a.positioning" class="badge blue" :title="a.positioning">{{ a.positioning }}</span>
+                <div class="muted" style="font-size:11px" v-if="a.role">{{ a.role }}<template v-if="a.tier"> · {{ a.tier }}</template></div></td>
+              <td><span v-for="t in (a.tags || []).slice(0, 5)" :key="t" class="badge yellow"
+                    style="margin:1px 4px 1px 0">{{ t }}</span></td>
               <td class="mono">{{ a.followers ? fmtFol(a.followers) : '—' }}</td>
               <td><span class="switch" :class="{ on: a.enabled, busy: xBusyId === a.handle }"
                     role="switch" tabindex="0" :aria-checked="a.enabled ? 'true' : 'false'"
                     :title="a.pool_enabled
-                      ? (a.enabled ? '停看(推荐/蹭蹭流量隐藏此账号)' : '恢复看(重新出现在推荐/蹭蹭流量)')
+                      ? (a.enabled ? '停看(本机视图隐藏此账号)' : '恢复看(重新出现在推荐/蹭蹭流量)')
                       : '池内停用账号 — 须改池文件或 local 覆盖启用'"
                     @click="toggleXEnabled(a)" @keydown.enter="toggleXEnabled(a)"></span></td>
               <td><span class="act" :style="{color: a.follow ? 'var(--yellow)' : ''}"
                     @click="toggleXFollow(a)">{{ a.follow ? '★ 已关注' : '☆ 关注' }}</span></td>
-              <td><input type="text" v-model="a.local_note" @change="saveXNote(a)" placeholder="本地备注"
+              <td><input type="text" v-model="a.note_local" @change="saveXNote(a)"
+                         :placeholder="(a.note || '').slice(0, 20) || '本机备注'"
+                         :title="a.note_effective ? '生效备注: ' + a.note_effective : '无备注'"
                          style="width:150px;font-size:11.5px"></td>
             </tr>
             <tr v-if="!xacctRows.length && !xaccts.loading">
-              <td colspan="8" class="muted">无匹配账号</td></tr>
+              <td colspan="9" class="muted">无匹配账号</td></tr>
           </tbody>
         </table>
       </div>

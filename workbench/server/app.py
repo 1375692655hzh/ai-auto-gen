@@ -265,7 +265,8 @@ def create_app(bind_host: str = "127.0.0.1") -> FastAPI:
         return {"profiles": c["profiles"], "enriched_at": c.get("enriched_at"),
                 "count": len(c["profiles"])}
 
-    # ── 账号管理(图文页子页): 全池只读 + 本地偏好(唯一写口 x_account_prefs.json) ──
+    # ── 账号管理(图文页子页): 全池只读 + 本机偏好(启用/备注写 xpool_prefs.json,
+    #    关注映射账号追踪 x_track 库; 池文件只读, 权限模型同 source_prefs) ─────────
     @app.get("/wb-api/x-accounts-manage")
     def x_accounts_manage():
         return xaccounts.manage_payload()
@@ -278,6 +279,24 @@ def create_app(bind_host: str = "127.0.0.1") -> FastAPI:
             return xaccounts.set_enabled(handle, on)
         except KeyError:
             return JSONResponse({"error": f"池内无此账号: {handle}"}, status_code=404)
+
+    @app.post("/wb-api/x-accounts/{handle}/note")
+    async def x_account_note(handle: str, request: Request):
+        body = await request.json()
+        try:
+            return xaccounts.set_note(handle, str(body.get("note") or ""))
+        except KeyError:
+            return JSONResponse({"error": f"池内无此账号: {handle}"}, status_code=404)
+
+    @app.post("/wb-api/x-accounts/{handle}/follow")
+    async def x_account_follow(handle: str, request: Request):
+        body = await request.json()
+        try:
+            return xaccounts.set_follow(handle, bool(body.get("on", True)))
+        except KeyError:
+            return JSONResponse({"error": f"池内无此账号: {handle}"}, status_code=404)
+        except RuntimeError as e:
+            return JSONResponse({"error": str(e)[:120]}, status_code=400)
 
     # ── 账号追踪(图文页子页): 自选 X 账号粉丝/增粉/更新/流量日快照 ─────────────
     # 端点零外呼(红线同 yt_track): 读缓存或 spawn CLI; 真抓网只在 refresh-x-track 进程。

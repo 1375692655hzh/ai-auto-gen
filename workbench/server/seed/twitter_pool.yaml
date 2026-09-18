@@ -1,5 +1,3 @@
-# twitter_pool.yaml —— X 账号池（X账号录入规范.md 的结构化形态）
-# markets 一律用新体系市场值（全球/美国/A股/香港/台湾/日本/韩国/土耳其，2026-09-03 双标签制）
 defaults:
   per_account_limit: 50
   account_delay_seconds: 1
@@ -20,6 +18,12 @@ accounts:
   risk: medium
   replies: false
   note: BIST影响榜前列，财报拆解非常细致，常给目标价和逻辑，中线基本面交易者必看
+  followers: 121087
+  positioning: 土耳其股市投资分享
+  tags:
+  - 土耳其股市
+  - 全职投资
+  - 个人笔记
 - handle: TuncayTursucu
   uid: '864765082512838657'
   name: Tuncay Turşucu
@@ -34,6 +38,13 @@ accounts:
   risk: low
   replies: false
   note: SPK持牌分析师，数学工程师背景，财务报表分析专业严谨（12万粉）
+  followers: 528711
+  positioning: 持牌分析师市场评论
+  tags:
+  - 土耳其股市
+  - 市场分析
+  - 持牌分析师
+  - 宏观
 - handle: fintables
   uid: '4797162376'
   name: Fintables
@@ -48,6 +59,13 @@ accounts:
   risk: medium
   replies: false
   note: BIST最好用的数据平台（41万粉）：财务数据/持仓/比率，决策前验证必看
+  followers: 414014
+  positioning: 土耳其股市财报与基金数据
+  tags:
+  - 土耳其股市
+  - 财报
+  - 基金
+  - 金融数据
 - handle: baymucize
   uid: '1959969258'
   name: Borsa Takipçisi
@@ -62,6 +80,13 @@ accounts:
   risk: medium
   replies: false
   note: 技术图形+KAP资讯+具体买卖点，短线/波段交易党常用
+  followers: 7344
+  positioning: 土耳其个股技术分析
+  tags:
+  - 土耳其股市
+  - 技术分析
+  - 选股
+  - 支撑阻力
 - handle: Viop_Analiz
   uid: ''
   verify_pending: true
@@ -77,6 +102,12 @@ accounts:
   risk: medium
   replies: false
   note: 技术+基本面结合，VİOP期货分析，期货股票双做者适用
+  followers: 43578
+  positioning: 公司估值课程推广
+  tags:
+  - 公司估值
+  - 土耳其股市
+  - 教育
 - handle: Borsayolundaa
   uid: '2647570873'
   name: BORSA YOLUNDA
@@ -91,6 +122,13 @@ accounts:
   risk: medium
   replies: false
   note: 个股分析与逻辑分享，量大有深度，找潜力股的中线投资者适用
+  followers: 304316
+  positioning: 土耳其股市宏观与个股笔记
+  tags:
+  - 土耳其股市
+  - 宏观分析
+  - 美联储
+  - 行业轮动
 - handle: KadirCalimbay
   uid: '2383795543'
   name: Kadir Çalımbay
@@ -105,6 +143,14 @@ accounts:
   risk: medium
   replies: false
   note: 影响力较高（36万粉），个股点评多，有关注个股价值
+  followers: 362240
+  positioning: 土耳其股市实战教学
+  tags:
+  - 土耳其股市
+  - 个股分析
+  - 比特币
+  - 黄金
+  - 投资策略
 - handle: SerkannnKayaaaa
   uid: '1737274573408591872'
   name: Serkan Kaya | Borsa Analisti
@@ -119,6 +165,13 @@ accounts:
   risk: medium
   replies: false
   note: 22年BIST经验，前İş Bankası & Garanti BBVA资深分析师
+  followers: 873
+  positioning: 土耳其市场宏观与黄金评论
+  tags:
+  - BIST100
+  - 黄金
+  - 比特币
+  - 宏观分析
 - handle: borsaistanbul
   uid: '1070609989'
   name: Borsa İstanbul
@@ -130,6 +183,12 @@ accounts:
   priority: high
   risk: low
   note: 交易所官方（52万粉）：收盘数据、IPO、官方公告，最权威来源
+  followers: 521741
+  positioning: 伊斯坦布尔交易所官方
+  tags:
+  - BIST100
+  - 官方公告
+  - 收盘数据
 - handle: memetsimsek
   uid: '183665035'
   name: Mehmet Simsek
@@ -141,6 +200,13 @@ accounts:
   priority: high
   risk: low
   note: 土耳其财政部部长（263万粉），财政政策声明与宏观表态
+  followers: 2632881
+  positioning: 土耳其财经政策发布
+  tags:
+  - 土耳其财政
+  - 政策
+  - 税务
+  - 宏观
 - handle: InvestTurkey
   uid: '1388812572'
   name: Invest in Türkiye
@@ -152,6 +218,13 @@ accounts:
   priority: medium
   risk: low
   note: 官方投资办公室，宏观政策/投资环境/官方数据
+  followers: 181059
+  positioning: 土耳其官方投资促进
+  tags:
+  - 土耳其投资
+  - 官方
+  - 能源转型
+  - 物流
 - handle: YFinansman
   uid: '555978794'
   name: Yatırım Finansman
@@ -163,6 +236,13 @@ accounts:
   priority: medium
   risk: low
   note: 土耳其最老牌经纪商（İş Bankası系），教育性内容多
+  followers: 122997
+  positioning: 土耳其券商市场分析
+  tags:
+  - 土耳其
+  - 券商
+  - 市场分析
+  - 投资
 - handle: ibrahimmturhan2
   uid: '752888409824296960'
   name: Ibrahim M. Turhan
@@ -174,6 +254,13 @@ accounts:
   priority: high
   risk: low
   note: 前Borsa İstanbul主席、央行前副主席，银行体系与政策权威
+  followers: 96747
+  positioning: 土耳其经济与市场评论
+  tags:
+  - 土耳其
+  - 宏观经济
+  - 央行
+  - 资本市场
 - handle: AS_Akat
   uid: '1285775534'
   name: Asaf Savaş Akat
@@ -185,6 +272,12 @@ accounts:
   priority: medium
   risk: low
   note: 资深经济学家（37万粉），宏观政策学术深度
+  followers: 124457
+  positioning: 土耳其经济文章转发
+  tags:
+  - 土耳其
+  - 经济评论
+  - 专栏
 - handle: guskuay
   uid: '371894476'
   name: Gökhan Uskuay
@@ -196,6 +289,13 @@ accounts:
   priority: medium
   risk: low
   note: 专业投资策略师，美元/利率/国际市场联动
+  followers: 82035
+  positioning: 土耳其股市盘面解读
+  tags:
+  - 土耳其
+  - 股市
+  - 基金清盘
+  - 盘面分析
 - handle: elerianm
   uid: '332617373'
   name: Mohamed A. El-Erian
@@ -207,6 +307,13 @@ accounts:
   priority: medium
   risk: low
   note: Allianz首席经济顾问/前PIMCO CEO（388万粉），全球宏观大框架参考
+  followers: 1104335
+  positioning: 全球宏观与市场评论
+  tags:
+  - 宏观
+  - 债券
+  - 央行
+  - 全球市场
 - handle: BORSAIZINDE
   uid: '741553965444239360'
   name: BORSA İZİNDE
@@ -218,6 +325,13 @@ accounts:
   priority: high
   risk: medium
   note: 潜力股跟踪、实用风格，选股思路清晰
+  followers: 582753
+  positioning: 土耳其股市分析教育
+  tags:
+  - 土耳其
+  - 股市
+  - 教育
+  - 订阅
 - handle: PiyasaTturkiye
   uid: '1521020097292378112'
   name: Piyasa Türkiye
@@ -240,6 +354,13 @@ accounts:
   priority: high
   risk: medium
   note: 技术分析、BIST100图表点评，图表分析专业
+  followers: 570
+  positioning: 土耳其股市与贵金属技术分析
+  tags:
+  - BIST100
+  - 黄金
+  - 白银
+  - 技术分析
 - handle: borsanalist_
   uid: '1053991889681158146'
   name: BORSANALİST
@@ -251,6 +372,13 @@ accounts:
   priority: medium
   risk: medium
   note: BIST分析，风格谨慎带免责声明
+  followers: 5332
+  positioning: 土耳其个股与基金动态
+  tags:
+  - 土耳其
+  - 个股
+  - 基金
+  - 分析
 - handle: taaardu
   uid: '1451911567'
   name: Tardu
@@ -262,6 +390,13 @@ accounts:
   priority: medium
   risk: medium
   note: 长期投资视角（9万粉），近年聚焦 Halka Arz（IPO）与 BIST100
+  followers: 492514
+  positioning: 土耳其股市与IPO观察
+  tags:
+  - 土耳其
+  - BIST100
+  - IPO
+  - 基金
 - handle: barissoydan
   uid: '25826831'
   name: Barış Soydan
@@ -273,6 +408,13 @@ accounts:
   priority: medium
   risk: medium
   note: 市场评论与分析（15万粉）
+  followers: 151439
+  positioning: 土耳其财经评论与基金事件
+  tags:
+  - 土耳其
+  - 基金清盘
+  - 财经评论
+  - 市场
 - handle: ridvanozturgut
   uid: '497128903'
   name: Rıdvan Özturgut
@@ -284,6 +426,14 @@ accounts:
   priority: medium
   risk: medium
   note: 活跃市场观点（8万粉）
+  followers: 82008
+  positioning: 土耳其财经学者多资产分析
+  tags:
+  - 宏观
+  - BIST100
+  - 基金
+  - 黄金
+  - 比特币
 - handle: BorsaAnalyst
   uid: '325644038'
   name: Onurcan Deger
@@ -295,6 +445,13 @@ accounts:
   priority: medium
   risk: medium
   note: Trader风格，技术分析为主
+  followers: 2967
+  positioning: 土耳其股市交易员日常
+  tags:
+  - BIST100
+  - 交易员
+  - 股市
+  - 行情
 - handle: tahtaci_borsa
   uid: '1616750979235315712'
   name: Tahtacı
@@ -306,6 +463,12 @@ accounts:
   priority: medium
   risk: medium
   note: 技术派活跃账号（18万粉）
+  followers: 185150
+  positioning: 交易心理与励志短句
+  tags:
+  - 交易心理
+  - 励志
+  - 格言
 - handle: analitikyatirim
   uid: '1669260360287678464'
   name: ANALİTİK YATIRIM
@@ -317,6 +480,13 @@ accounts:
   priority: high
   risk: medium
   note: 技术研究机构：技术+基本+takas（订单流）结合
+  followers: 14203
+  positioning: 土耳其个股技术分析
+  tags:
+  - 技术分析
+  - 个股
+  - 日内交易
+  - BIST
 - handle: fonanalisti
   uid: '1777661280569995264'
   name: Fon Analisti | Yatırım Stratejileri
@@ -328,6 +498,13 @@ accounts:
   priority: high
   risk: low
   note: SPK持牌基金分析师，基金对比与资产配置
+  followers: 4087
+  positioning: 土耳其基金专业分析
+  tags:
+  - 基金
+  - SPK
+  - 资管
+  - 分析
 - handle: data_kapital
   uid: '1310538387011534848'
   name: DataKapital
@@ -339,6 +516,14 @@ accounts:
   priority: medium
   risk: medium
   note: BIST内容生产与影响分析媒体
+  followers: 3182
+  positioning: BIST数据与社媒情绪平台
+  tags:
+  - 数据平台
+  - BIST
+  - 社交情绪
+  - AI
+  - 基金
 - handle: arifcoskun05
   uid: '3255556330'
   name: Arif COŞKUN (Algoritmarif)
@@ -350,6 +535,13 @@ accounts:
   priority: medium
   risk: medium
   note: 算法/量化风格（37万粉）
+  followers: 373773
+  positioning: 土耳其股市策略网红
+  tags:
+  - 策略
+  - BIST
+  - 金融网红
+  - 市场结构
 - handle: Borsaemiliano
   uid: '1319609719154233347'
   name: Borsa Emiliano
@@ -361,6 +553,13 @@ accounts:
   priority: medium
   risk: medium
   note: 影响榜活跃的BIST讨论账号（7万粉）
+  followers: 70523
+  positioning: 土耳其底部个股猎手
+  tags:
+  - 抄底
+  - 个股
+  - 交易心理
+  - BIST
 - handle: RealUncleBrent
   uid: '916883323418435584'
   name: 布蘭特大叔 Uncle Brent
@@ -374,6 +573,13 @@ accounts:
   risk: medium
   replies: false
   note: 筹码/汇率/宏观纯资讯无荐股(Threads侧5万粉A档); X号为本人(bio互链大叔日誌)但仅9粉基本不发, 主场在Threads, X抓取仅作补充
+  followers: 9
+  positioning: 台湾生活设计与自媒体分享
+  tags:
+  - 视觉设计
+  - 自媒体
+  - 课程
+  - 生活
 - handle: SemiAnalysis_
   uid: '1745106082790318080'
   name: SemiAnalysis
@@ -385,6 +591,13 @@ accounts:
   priority: high
   risk: low
   note: 半导体权威研究机构官方号(15.9万粉), 台股池KOL(阿雪等)常引用的一手源; 2026-09-09 用户拍板 media→research(定位升机构, 抓取仍走 flash 逐推); 注意handle带下划线, @SemiAnalysis 是仿号404
+  followers: 164930
+  positioning: 半导体与AI芯片深度分析
+  tags:
+  - 半导体
+  - AI芯片
+  - 存储
+  - 数据中心
 - handle: unusual_whales
   uid: '1200616796295847936'
   name: unusual_whales
@@ -397,6 +610,14 @@ accounts:
   priority: high
   risk: medium
   note: 期权资金流+突发+政治经济异动(527万粉); 学速度/数据/异动
+  followers: 5367752
+  positioning: 美股期权流与市场新闻
+  tags:
+  - 期权
+  - 美股
+  - 市场新闻
+  - 宏观
+  - AI
 - handle: StockMKTNewz
   uid: '1250830691824283648'
   name: Evan
@@ -409,6 +630,13 @@ accounts:
   priority: high
   risk: medium
   note: 美股实时快讯, 极高频+Ticker化(112万粉)
+  followers: 1137329
+  positioning: 美股实时快讯与市场新闻
+  tags:
+  - 美股
+  - 快讯
+  - 市场新闻
+  - 公司动态
 - handle: KobeissiLetter
   uid: '3316376038'
   name: The Kobeissi Letter
@@ -422,6 +650,13 @@ accounts:
   priority: high
   risk: medium
   note: 宏观数据+一句强判断(258万粉); 学数据→结论→市场意义
+  followers: 2634797
+  positioning: 全球资本市场评论
+  tags:
+  - 宏观
+  - 美联储
+  - 比特币
+  - 能源
 - handle: litcapital
   uid: '932630991298007041'
   name: litquidity
@@ -433,6 +668,13 @@ accounts:
   priority: medium
   risk: medium
   note: 华尔街梗/金融meme/投资圈八卦(163万粉); 学人格化表达
+  followers: 1697073
+  positioning: 创投观点与市场吐槽
+  tags:
+  - 创投
+  - AI
+  - 市场情绪
+  - 政治
 - handle: burrytracker
   uid: '1539636858170122242'
   name: Michael Burry Stock Tracker
@@ -444,6 +686,13 @@ accounts:
   priority: medium
   risk: medium
   note: 'Tracker账号模型: 专追踪Burry/基金持仓(56万粉)'
+  followers: 561638
+  positioning: 对冲基金持仓跟踪
+  tags:
+  - 持仓
+  - 对冲基金
+  - 巴菲特
+  - 市场动态
 - handle: GRDecter
   uid: '1281457267582177280'
   name: Genevieve Roch-Decter, CFA
@@ -455,6 +704,12 @@ accounts:
   priority: medium
   risk: medium
   note: 财经新闻+个人IP(41万粉CFA); 真人感+简单解释
+  followers: 411355
+  positioning: 商业领袖个人动态
+  tags:
+  - 商业
+  - 个人成长
+  - 社交
 - handle: charliebilello
   uid: '1413027896'
   name: Charlie Bilello
@@ -468,6 +723,13 @@ accounts:
   priority: high
   risk: low
   note: 'P1·E1表达方式对标: 长期市场数据/历史对比/图表解释(86万粉, 实名)'
+  followers: 866021
+  positioning: 宏观数据与市场策略
+  tags:
+  - 宏观
+  - 利率
+  - 通胀
+  - 市场数据
 - handle: MacroAlf
   uid: '1344759366671589376'
   name: Alf
@@ -479,6 +741,13 @@ accounts:
   priority: low
   risk: medium
   note: 'P3: 宏观变量→利率-美元-资产因果链; 观点强需回到数据'
+  followers: 466596
+  positioning: 宏观策略与市场观点
+  tags:
+  - 宏观
+  - 策略
+  - 投资
+  - 市场
 - handle: tier10k
   uid: '2361601055'
   name: db
@@ -490,6 +759,13 @@ accounts:
   priority: medium
   risk: medium
   note: 'P2: SEC文件/公告/财报快讯(104万粉); 只学压缩方式不转载'
+  followers: 1066739
+  positioning: 突发新闻与地缘快讯
+  tags:
+  - 新闻
+  - 地缘政治
+  - 快讯
+  - 市场
 - handle: 10kdiver
   uid: '1248071584713076737'
   name: 10-K Diver
@@ -502,6 +778,12 @@ accounts:
   priority: high
   risk: medium
   note: 'P1·E1+C3共用: 财报/利润率/资本开支拆成因果链(29万粉)'
+  followers: 290390
+  positioning: 投资教育与基本面分析
+  tags:
+  - 投资教育
+  - 基本面
+  - 价值投资
 - handle: DeItaone
   uid: '2704294333'
   name: '*Walter Bloomberg'
@@ -514,6 +796,14 @@ accounts:
   priority: low
   risk: medium
   note: 'P3: 快讯聚合(191万粉); 注意handle是大写I不是小写L; 快讯≠已交叉验证事实'
+  followers: 1932640
+  positioning: 全球宏观财经快讯
+  tags:
+  - 宏观
+  - 快讯
+  - 能源
+  - 央行
+  - 市场
 - handle: citrini
   uid: '1365809270034477069'
   name: Citrini
@@ -525,6 +815,13 @@ accounts:
   priority: medium
   risk: medium
   note: 'P2: 结构性主题/行业链/二阶受益者, 主题连续剧写法'
+  followers: 289798
+  positioning: 跨资产主题投资研究
+  tags:
+  - 跨资产
+  - 宏观
+  - 机器人
+  - 美债
 - handle: KawzInvests
   uid: '1447102056481837058'
   name: KawzInvests
@@ -537,6 +834,13 @@ accounts:
   priority: high
   risk: medium
   note: 'P1·E1主结构第一对标: 单公司(NVDA)持续更新不换热点(12万粉)'
+  followers: 117577
+  positioning: 光电与AI科技研究
+  tags:
+  - 光子学
+  - AI
+  - 国防科技
+  - 太空
 - handle: burak_finance
   uid: '371876593'
   name: Burak Finance
@@ -548,6 +852,13 @@ accounts:
   priority: low
   risk: medium
   note: 'P3: 科技公司/产业趋势图表研究; 用前复核近期稳定性'
+  followers: 11699
+  positioning: 成长股深度分析
+  tags:
+  - 成长股
+  - 科技
+  - 基本面
+  - 投资
 - handle: PeterLBrandt
   uid: '247857712'
   name: The Factor Report
@@ -560,6 +871,12 @@ accounts:
   priority: high
   risk: medium
   note: 'P1·E3主结构: 价格结构/情景概率/失效位置(130万粉); 不照搬价格预测'
+  followers: 1314044
+  positioning: 经典图表交易分析
+  tags:
+  - 期货
+  - 技术分析
+  - 交易心理
 - handle: NorthstarCharts
   uid: '1097211439159365632'
   name: Northstar
@@ -572,6 +889,13 @@ accounts:
   priority: high
   risk: medium
   note: 'P1·E3证据方式: 固定图表框架持续更新价格/广度/杠杆(17万粉)'
+  followers: 167878
+  positioning: 宏观债市技术分析
+  tags:
+  - 宏观
+  - 美债
+  - 技术分析
+  - 利率
 - handle: BitcoinMagazine
   uid: '361289499'
   name: Bitcoin Magazine
@@ -584,6 +908,12 @@ accounts:
   priority: high
   risk: medium
   note: 'P1·E3事件雷达: 比特币行业新闻(446万粉); 媒体号不作唯一事实来源'
+  followers: 4481778
+  positioning: 比特币新闻资讯
+  tags:
+  - 比特币
+  - 加密货币
+  - 机构采用
 - handle: BrianFeroldi
   uid: '61558281'
   name: Brian Feroldi
@@ -596,6 +926,13 @@ accounts:
   priority: high
   risk: low
   note: 'P1·C3证据方式: 投资概念→清单/评分/可执行问题(67万粉, 实名)'
+  followers: 672251
+  positioning: 投资教育与企业分析
+  tags:
+  - 投资教育
+  - 基本面
+  - 财务分析
+  - 长期投资
 - handle: morganhousel
   uid: '284278132'
   name: Morgan Housel
@@ -608,6 +945,13 @@ accounts:
   priority: high
   risk: low
   note: 'P1·C3表达方式: 投资心理/历史故事/长期原则(70万粉, 实名作家); 只学叙事'
+  followers: 706915
+  positioning: 投资心理与行为金融
+  tags:
+  - 投资心理
+  - 行为金融
+  - 历史
+  - 理财
 - handle: mingchikuo
   uid: '267509471'
   name: 郭明錤｜Ming-Chi Kuo
@@ -621,6 +965,13 @@ accounts:
   priority: high
   risk: low
   note: 'P2: 科技供应链/产品节奏一手信息(25万粉, 天风分析师); 观点需供应链披露验证'
+  followers: 250789
+  positioning: 科技产业链趋势分析
+  tags:
+  - 半导体
+  - AI
+  - 供应链
+  - 产业趋势
 - handle: MikeFritzell
   uid: '2471879203'
   name: Michael Fritzell (Asian Century Stocks)
@@ -632,6 +983,12 @@ accounts:
   priority: medium
   risk: medium
   note: 'P2: 亚洲公司与区域市场研究, 英语圈覆盖较少的信息差'
+  followers: 35941
+  positioning: 亚洲股市价值投资分析
+  tags:
+  - 亚洲股市
+  - 价值投资
+  - 个股分析
 - handle: jyershixiong
   uid: '1644184701316534273'
   name: 交易所二师兄
@@ -643,6 +1000,13 @@ accounts:
   priority: low
   risk: medium
   note: 'P3: 亚洲市场观察, 美股叙事映射到香港/亚洲资产; 用前复核活跃度'
+  followers: 2811
+  positioning: 美股期权实战与交易心态
+  tags:
+  - 美股期权
+  - 港股衍生品
+  - 交易策略
+  - 投资心态
 - handle: EconomyApp
   uid: '1246136668014301184'
   name: App Economy Insights
@@ -656,6 +1020,13 @@ accounts:
   risk: low
   replies: false
   note: '财报可视化模板头部(24万粉): 营收拆分/分部利润/同比曲线, 原料全公开财报; 最该抄的模板型账号'
+  followers: 242283
+  positioning: App经济与科技公司分析
+  tags:
+  - App经济
+  - 科技股
+  - 财报分析
+  - IPO
 - handle: borrowed_ideas
   uid: '1154601225880555520'
   name: Mostly Borrowed Ideas
@@ -669,6 +1040,13 @@ accounts:
   risk: low
   replies: false
   note: '科技公司深度拆解(15万粉): 商业模式+竞争格局, Substack变现'
+  followers: 150351
+  positioning: 美股深度个股研究
+  tags:
+  - 美股
+  - 个股分析
+  - 电商
+  - AI应用
 - handle: ecommerceshares
   uid: '534058408'
   name: Wasteland Capital
@@ -682,6 +1060,12 @@ accounts:
   risk: medium
   replies: false
   note: 电商/消费科技个股(13.5万粉), 长贴分析; 注意近2月未发帖; 验号时已68天未发帖(低活跃观察)
+  followers: 134681
+  positioning: 全球资产与消费电子观察
+  tags:
+  - 苹果
+  - 消费电子
+  - 全球投资
 - handle: TheTranscript_
   uid: '923687530045759488'
   name: The Transcript
@@ -696,6 +1080,12 @@ accounts:
   risk: low
   replies: false
   note: 财报电话会关键表述摘录归类(10万粉); 冷启动最易执行的形态
+  followers: 103457
+  positioning: 财报电话会议要闻精选
+  tags:
+  - 财报电话会
+  - 美股
+  - 企业高管言论
 - handle: RihardJarc
   uid: '4765100357'
   name: Rihard Jarc
@@ -709,6 +1099,13 @@ accounts:
   risk: low
   replies: false
   note: 科技公司深度+渠道验证(8万粉), 输出接近卖方研报; UncoverAlpha
+  followers: 81896
+  positioning: AI科技产业链研究
+  tags:
+  - AI
+  - 科技股
+  - 半导体
+  - 云计算
 - handle: TSOH_Investing
   uid: '829031723526668288'
   name: Alex Morris (TSOH Investment Research)
@@ -722,6 +1119,13 @@ accounts:
   risk: low
   replies: false
   note: 单人付费研究范式(6.5万粉Substack全职); Alex Morris
+  followers: 65736
+  positioning: 巴菲特芒格价值投资研究
+  tags:
+  - 价值投资
+  - 巴菲特
+  - 芒格
+  - 投资研究
 - handle: ByrneHobart
   uid: '2723411'
   name: Byrne Hobart
@@ -736,6 +1140,12 @@ accounts:
   risk: low
   replies: false
   note: 科技×金融交叉(The Diff, 6万粉), 机构订阅; 读者质量高
+  followers: 61598
+  positioning: 科技趋势与风险投资
+  tags:
+  - AI
+  - 风险投资
+  - 科技趋势
 - handle: DataDInvesting
   uid: '1527430369183531008'
   name: Chris Hoeger
@@ -749,6 +1159,13 @@ accounts:
   risk: low
   replies: false
   note: '数据驱动个股(5.5万粉): 自建数据表横向比较'
+  followers: 54565
+  positioning: 价值投资与第一性原理
+  tags:
+  - 价值投资
+  - 第一性原理
+  - AI
+  - 股东价值
 - handle: amitisinvesting
   uid: '1468103131737247748'
   name: amit
@@ -762,6 +1179,13 @@ accounts:
   risk: medium
   replies: false
   note: '财报速览卡片(65万粉): 财报季高频统一格式, 靠密度取胜'
+  followers: 656766
+  positioning: 科技股与美股市场热点解读
+  tags:
+  - 科技股
+  - 美股
+  - PLTR
+  - 市场
 - handle: benthompson
   uid: '1233663476'
   name: Stratechery
@@ -776,6 +1200,13 @@ accounts:
   risk: low
   replies: false
   note: Stratechery科技战略分析(149万粉); 更新约每周, 观点密度高
+  followers: 283260
+  positioning: 科技产业深度分析与评论
+  tags:
+  - 科技
+  - 策略
+  - AI
+  - 商业模式
 - handle: Beth_Kindig
   uid: '499993648'
   name: Beth Kindig
@@ -789,6 +1220,13 @@ accounts:
   risk: low
   replies: false
   note: '科技股基本面(18万粉): 半导体+云计算, 从业背景转投研'
+  followers: 182798
+  positioning: 科技股与AI基础设施投资分析
+  tags:
+  - AI
+  - 半导体
+  - 科技股
+  - 投资
 - handle: GavinSBaker
   uid: '340387261'
   name: Gavin Baker
@@ -803,6 +1241,13 @@ accounts:
   risk: low
   replies: false
   note: 科技基金经理(34万粉), 真实管钱不可复制但是风向标; 对照组
+  followers: 347057
+  positioning: AI行业与投资趋势观察
+  tags:
+  - AI
+  - OpenAI
+  - 投资
+  - 科技
 - handle: zephyr_z9
   uid: '1695126229446479872'
   name: Zephyr
@@ -817,6 +1262,13 @@ accounts:
   risk: medium
   replies: false
   note: '中文AI/半导体产业链(17万粉): 中文在该赛道跑通的证明'
+  followers: 172155
+  positioning: AI芯片与半导体趋势分析
+  tags:
+  - AI
+  - 芯片
+  - 半导体
+  - CoWoS
 - handle: dylan522p
   uid: '985281530070265862'
   name: Dylan Patel
@@ -831,6 +1283,12 @@ accounts:
   risk: low
   replies: false
   note: 'SemiAnalysis创始人(16万粉): 芯片架构/数据中心/成本模型, 技术天花板'
+  followers: 162217
+  positioning: AI基础设施与半导体研究
+  tags:
+  - AI
+  - 半导体
+  - 基础设施
 - handle: dnystedt
   uid: '814134230959521792'
   name: 駿HaYaO
@@ -845,6 +1303,13 @@ accounts:
   risk: low
   replies: false
   note: '驻台科技供应链记者(3万粉): 台厂月营收/法说会英文化, 台湾坐标范式'
+  followers: 54784
+  positioning: 半导体与晶圆厂动态播报
+  tags:
+  - 半导体
+  - 晶圆代工
+  - TSMC
+  - 供应链
 - handle: techfund1
   uid: '1356621924919615489'
   name: Tech Fund
@@ -858,6 +1323,13 @@ accounts:
   risk: medium
   replies: false
   note: '科技股研究(1.7万粉): 小号高密度, 典型腰部形态'
+  followers: 16658
+  positioning: 科技投资与AI算力分析
+  tags:
+  - 科技股
+  - AI
+  - 半导体
+  - 机器人
 - handle: IanCutress
   uid: '317150782'
   name: 𝐷𝑟. 𝐼𝑎𝑛 𝐶𝑢𝑡𝑟𝑒𝑠𝑠
@@ -872,6 +1344,13 @@ accounts:
   risk: low
   replies: false
   note: '半导体技术记者(5.8万粉): TechTechPotato, 博士背景技术解读'
+  followers: 58047
+  positioning: 半导体与AI基础设施分析
+  tags:
+  - 半导体
+  - AI
+  - 基础设施
+  - Broadcom
 - handle: PatrickMoorhead
   uid: '14927543'
   name: Patrick Moorhead
@@ -886,6 +1365,12 @@ accounts:
   risk: low
   replies: false
   note: '分析机构创始人(6.8万粉): 厂商关系拿早期信息'
+  followers: 68806
+  positioning: 科技产业与技术政策评论
+  tags:
+  - AI
+  - 科技产业
+  - 评论
 - handle: trendforce
   uid: '201153042'
   name: TrendForce
@@ -900,6 +1385,14 @@ accounts:
   risk: low
   replies: false
   note: '集邦咨询英文号(2.2万粉): 台湾研究机构, 被英文财经圈大量引用, 原始信源'
+  followers: 22682
+  positioning: 科技产业市场情报
+  tags:
+  - 半导体
+  - AI芯片
+  - 存储器
+  - 晶圆代工
+  - 产业趋势
 - handle: DIGITIMES
   uid: '29181028'
   name: DIGITIMES
@@ -914,6 +1407,13 @@ accounts:
   risk: low
   replies: false
   note: '台湾科技媒体(1万粉): 供应链消息进英文圈通道; 注意近1年未发帖, 观察项; 验号时已3509天未发帖(低活跃观察)'
+  followers: 10406
+  positioning: 科技媒体视频分享
+  tags:
+  - 科技
+  - 视频
+  - YouTube
+  - 产业
 - handle: zerohedge
   uid: '18856867'
   name: zerohedge
@@ -928,6 +1428,13 @@ accounts:
   risk: low
   replies: false
   note: '另类叙事聚合(337万粉): 团队运作; 情绪风向标, 需强过滤'
+  followers: 3395566
+  positioning: 宏观市场新闻评论
+  tags:
+  - 宏观
+  - 美联储
+  - 金融市场
+  - 地缘政治
 - handle: LizAnnSonders
   uid: '363561760'
   name: Wilfred Frost
@@ -942,6 +1449,13 @@ accounts:
   risk: low
   replies: false
   note: 'Schwab首席投资策略师(4.8万粉): 机构背书路径; 对照组'
+  followers: 814161
+  positioning: 宏观经济与市场策略
+  tags:
+  - 宏观
+  - 经济数据
+  - 美联储
+  - 投资者情绪
 - handle: NickTimiraos
   uid: '59603406'
   name: Nick Timiraos
@@ -956,6 +1470,13 @@ accounts:
   risk: low
   replies: false
   note: 'WSJ美联储记者(49万粉): Fed消息实际首发口, 不可复制但必须跟'
+  followers: 491314
+  positioning: 美联储与央行报道
+  tags:
+  - 美联储
+  - 央行
+  - 利率
+  - 经济政策
 - handle: CathieDWood
   uid: '2361631088'
   name: Cathie Wood
@@ -969,6 +1490,14 @@ accounts:
   risk: low
   replies: false
   note: 'ARK创始人(291万粉): 明星基金经理, 每日交易明细有信号价值'
+  followers: 2942191
+  positioning: 颠覆性创新投资
+  tags:
+  - 创新科技
+  - AI
+  - 太空
+  - 投资
+  - ARK
 - handle: jimcramer
   uid: '14216123'
   name: Jim Cramer
@@ -982,6 +1511,13 @@ accounts:
   risk: medium
   replies: false
   note: 'CNBC Mad Money(248万粉): 电视人格; 反指/情绪参考'
+  followers: 2482610
+  positioning: 美股热点与期权评论
+  tags:
+  - 美股
+  - 科技股
+  - 期权
+  - 热门股
 - handle: RampCapitalLLC
   uid: '2214652482'
   name: Ramp Capital
@@ -995,6 +1531,14 @@ accounts:
   risk: medium
   replies: false
   note: '匿名金融段子(164万粉): 匿名号天花板证明; 情绪参考'
+  followers: 1702666
+  positioning: 金融创投幽默评论
+  tags:
+  - 创投
+  - 股市
+  - 幽默
+  - 政治
+  - 科技
 - handle: LynAldenContact
   uid: '1390842784261853186'
   name: 𝐓𝐗𝐌𝐂
@@ -1009,6 +1553,13 @@ accounts:
   risk: low
   replies: false
   note: '独立宏观分析师(9.4万粉): 工程师出身无机构背书, 长文质量高'
+  followers: 1135405
+  positioning: 宏观货币与AI趋势
+  tags:
+  - 宏观
+  - 货币
+  - 比特币
+  - AI
 - handle: SawyerMerritt
   uid: '243013409'
   name: Sawyer Merritt
@@ -1022,6 +1573,13 @@ accounts:
   risk: medium
   replies: false
   note: '只做特斯拉(112万粉): 单公司垂类极致'
+  followers: 1133886
+  positioning: 特斯拉及电动车新闻
+  tags:
+  - 特斯拉
+  - 电动车
+  - 太空
+  - 科技
 - handle: markminervini
   uid: '105353526'
   name: Mark Minervini
@@ -1035,6 +1593,14 @@ accounts:
   risk: medium
   replies: false
   note: '交易冠军方法论IP(76万粉): 技术面+交易心理'
+  followers: 764509
+  positioning: 美股交易冠军，技术面与心理
+  tags:
+  - 交易
+  - 美股
+  - 技术分析
+  - 投资心理
+  - 美联储
 - handle: LukeGromen
   uid: '2936015319'
   name: Luke Gromen
@@ -1049,6 +1615,13 @@ accounts:
   risk: low
   replies: false
   note: '美元体系单一叙事(62万粉): 宏观另类视角'
+  followers: 627591
+  positioning: 宏观与黄金评论
+  tags:
+  - 宏观
+  - 黄金
+  - 财政
+  - 通胀
 - handle: garyblack00
   uid: '1161703589942878208'
   name: Gary Black
@@ -1062,6 +1635,14 @@ accounts:
   risk: low
   replies: false
   note: '公开EPS模型(58万粉): TSLA预测透明化接受质疑'
+  followers: 581115
+  positioning: 美股宏观与科技股策略
+  tags:
+  - 美股
+  - 美联储
+  - 科技股
+  - 宏观
+  - 利率
 - handle: JonahLupton
   uid: '1674054161661345794'
   name: Nebius
@@ -1075,6 +1656,14 @@ accounts:
   risk: medium
   replies: false
   note: '公开真实持仓(3.7万粉): 透明化路线'
+  followers: 554566
+  positioning: 成长股对冲基金观点
+  tags:
+  - 成长股
+  - 对冲基金
+  - AI
+  - 科技
+  - 股票分析
 - handle: QCompounding
   uid: '1535311072181231617'
   name: Compounding Quality
@@ -1088,6 +1677,14 @@ accounts:
   risk: medium
   replies: false
   note: '匿名教育型(49万粉): 免费PDF换订阅'
+  followers: 492129
+  positioning: 质量股价值投资教育
+  tags:
+  - 价值投资
+  - 质量股
+  - 巴菲特
+  - 长期投资
+  - 投资教育
 - handle: GerberKawasaki
   uid: '349249475'
   name: Ross Gerber
@@ -1101,6 +1698,14 @@ accounts:
   risk: medium
   replies: false
   note: '观点型基金经理(43万粉): Ross Gerber'
+  followers: 430003
+  positioning: 科技与创新投资，特斯拉批评
+  tags:
+  - 特斯拉
+  - AI
+  - 创新
+  - 投资
+  - FSD
 - handle: FinanceLancelot
   uid: '1265428695939981318'
   name: Financelot
@@ -1115,6 +1720,14 @@ accounts:
   risk: low
   replies: false
   note: '匿名数据截图流(36万粉): 宏观数据快照'
+  followers: 365190
+  positioning: 期权大单与市场异动追踪
+  tags:
+  - 期权
+  - 异动
+  - 市场操纵
+  - 科技股
+  - 投机
 - handle: TaviCosta
   uid: '207690854'
   name: Peter Spina ⚒ GoldSeek | SilverSeek
@@ -1129,6 +1742,14 @@ accounts:
   risk: low
   replies: false
   note: 'Crescat Capital(11万粉): 每日一张自制宏观图表'
+  followers: 322695
+  positioning: 全球宏观与价值投资
+  tags:
+  - 宏观
+  - 利率
+  - 通胀
+  - 估值
+  - 矿业
 - handle: michaelbatnick
   uid: '149571760'
   name: Eric Balchunas
@@ -1142,6 +1763,14 @@ accounts:
   risk: medium
   replies: false
   note: 'Ritholtz研究总监(62万粉): 播客/写作; 更新稀疏'
+  followers: 207593
+  positioning: 金融圈投资评论与社交
+  tags:
+  - 投资
+  - 评论
+  - 市场
+  - 书籍
+  - 社交
 - handle: dollarsanddata
   uid: '814964403284115457'
   name: Nick Maggiulli
@@ -1155,6 +1784,14 @@ accounts:
   risk: low
   replies: false
   note: '数据驱动个人理财(19万粉): Nick Maggiulli'
+  followers: 189958
+  positioning: 个人理财与投资心理
+  tags:
+  - 财富管理
+  - 投资心理
+  - 财务独立
+  - 数据研究
+  - 长期投资
 - handle: jessefelder
   uid: '1473431'
   name: Jesse Felder
@@ -1169,6 +1806,13 @@ accounts:
   risk: low
   replies: false
   note: 长期唱空视角(17万粉); 注意近8月未发帖; 验号时已261天未发帖(低活跃观察)
+  followers: 171043
+  positioning: 美股市场与泡沫分析
+  tags:
+  - 美股
+  - 泡沫
+  - 市场情绪
+  - 盈利
 - handle: ericjackson
   uid: '818071'
   name: Eric Jackson
@@ -1182,6 +1826,13 @@ accounts:
   risk: medium
   replies: false
   note: '科技股公开喊单(17万粉): STKK/为持仓造势, 立场强'
+  followers: 173283
+  positioning: 预测市场与宏观事件
+  tags:
+  - 预测市场
+  - 比特币
+  - 宏观
+  - 政治
 - handle: DanielTNiles
   uid: '1948086848'
   name: Dan Niles
@@ -1195,6 +1846,13 @@ accounts:
   risk: low
   replies: false
   note: '前对冲基金经理(13万粉): Satori Fund, 观点周频'
+  followers: 133503
+  positioning: 科技与市场策略笔记
+  tags:
+  - AI
+  - 科技股
+  - 宏观
+  - 市场策略
 - handle: modestproposal1
   uid: '355866075'
   name: modest proposal
@@ -1209,6 +1867,13 @@ accounts:
   risk: medium
   replies: false
   note: '匿名买方(12.5万粉): 有话才发, 低频高质量'
+  followers: 125741
+  positioning: 商业案例与消费观察
+  tags:
+  - 商业
+  - 消费
+  - 农业
+  - 市场分析
 - handle: dividendology
   uid: '1509705643418128399'
   name: Dividendology
@@ -1222,6 +1887,13 @@ accounts:
   risk: low
   replies: false
   note: '股息策略垂类(12万粉): 数据表格化'
+  followers: 125021
+  positioning: 股息股投资机会分享
+  tags:
+  - 股息
+  - 价值投资
+  - 现金流
+  - 高收益
 - handle: LanceRoberts
   uid: '49958733'
   name: Lance Roberts
@@ -1236,6 +1908,13 @@ accounts:
   risk: low
   replies: false
   note: 'RIA首席策略(10万粉): 宏观+组合管理'
+  followers: 105384
+  positioning: 宏观策略与市场风险解读
+  tags:
+  - 宏观
+  - 美联储
+  - 市场风险
+  - 策略
 - handle: biancoresearch
   uid: '188369814'
   name: Jim Bianco
@@ -1250,6 +1929,13 @@ accounts:
   risk: low
   replies: false
   note: 'Bianco Research 创始人(77万粉): 利率/债市宏观日更, 图表专业; 勘误2026-09-03: 昨日验号脚本将首条转推(Josh Young)误认作者, 已修正'
+  followers: 777538
+  positioning: 宏观研究与政策评论
+  tags:
+  - 宏观
+  - 美联储
+  - 利率
+  - 政策
 - handle: buffett_taro
   uid: '720578402135068673'
   name: バフェット太郎
@@ -1264,6 +1950,13 @@ accounts:
   risk: medium
   replies: false
   note: '日语美股线头部(36万粉): 高股息策略主张; 匿名IP'
+  followers: 362990
+  positioning: 日文国际投资与宏观分析
+  tags:
+  - 宏观
+  - 国际分散
+  - 美股
+  - 日文
 - handle: komcdspxl
   uid: '1026412939211730944'
   name: 全力米国株
@@ -1278,6 +1971,12 @@ accounts:
   risk: medium
   replies: false
   note: '美股新闻+股价解说(14万粉): 高频搬运型'
+  followers: 140368
+  positioning: 情绪化交易吐槽
+  tags:
+  - 交易
+  - 情绪
+  - 市场
 - handle: strainerjp
   uid: '804273411325202432'
   name: ストレイナー｜米国決算の美味しいところ
@@ -1292,6 +1991,13 @@ accounts:
   risk: low
   replies: false
   note: '美股财报可视化摘要(7.8万粉): 日语版EconomyApp形态, 团队媒体'
+  followers: 77745
+  positioning: 美企财报要点日文解读
+  tags:
+  - 财报
+  - AI
+  - 基础设施
+  - 日文
 - handle: taritariblog
   uid: '1060835148340449280'
   name: たりたり
@@ -1306,6 +2012,13 @@ accounts:
   risk: low
   replies: false
   note: '前基金经理个股分析(7.7万粉): 日语个股深度最高水位'
+  followers: 76599
+  positioning: 时事经济数据解说
+  tags:
+  - 时事
+  - 经济
+  - 亚洲
+  - 评论
 - handle: us_stock_invest
   uid: '896850496278876160'
   name: ユーエスさん🇺🇸米国株投資🍺🥃🍷🍶⚽
@@ -1320,6 +2033,13 @@ accounts:
   risk: medium
   replies: false
   note: '综合型个人号(6.2万粉): 无明确垂类'
+  followers: 62052
+  positioning: 美股投资信息分享
+  tags:
+  - 美股
+  - 宏观经济
+  - 科技股
+  - 债券
 - handle: ActiveArk
   uid: '1303533456253620225'
   name: ARK trade information
@@ -1334,6 +2054,13 @@ accounts:
   risk: medium
   replies: false
   note: 'ARK交易明细日语化(1.6万粉): 纯语言套利; 注意近4年未发帖, 观察项; 验号时已1470天未发帖(低活跃观察)'
+  followers: 15787
+  positioning: ARK与美股资讯翻译
+  tags:
+  - ARK
+  - 美股
+  - Cramer
+  - 翻译
 - handle: NRAGR
   uid: '118404243'
   name: Makabee【ジム・クレイマー応援ch】
@@ -1348,6 +2075,12 @@ accounts:
   risk: low
   replies: false
   note: 'Cramer节目日语总结(1.2万粉): 语言套利; Mad Money和译'
+  followers: 12164
+  positioning: Jim Cramer节目解读
+  tags:
+  - 美股
+  - Jim Cramer
+  - Mad Money
 - handle: hiromethods
   uid: '3377328194'
   name: 複利のチカラで億り人
@@ -1361,6 +2094,13 @@ accounts:
   risk: medium
   replies: false
   note: '连续增息股特化(1万粉): 单一策略垂类; 近期低频'
+  followers: 9996
+  positioning: 美股投资理财方法
+  tags:
+  - 美股
+  - 增配股
+  - 理财
+  - 亚马逊
 - handle: mifsee
   uid: '806804923203534848'
   name: MiFsee 🌐 米国株×深堀り分析
@@ -1375,6 +2115,13 @@ accounts:
   risk: medium
   replies: false
   note: '美股深度挖掘(1933粉): 定位正确竞争极少, 小而美观察'
+  followers: 1926
+  positioning: 美股个股分析实践
+  tags:
+  - 美股
+  - 个股分析
+  - 成长股
+  - 宏观
 - handle: NIKKEIxTECH
   uid: '943043204131123200'
   name: 日経クロステック（xTECH）
@@ -1389,6 +2136,12 @@ accounts:
   risk: low
   replies: false
   note: '日经クロステック(4.9万粉): 日语产业链信息主要信源, 机构号'
+  followers: 49805
+  positioning: 科技产业新闻报道
+  tags:
+  - 科技
+  - IT
+  - 前沿技术
 - handle: traders_web
   uid: '271215338'
   name: トレーダーズ・ウェブ
@@ -1402,6 +2155,13 @@ accounts:
   risk: low
   replies: false
   note: 'トレーダーズ・ウェブ(4.5万粉): 盘中快讯为主'
+  followers: 45401
+  positioning: 日本股市快讯
+  tags:
+  - 日股
+  - 市场快讯
+  - 个股
+  - FX
 - handle: irbank
   uid: '2605418089'
   name: IRBANK- 企業分析・銘柄発掘
@@ -1415,6 +2175,12 @@ accounts:
   risk: medium
   replies: false
   note: 'IRBANK(9673粉): 日股财务数据平台, 企业分析工具号'
+  followers: 9730
+  positioning: 企业IR信息查询
+  tags:
+  - 财报
+  - IR
+  - 日本企业
 - handle: Omdia_Japan
   uid: '1314102586987835392'
   name: Omdia Japan
@@ -1429,6 +2195,13 @@ accounts:
   risk: low
   replies: false
   note: 'Omdia日本(569粉): 南川明所属机构号; 更新月频; 验号时已33天未发帖(低活跃观察)'
+  followers: 573
+  positioning: 科技市场研究资讯
+  tags:
+  - 科技市场
+  - 研究
+  - AI
+  - 显示器
 - handle: SemiconPortal
   uid: '2373035642'
   name: EmergingTech frm JPN
@@ -1443,6 +2216,13 @@ accounts:
   risk: low
   replies: false
   note: '半导体门户(7粉): 名存实亡, 仅存档观察; 验号时已4474天未发帖(低活跃观察)'
+  followers: 7
+  positioning: 半导体产业新闻速递
+  tags:
+  - 半导体
+  - 日本
+  - 制造
+  - 投资
 - handle: nikkei
   uid: '169480493'
   name: 日本経済新聞 電子版（日経電子版）
@@ -1457,6 +2237,12 @@ accounts:
   risk: low
   replies: false
   note: '日本経済新聞官号(392万粉): 权威媒体, 与机构源重叠注意'
+  followers: 3920146
+  positioning: 日经新闻官方发布
+  tags:
+  - 日本经济
+  - 财经新闻
+  - 宏观
 - handle: tesuta001
   uid: '111603894'
   name: テスタ
@@ -1470,6 +2256,13 @@ accounts:
   risk: medium
   replies: false
   note: '日股传奇交易员(119万粉): 靠人格不靠内容; 情绪参考'
+  followers: 1194813
+  positioning: 日本散户投资记录
+  tags:
+  - 日本股票
+  - 长期投资
+  - 交易
+  - 个人投资
 - handle: goto_finance
   uid: '1629037738975723521'
   name: ReHacQ 【公式】
@@ -1483,6 +2276,13 @@ accounts:
   risk: medium
   replies: false
   note: '前日经记者独立(8.9万粉): 把复杂的东西讲明白的表达方式'
+  followers: 816134
+  positioning: 日本宏观经济与市场解读
+  tags:
+  - 日本央行
+  - 汇率
+  - 宏观
+  - 投资
 - handle: cissan_9984
   uid: '2432059932'
   name: cis@株 先物 FX 新信長の野望
@@ -1496,6 +2296,12 @@ accounts:
   risk: medium
   replies: false
   note: 'cis传奇交易员(79万粉): 短线情绪参考'
+  followers: 790076
+  positioning: 日本股民交易吐槽
+  tags:
+  - 股票
+  - 交易
+  - 日本股市
 - handle: yurumazu
   uid: '948208460822339584'
   name: Emin Yurumazu (エミンユルマズ)
@@ -1510,6 +2316,13 @@ accounts:
   risk: low
   replies: false
   note: '宏观/外国人视角(53万粉): エミン・ユルマズ'
+  followers: 529430
+  positioning: 汇率与央行政策评论
+  tags:
+  - 汇率
+  - 日银
+  - 宏观
+  - 策略
 - handle: hirosetakao
   uid: '92957264'
   name: …
@@ -1524,6 +2337,13 @@ accounts:
   risk: low
   replies: false
   note: '日语美股分析第一人(29万粉): 広瀬隆雄, 风格老派'
+  followers: 292958
+  positioning: 宏观策略与IPO分析
+  tags:
+  - 美股
+  - 宏观
+  - 日银
+  - IPO
 - handle: tapazou29
   uid: '782008204096000000'
   name: たぱぞう🐘/米国株/不動産
@@ -1537,6 +2357,13 @@ accounts:
   risk: medium
   replies: false
   note: '指数/资产配置面向新手(25万粉): たぱぞう'
+  followers: 250413
+  positioning: 美股与不动产投资分享
+  tags:
+  - 美股
+  - 房地产
+  - 投资
+  - 资产运用
 - handle: momiage0088
   uid: '949765735'
   name: おむすび侍
@@ -1551,6 +2378,13 @@ accounts:
   risk: medium
   replies: false
   note: '在美日本人·美股(3593粉): 小号观察; 注意名字含毛 but 粉丝少'
+  followers: 211142
+  positioning: 在美视角美股分析
+  tags:
+  - 美股
+  - 美联储
+  - 投资
+  - 美国政治
 - handle: marikomabuchi
   uid: '1529701405912539136'
   name: 【公式】TOKYO FM『馬渕・渡辺の#ビジトピ』
@@ -1564,6 +2398,13 @@ accounts:
   risk: low
   replies: false
   note: '分析师/媒体常客(2.4万粉): 馬渕磨理子; 更新月频; 验号时已53天未发帖(低活跃观察)'
+  followers: 157649
+  positioning: 财经评论与投资教育
+  tags:
+  - 财经
+  - 投资
+  - 日本经济
+  - 评论
 - handle: churio777
   uid: '847223574586769408'
   name: ちゅり男｜医師×インデックス投資
@@ -1577,6 +2418,13 @@ accounts:
   risk: medium
   replies: false
   note: '医生×指数投资(4.3万粉): ちゅり男'
+  followers: 43373
+  positioning: 日本指数投资科普
+  tags:
+  - 指数投资
+  - NISA
+  - 资产配置
+  - 日本
 - handle: america_kabu
   uid: '4235584812'
   name: アメリカ部/米国株投資アンテナ
@@ -1591,6 +2439,13 @@ accounts:
   risk: low
   replies: false
   note: '美股资讯聚合(2.9万粉): アメリカ部; 近1年未发帖, 观察项; 验号时已328天未发帖(低活跃观察)'
+  followers: 29252
+  positioning: 美股AI半导体资讯
+  tags:
+  - 美股
+  - AI
+  - 半导体
+  - NVIDIA
 - handle: MacroMicroMe
   uid: '1295255955404292096'
   name: MacroMicro
@@ -1605,6 +2460,14 @@ accounts:
   risk: low
   replies: false
   note: '财经M平方(2.3万粉): 台湾最大总经平台, X号已转英文运营'
+  followers: 23410
+  positioning: 宏观市场数据与央行政策
+  tags:
+  - 宏观
+  - 央行
+  - 利率
+  - 美联储
+  - 日本
 - handle: statementdog
   uid: '1801640503575986176'
   name: StatementDog | AI & Tech Supply Chains
@@ -1619,6 +2482,13 @@ accounts:
   risk: low
   replies: false
   note: '財報狗(3289粉): X定位已改AI&Tech Supply Chains, 转英文'
+  followers: 3523
+  positioning: AI硬件供应链研究
+  tags:
+  - AI
+  - 供应链
+  - 半导体
+  - 硬件
 - handle: cnYES
   uid: '20749201'
   name: 鉅亨全球財經快報
@@ -1632,6 +2502,13 @@ accounts:
   risk: low
   replies: false
   note: '鉅亨網(1305粉): 台湾财经门户, X号基本挂机; 近17月未发帖; 验号时已6076天未发帖(低活跃观察)'
+  followers: 1303
+  positioning: 财经新闻快讯
+  tags:
+  - 财经
+  - 台湾
+  - 美股
+  - 市场
 - handle: StockFeel
   uid: '2593661953'
   name: StockFeel
@@ -1645,6 +2522,12 @@ accounts:
   risk: low
   replies: false
   note: '股感(9粉): 名存实亡, 仅存档观察; 验号时已4448天未发帖(低活跃观察)'
+  followers: 9
+  positioning: 股票交易学习平台
+  tags:
+  - 股票
+  - 学习
+  - 交易
 - handle: HAOHONG_CFA
   uid: '41902408'
   name: Hao HONG 洪灝, CFA
@@ -1659,6 +2542,13 @@ accounts:
   risk: low
   replies: false
   note: '洪灝(35万粉): 华语圈唯一X破30万宏观, 以英文为主'
+  followers: 354819
+  positioning: 中国宏观市场策略
+  tags:
+  - 宏观
+  - 中国
+  - 策略
+  - 市场
 - handle: jukan05
   uid: '1836240683268759552'
   name: Jukan
@@ -1673,6 +2563,13 @@ accounts:
   risk: low
   replies: false
   note: '原@Jukanlosreve改名(2026-09-03 grok核实改名记录+本人声明): 韩国存储/HBM供应链韩文消息英文化(20.8万粉), 三星/海力士一手渠道; 语言套利范式标杆, 半导体链核心源'
+  followers: 212323
+  positioning: 韩国半导体产业动态
+  tags:
+  - 半导体
+  - 韩国
+  - 存储芯片
+  - NAND
 - handle: fabknowledge
   uid: '1440064744107298826'
   name: Fabricated Knowledge
@@ -1687,11 +2584,1206 @@ accounts:
   risk: low
   replies: false
   note: 'Doug O''Laughlin 半导体通讯品牌号(3.4万粉, SemiAnalysis 团伙): 化工/材料/半导体深度; 个人号 @FoolAllTheTime 私密不活跃(FxTwitter 500), 公开发言集中此号'
-defaults:
-  per_account_limit: 50
-  account_delay_seconds: 1
-  window: yesterday_start_to_now
-  min_priority: low
+  followers: 34366
+  positioning: 半导体行业投资分析
+  tags:
+  - 半导体
+  - 投资
+  - AI
+  - HBM
+- handle: cnfinancewatch
+  uid: '137332930'
+  name: 华尔街观察 Xtrader
+  homepage: https://x.com/cnfinancewatch
+  markets:
+  - 全球
+  role: kol
+  lang: zh
+  priority: medium
+  risk: medium
+  replies: false
+  note: '同事收集批次(2026-09-17); 粉丝12万; bio: PhD | Professor | Investor |中美股市事件、研报、资金'
+  followers: 127857
+  positioning: 中美股市策略分析
+  tags:
+  - A股
+  - 美股
+  - 策略
+  - 资金
+  - AI
+- handle: TraderS18
+  uid: '1663749852965240834'
+  name: TraderS | 缺德道人
+  homepage: https://x.com/TraderS18
+  markets:
+  - 全球
+  role: kol
+  lang: zh
+  priority: medium
+  risk: medium
+  replies: false
+  note: '同事收集批次(2026-09-17); 粉丝6万; bio: 宏观 × 美股 × Crypto 交易员
+
+    拆解美联储、战争与全球资金流
+
+    捕捉 美'
+  followers: 67267
+  positioning: 宏观美股加密交易笔记
+  tags:
+  - 美联储
+  - 原油
+  - BTC
+  - 风险资产
+  - 全球资金流
+- handle: thankUcrypto
+  uid: '705564530936418304'
+  name: allincrypto 熬鹰资本 🇨🇳
+  homepage: https://x.com/thankUcrypto
+  markets:
+  - 全球
+  role: kol
+  lang: zh
+  priority: medium
+  risk: medium
+  replies: false
+  note: '同事收集批次(2026-09-17); 粉丝17万; bio: |PNL 120K—10M|助理:@xiaoweio9983
+
+    币安：https:'
+  followers: 176593
+  positioning: 加密合约交易与行情分享
+  tags:
+  - 合约
+  - 行情
+  - 币安
+  - 交易
+  - 美股
+- handle: feifan7686
+  uid: '1369089513473990658'
+  name: 飞凡
+  homepage: https://x.com/feifan7686
+  markets:
+  - 全球
+  role: kol
+  lang: zh
+  priority: medium
+  risk: medium
+  replies: false
+  note: '同事收集批次(2026-09-17); 粉丝4万; bio: 只输出价值 ｜纯宏观与金融行业内容 | 长期主义 | 宏观 | 二级 | 加密圈'
+  followers: 49762
+  positioning: 加密周期与宏观分析
+  tags:
+  - 加密周期
+  - 宏观
+  - 美股
+  - 二级市场
+  - 加密经济学
+- handle: WangNextDoor2
+  uid: '1378320364376219655'
+  name: WangNextDoor
+  homepage: https://x.com/WangNextDoor2
+  markets:
+  - 全球
+  role: kol
+  lang: zh
+  priority: medium
+  risk: medium
+  replies: false
+  note: '同事收集批次(2026-09-17); 粉丝10万; bio: Engineer/entrepreneur in CA, Tesla/NVDA/'
+  followers: 108294
+  positioning: 科技股与AI产业观察
+  tags:
+  - AI
+  - 特斯拉
+  - 英伟达
+  - 科技股
+  - 机器人
+- handle: yiguxia
+  uid: '885782951786446848'
+  name: 易先森聊财经📈
+  homepage: https://x.com/yiguxia
+  markets:
+  - 全球
+  role: kol
+  lang: zh
+  priority: medium
+  risk: medium
+  replies: false
+  note: '同事收集批次(2026-09-17); 粉丝7万; bio: 谈谈股市，讲讲段子，看过一堆废纸，也有几斤故事。每晚更新（个人复盘心得，不作为任'
+  followers: 70718
+  positioning: A股市场复盘与段子
+  tags:
+  - A股
+  - 复盘
+  - 市场情绪
+  - 量化
+  - 产业逻辑
+- handle: qinbafrank
+  uid: '1338075202798809089'
+  name: qinbafrank
+  homepage: https://x.com/qinbafrank
+  markets:
+  - 全球
+  role: kol
+  lang: zh
+  priority: medium
+  risk: medium
+  replies: false
+  note: '同事收集批次(2026-09-17); 粉丝15万; bio: Investor in AI、Crypto、TMT，跟踪最前沿科技趋势、野生宏观'
+  followers: 158641
+  positioning: AI加密TMT趋势投资
+  tags:
+  - AI
+  - Crypto
+  - 宏观
+  - 流动性
+  - 周期投资
+- handle: TJ_Research
+  uid: '1620475218627121153'
+  name: 投资TALK君
+  homepage: https://x.com/TJ_Research
+  markets:
+  - 全球
+  role: kol
+  lang: zh
+  priority: medium
+  risk: medium
+  replies: false
+  note: '同事收集批次(2026-09-17); 粉丝9万; bio: AI观察员；美联储观察员；资管打工人.
+
+    美股，宏观，偶尔CRYPTO
+
+    油管17万'
+  followers: 93244
+  positioning: 美股宏观与AI观察
+  tags:
+  - AI
+  - 美联储
+  - 美股
+  - 宏观
+  - Crypto
+- handle: hanking66
+  uid: '1355223833137930240'
+  name: 美股仙人（全网吹存第一人）
+  homepage: https://x.com/hanking66
+  markets:
+  - 全球
+  role: kol
+  lang: zh
+  priority: medium
+  risk: medium
+  replies: false
+  note: '同事收集批次(2026-09-17); 粉丝4万; bio: 十年美股投资经验，复利收益2800%
+
+    Discord：https://disco'
+  followers: 47840
+  positioning: 美股长期价值投资分享
+  tags:
+  - 美股
+  - 谷歌
+  - 长期持有
+  - 价值投资
+  - Discord
+- handle: CausMoney
+  uid: '1305905708018348032'
+  name: 加美财经caus.com
+  homepage: https://x.com/CausMoney
+  markets:
+  - 全球
+  role: kol
+  lang: zh
+  priority: medium
+  risk: medium
+  replies: false
+  note: '同事收集批次(2026-09-17); 粉丝4万; bio: 加美财经是中文小众政经商业媒体，为全球华人提供来自主流媒体的新闻新论新知，适合愿'
+  followers: 49996
+  positioning: 全球政经商业新闻编译
+  tags:
+  - 全球
+  - 政经
+  - 商业
+  - 媒体
+  - 时事
+- handle: fxtrader
+  uid: '1059638356609396736'
+  name: 外汇交易员
+  homepage: https://x.com/fxtrader
+  markets:
+  - 全球
+  role: kol
+  lang: zh
+  priority: medium
+  risk: medium
+  replies: false
+  note: '同事收集批次(2026-09-17); 粉丝40万; bio: 盯紧市场，把握时机。理性客观，利益永恒。'
+  followers: 404842
+  positioning: 全球市场与政策快讯
+  tags:
+  - 宏观
+  - 数据
+  - 政策
+  - 央行
+  - 市场
+- handle: wangwatchworld
+  uid: '31083308'
+  name: 王海滨的财经闲谈
+  homepage: https://x.com/wangwatchworld
+  markets:
+  - 全球
+  role: kol
+  lang: zh
+  priority: medium
+  risk: medium
+  replies: false
+  note: '同事收集批次(2026-09-17); 粉丝24万; bio: 宏观经济，大宗商品，油管视频号搜王海滨的财经闲谈。'
+  followers: 248401
+  positioning: 宏观经济与大宗商品评论
+  tags:
+  - 宏观经济
+  - 大宗商品
+  - 日本经济
+  - 财经
+- handle: BullTheoryio
+  uid: '815942827968495616'
+  name: Bull Theory
+  homepage: https://x.com/BullTheoryio
+  markets:
+  - 全球
+  role: kol
+  lang: en
+  priority: medium
+  risk: medium
+  replies: false
+  note: '同事收集批次(2026-09-17); 粉丝24万; bio: News, Research, and all other Global mar'
+  followers: 245356
+  positioning: 全球市场与加密新闻
+  tags:
+  - 加密货币
+  - 美股
+  - 比特币
+  - 市场
+- handle: niniSweet88
+  uid: '842008997913845760'
+  name: 妮妮要翻倍
+  homepage: https://x.com/niniSweet88
+  markets:
+  - 全球
+  role: kol
+  lang: zh
+  priority: medium
+  risk: medium
+  replies: false
+  note: '同事收集批次(2026-09-17); 粉丝1万; bio: 02年大学生｜all in web3｜大学生炒币联盟创始人｜坚定的多头战士｜ 请'
+  followers: 10170
+  positioning: Web3加密投资与DeFi分析
+  tags:
+  - Web3
+  - DeFi
+  - Uniswap
+  - 加密货币
+- handle: LordWilliamUK
+  uid: '1503029991986155525'
+  name: Lord William｜UK
+  homepage: https://x.com/LordWilliamUK
+  markets:
+  - 全球
+  role: kol
+  lang: zh
+  priority: medium
+  risk: medium
+  replies: false
+  note: '同事收集批次(2026-09-17); 粉丝2万; bio: Founder of 1024 Capital, Investor, Phila'
+  followers: 23260
+  positioning: 美股加密交易与量化投资
+  tags:
+  - 美股
+  - 加密货币
+  - 量化交易
+  - BTC
+- handle: Alpha_Cat
+  uid: '1455865812942688265'
+  name: Alpha Cat
+  homepage: https://x.com/Alpha_Cat
+  markets:
+  - 全球
+  role: kol
+  lang: zh
+  priority: medium
+  risk: medium
+  replies: false
+  note: '同事收集批次(2026-09-17); 粉丝2万; bio: 投资笔记｜AI前瞻｜美企洞察｜国际局势
+
+    本人无任何投资群组，谨防诈骗'
+  followers: 20570
+  positioning: 投资笔记与美企AI洞察
+  tags:
+  - 投资笔记
+  - AI
+  - 美股
+  - 国际局势
+- handle: Banana3Stocks
+  uid: '1098312581951807488'
+  name: Banana3
+  homepage: https://x.com/Banana3Stocks
+  markets:
+  - 全球
+  role: kol
+  lang: en
+  priority: medium
+  risk: medium
+  replies: false
+  note: '同事收集批次(2026-09-17); 粉丝15万; bio: Professional Trader/Investor, 25yrs expe'
+  followers: 153897
+  positioning: 美股实盘交易与订阅推荐
+  tags:
+  - 美股
+  - 交易
+  - 技术分析
+  - 订阅
+- handle: LeopoldTracker_
+  uid: '1539998845718781953'
+  name: Leopold Stock Tracker
+  homepage: https://x.com/LeopoldTracker_
+  markets:
+  - 全球
+  role: kol
+  lang: en
+  priority: medium
+  risk: medium
+  replies: false
+  note: '同事收集批次(2026-09-17); 粉丝70万; bio: Tracking Leopold Aschenbrenner''s trades '
+  followers: 701047
+  positioning: 追踪Leopold交易动态
+  tags:
+  - 持仓跟踪
+  - 美股
+  - 对冲基金
+  - 投资
+- handle: PhotonCap
+  uid: '1917312438858588161'
+  name: Photon Capital
+  homepage: https://x.com/PhotonCap
+  markets:
+  - 全球
+  role: kol
+  lang: en
+  priority: medium
+  risk: medium
+  replies: false
+  note: '同事收集批次(2026-09-17); 粉丝6万; bio: Seeing tech through a different waveleng'
+  followers: 64346
+  positioning: 光子学与半导体研究
+  tags:
+  - 半导体
+  - 光子学
+  - 科技
+  - 内存
+- handle: Young852560
+  uid: '1999426877119942656'
+  name: Young
+  homepage: https://x.com/Young852560
+  markets:
+  - 全球
+  role: kol
+  lang: zh
+  priority: medium
+  risk: medium
+  replies: false
+  note: '同事收集批次(2026-09-17); 粉丝2万; bio: 女交易员｜币圈九年
+
+    专注比特币、黄金、美股盘面解析
+
+    用 K 线读懂资本博弈，过滤'
+  followers: 29896
+  positioning: 币圈黄金美股盘面解析
+  tags:
+  - 比特币
+  - 黄金
+  - 美股
+  - 技术分析
+- handle: pelositracker
+  uid: '1303681404631502849'
+  name: Chris Josephs
+  homepage: https://x.com/pelositracker
+  markets:
+  - 全球
+  role: kol
+  lang: en
+  priority: medium
+  risk: medium
+  replies: false
+  note: '同事收集批次(2026-09-17); 粉丝4万; bio: Co-Founder @joinautopilot 💰 Run the @pel'
+  followers: 1953158
+  positioning: 追踪政客股票交易
+  tags:
+  - 政客交易
+  - 美股
+  - 持仓
+  - 政治
+- handle: JohnsonZ91127
+  uid: '1853471066410414080'
+  name: 潘驴邓晓闲缺一
+  homepage: https://x.com/JohnsonZ91127
+  markets:
+  - 全球
+  role: kol
+  lang: zh
+  priority: medium
+  risk: medium
+  replies: false
+  note: '同事收集批次(2026-09-17); 粉丝2万; bio: 美股&区块链资深交易员，  美股15年，持 btc 10年
+
+    公众号：潘大的投研笔'
+  followers: 28112
+  positioning: 美股区块链交易分析
+  tags:
+  - 美股
+  - 区块链
+  - 比特币
+  - AI算力
+  - 交易
+- handle: IamRamenPanda
+  uid: '1008162403'
+  name: RamenPanda
+  homepage: https://x.com/IamRamenPanda
+  markets:
+  - 全球
+  role: kol
+  lang: zh
+  priority: medium
+  risk: medium
+  replies: false
+  note: '同事收集批次(2026-09-17); 粉丝9万; bio: 2017年入圈加密的老OG。老粉们从推到微博（15万粉）再到推，跟我很多年了
+
+
+    '
+  followers: 91599
+  positioning: 加密与半导体行业杂谈
+  tags:
+  - 区块链
+  - 加密货币
+  - 半导体
+  - 美股
+  - 吐槽
+- handle: SVScholar
+  uid: '79766814'
+  name: 硅谷居士
+  homepage: https://x.com/SVScholar
+  markets:
+  - 全球
+  role: kol
+  lang: zh
+  priority: medium
+  risk: medium
+  replies: false
+  note: '同事收集批次(2026-09-17); 粉丝10万; bio: 清华本科，美国计算机博士，硅谷软件工程师兼经理。
+
+    拥有20多年美股投资经验。过去'
+  followers: 101218
+  positioning: 美股指数投资与科技分析
+  tags:
+  - 美股
+  - 指数基金
+  - 巴菲特
+  - 半导体
+  - QDII
+- handle: ChineseWSJ
+  uid: '46574977'
+  name: 华尔街日报中文网
+  homepage: https://x.com/ChineseWSJ
+  markets:
+  - 全球
+  role: kol
+  lang: zh
+  priority: medium
+  risk: medium
+  replies: false
+  note: '同事收集批次(2026-09-17); 粉丝333万; bio: 感谢您关注华尔街日报中文网。我们有上千位专业记者与资深编辑遍布全球，为读者提供2'
+  followers: 3335074
+  positioning: 全球财经与深度新闻
+  tags:
+  - 财经
+  - 全球
+  - 科技
+  - 商业
+  - 时事
+- handle: RichTerry123
+  uid: '1901844074250080256'
+  name: Terry
+  homepage: https://x.com/RichTerry123
+  markets:
+  - 全球
+  role: kol
+  lang: zh
+  priority: medium
+  risk: medium
+  replies: false
+  note: '同事收集批次(2026-09-17); 粉丝3万; bio: Trader | 私募基金PM
+
+    市场投研 |  写文章讲故事'
+  followers: 32716
+  positioning: 美股宏观与科技股投研
+  tags:
+  - 美股
+  - 宏观
+  - 苹果
+  - 油价
+  - 科技股
+- handle: Kay2289123
+  uid: '2058239737522204672'
+  name: 美研芒格君
+  homepage: https://x.com/Kay2289123
+  markets:
+  - 全球
+  role: kol
+  lang: zh
+  priority: medium
+  risk: medium
+  replies: false
+  note: '同事收集批次(2026-09-17); 粉丝3万; bio: 小红书也是这个id @Kay2289123，
+
+    x仅此一号，完全没有助理。
+
+    没wh'
+  followers: 32501
+  positioning: AI模型一线与美股交易
+  tags:
+  - AI
+  - 大模型
+  - 半导体
+  - 美联储
+  - 美股
+- handle: SemiconductorsX
+  uid: '731152829289762816'
+  name: Semiconductor Insider
+  homepage: https://x.com/SemiconductorsX
+  markets:
+  - 全球
+  role: kol
+  lang: en
+  priority: medium
+  risk: medium
+  replies: false
+  note: '同事收集批次(2026-09-17); 粉丝1万; bio: Semiconductor Insider • Independent news'
+  followers: 16228
+  positioning: 半导体产业链与AI硬件
+  tags:
+  - 半导体
+  - AI硬件
+  - HBM
+  - 晶圆厂
+  - 供应链
+- handle: tuolaji2024
+  uid: '2202853256'
+  name: 拖拉机
+  homepage: https://x.com/tuolaji2024
+  markets:
+  - 全球
+  role: kol
+  lang: zh
+  priority: medium
+  risk: medium
+  replies: false
+  note: '同事收集批次(2026-09-17); 粉丝5万; bio: 15 years of experience in the technology'
+  followers: 50849
+  positioning: AI算力与科技产业观察
+  tags:
+  - AI
+  - 算力
+  - Anthropic
+  - 苹果
+  - 科技
+- handle: Satyanadella
+  uid: '20571756'
+  name: Satya Nadella
+  homepage: https://x.com/Satyanadella
+  markets:
+  - 全球
+  role: kol
+  lang: en
+  priority: medium
+  risk: medium
+  replies: false
+  note: '同事收集批次(2026-09-17); 粉丝927万; bio: Chairman and CEO at Microsoft'
+  followers: 9286798
+  positioning: 微软CEO谈AI与云计算
+  tags:
+  - AI
+  - 微软
+  - 云计算
+  - Copilot
+  - 数据中心
+- handle: Benshapiro
+  uid: '17995040'
+  name: Ben Shapiro
+  homepage: https://x.com/Benshapiro
+  markets:
+  - 全球
+  role: kol
+  lang: en
+  priority: medium
+  risk: medium
+  replies: false
+  note: '同事收集批次(2026-09-17); 粉丝886万; bio: Daily Wire co-founder, host of @benshapi'
+  followers: 8860758
+  positioning: 美国保守派政治评论
+  tags:
+  - 美国政治
+  - 保守派
+  - 时评
+  - 社会议题
+- handle: Saylor
+  uid: '18744656'
+  name: Phong Le
+  homepage: https://x.com/Saylor
+  markets:
+  - 全球
+  role: kol
+  lang: en
+  priority: medium
+  risk: medium
+  replies: false
+  note: '同事收集批次(2026-09-17); 粉丝4万; bio: @Strategy CEO | #Bitcoin | $MSTR $STRC'
+  followers: 5205421
+  positioning: 比特币信仰布道与持仓动态
+  tags:
+  - 比特币
+  - MSTR
+  - SEC
+  - 创新豁免
+- handle: Rumoreconomy
+  uid: '2888086214'
+  name: 财经真相
+  homepage: https://x.com/Rumoreconomy
+  markets:
+  - 全球
+  role: kol
+  lang: zh
+  priority: medium
+  risk: medium
+  replies: false
+  note: '同事收集批次(2026-09-17); 粉丝93万; bio: 黄金'
+  followers: 937929
+  positioning: 宏观与黄金市场评论
+  tags:
+  - 黄金
+  - 日本央行
+  - 美联储
+  - 美债
+  - 宏观
+- handle: LZRationalnvest
+  uid: '1995690021521948674'
+  name: 李志 | Rational Investing
+  homepage: https://x.com/LZRationalnvest
+  markets:
+  - 全球
+  role: kol
+  lang: zh
+  priority: medium
+  risk: medium
+  replies: false
+  note: '同事收集批次(2026-09-17); 粉丝2万; bio: 🐶金融行业底层人士。
+
+    📈美股行情观察 & 数字游民分享 & 出海探索。
+
+    🏃‍♂️'
+  followers: 27031
+  positioning: 美股观察与数字游民闲聊
+  tags:
+  - 美股
+  - 数字游民
+  - 出海
+  - 投资心态
+- handle: yijiangren
+  uid: '1959136480535908352'
+  name: Metamental | 方外之域
+  homepage: https://x.com/yijiangren
+  markets:
+  - 全球
+  role: kol
+  lang: zh
+  priority: medium
+  risk: medium
+  replies: false
+  note: '同事收集批次(2026-09-17); 粉丝2万; bio: 01年 / UI/UX Designer / Trader / INTJ
+
+    8年交'
+  followers: 26439
+  positioning: Web3交易与加密市场分析
+  tags:
+  - Web3
+  - 交易
+  - 比特币
+  - AI
+  - 加密
+- handle: CryptoPainter
+  uid: '1056818658'
+  name: Crypto_Painter
+  homepage: https://x.com/CryptoPainter
+  markets:
+  - 全球
+  role: kol
+  lang: zh
+  priority: medium
+  risk: medium
+  replies: false
+  note: '同事收集批次(2026-09-17); 粉丝9万; bio: 老朋友叫我“画师”，技术\数据分析和量化交易，提供各种刁钻角度看市场，AI重度用'
+  followers: 93994
+  positioning: 加密量化与多空数据分析
+  tags:
+  - 加密货币
+  - 量化
+  - 美债
+  - 日本央行
+  - ETF
+- handle: Agujiaofu
+  uid: '2209650961'
+  name: A股教父·宏观情绪周期
+  homepage: https://x.com/Agujiaofu
+  markets:
+  - 全球
+  role: kol
+  lang: zh
+  priority: medium
+  risk: medium
+  replies: false
+  note: '同事收集批次(2026-09-17); 粉丝3万; bio: 分享龙头、情绪、超短、中长线的贴子以及复盘、风险点位提示。做美股关注@Huawe'
+  followers: 39079
+  positioning: A股科技股情绪与复盘
+  tags:
+  - A股
+  - 科技
+  - 半导体
+  - 情绪
+  - 短线
+- handle: Print_kbar
+  uid: '1786641012087214080'
+  name: P K B 【BTC/黄金/A/美股】
+  homepage: https://x.com/Print_kbar
+  markets:
+  - 全球
+  role: kol
+  lang: zh
+  priority: medium
+  risk: medium
+  replies: false
+  note: '同事收集批次(2026-09-17); 粉丝1万; bio: ｜前私募基金经理｜
+
+    ｜做好每一笔交易｜
+
+    ｜加入小群请私信｜
+
+    ｜商务合作TG: P'
+  followers: 15557
+  positioning: 美股黄金技术面交易复盘
+  tags:
+  - 美股
+  - 黄金
+  - 技术分析
+  - 交易
+  - QQQ
+- handle: phyrexNi
+  uid: '555634740'
+  name: Phyrex
+  homepage: https://x.com/phyrexNi
+  markets:
+  - 全球
+  role: kol
+  lang: zh
+  priority: medium
+  risk: medium
+  replies: false
+  note: '同事收集批次(2026-09-17); 粉丝40万; bio: 只是个搬砖的，偶尔恰饭
+
+    不奢求，不浪费
+
+    没有群也不收费，所有内容均不构成投资建议'
+  followers: 405738
+  positioning: 加密ETF与全球资产观察
+  tags:
+  - 比特币
+  - 以太坊
+  - ETF
+  - 美债
+  - 加密
+- handle: web3annie
+  uid: '1291222903552319488'
+  name: Annie 所长
+  homepage: https://x.com/web3annie
+  markets:
+  - 全球
+  role: kol
+  lang: zh
+  priority: medium
+  risk: medium
+  replies: false
+  note: "同事收集批次(2026-09-17); 粉丝6万; bio: 关注我的都发财 \U0001F64F \nAI & 股票研究所 | Meme @memewizd |"
+  followers: 68418
+  positioning: AI美股与加密信息分享
+  tags:
+  - AI
+  - 美股
+  - 加密
+  - 长期投资
+  - 信息差
+- handle: bboczeng
+  uid: '215939847'
+  name: 勃勃OC
+  homepage: https://x.com/bboczeng
+  markets:
+  - 全球
+  role: kol
+  lang: zh
+  priority: medium
+  risk: medium
+  replies: false
+  note: '同事收集批次(2026-09-17); 粉丝22万; bio: 美股投资日报：https://boist.org，免费订阅即可阅读，东半球最理性'
+  followers: 224321
+  positioning: 美股基本面分析日报
+  tags:
+  - 美股
+  - 宏观
+  - 基本面
+  - 机构行为
+- handle: dotey
+  uid: '3178231'
+  name: 宝玉
+  homepage: https://x.com/dotey
+  markets:
+  - 全球
+  role: kol
+  lang: zh
+  priority: medium
+  risk: medium
+  replies: false
+  note: '同事收集批次(2026-09-17); 粉丝24万; bio: AI Engineer, dedicated to learning and d'
+  followers: 249631
+  positioning: AI工程与技术分享
+  tags:
+  - AI
+  - 软件工程
+  - ChatGPT
+  - 工程管理
+- handle: yuanshan0626
+  uid: '1479293966'
+  name: 远山洞见
+  homepage: https://x.com/yuanshan0626
+  markets:
+  - 全球
+  role: kol
+  lang: zh
+  priority: medium
+  risk: medium
+  replies: false
+  note: '同事收集批次(2026-09-17); 粉丝2万; bio: 宏观周期 |  加密投研 |  美股研究 |  AI x Crypto
+
+    Cycl'
+  followers: 20480
+  positioning: 宏观加密投研
+  tags:
+  - 宏观
+  - 加密
+  - 投研
+  - 美股
+  - AI
+- handle: BTCdayu
+  uid: '1403881130802225152'
+  name: 大宇
+  homepage: https://x.com/BTCdayu
+  markets:
+  - 全球
+  role: kol
+  lang: zh
+  priority: medium
+  risk: medium
+  replies: false
+  note: '同事收集批次(2026-09-17); 粉丝32万; bio: FOMO，合规安全，秒买币股
+
+    http://fomo.family/r/BTCd'
+  followers: 325489
+  positioning: 币圈美股投资分享
+  tags:
+  - 加密货币
+  - 美股
+  - MEME
+  - 实盘
+- handle: xiaomustock
+  uid: '1507631541303713793'
+  name: 川沐｜Trumoo🐮
+  homepage: https://x.com/xiaomustock
+  markets:
+  - 全球
+  role: kol
+  lang: zh
+  priority: medium
+  risk: medium
+  replies: false
+  note: '同事收集批次(2026-09-17); 粉丝28万; bio: 一个自由的AI股票大宗期权纯二级韭菜交易员 -所有内容不构成任何投资建议-不会参'
+  followers: 282025
+  positioning: 美股期权交易笔记
+  tags:
+  - 美股
+  - 期权
+  - 链上
+  - 交易
+- handle: MacroMargin
+  uid: '890076269580341248'
+  name: 宏观边际MacroMargin
+  homepage: https://x.com/MacroMargin
+  markets:
+  - 全球
+  role: kol
+  lang: zh
+  priority: medium
+  risk: medium
+  replies: false
+  note: '同事收集批次(2026-09-17); 粉丝19万; bio: Macro Analyst ，聚焦中国宏观政策、美联储风向，跟踪分析边际变化。欢'
+  followers: 198108
+  positioning: 中美宏观政策分析
+  tags:
+  - 宏观
+  - 中国政策
+  - 美联储
+  - 美债
+- handle: Tychozzz
+  uid: '1556577100693651456'
+  name: Nico投资有道
+  homepage: https://x.com/Tychozzz
+  markets:
+  - 全球
+  role: kol
+  lang: zh
+  priority: medium
+  risk: medium
+  replies: false
+  note: '同事收集批次(2026-09-17); 粉丝9万; bio: 爱投资的一枚程序员。投资导航作者，必备一站式导航网站：http://invest'
+  followers: 92800
+  positioning: 美股比特币长期投资
+  tags:
+  - 美股
+  - 比特币
+  - AI
+  - 投资
+- handle: Summer_trading
+  uid: '1726112138068959232'
+  name: Summer 在交易
+  homepage: https://x.com/Summer_trading
+  markets:
+  - 全球
+  role: kol
+  lang: zh
+  priority: medium
+  risk: medium
+  replies: false
+  note: '同事收集批次(2026-09-17); 粉丝1万; bio: 全职美股/加密交易员 📈
+
+    主攻：美股期权策略 | Pre-IPO | 宏观流动性'
+  followers: 15922
+  positioning: 美股期权策略复盘
+  tags:
+  - 美股
+  - 期权
+  - 加密
+  - 宏观
+- handle: Walden779
+  uid: '1312603407400660992'
+  name: 贝塔酱
+  homepage: https://x.com/Walden779
+  markets:
+  - 全球
+  role: kol
+  lang: zh
+  priority: medium
+  risk: medium
+  replies: false
+  note: '同事收集批次(2026-09-17); 粉丝2万; bio: 📈 US Stocks & Crypto | 🏋️Fitness | 💜INTJ'
+  followers: 20978
+  positioning: 美股加密交易记录
+  tags:
+  - 美股
+  - 加密货币
+  - 交易
+  - 行情
+- handle: _pblanknews
+  uid: '15843059'
+  name: HealthRanger
+  homepage: https://x.com/_pblanknews
+  markets:
+  - 全球
+  role: kol
+  lang: en
+  priority: medium
+  risk: medium
+  replies: false
+  note: '同事收集批次(2026-09-17); 粉丝40万; bio: IQ 150+ polymath.  Founder of all Bright'
+  followers: 65689
+  positioning: 地缘政治与UFO探秘
+  tags:
+  - 地缘政治
+  - UFO
+  - 真相
+  - 灵性
+- handle: lidangzzz
+  uid: '28940967'
+  name: lidang 立党 （劝人卖房/学CS/买SP500/纳100/OpenAI/Anthrop第一人）
+  homepage: https://x.com/lidangzzz
+  markets:
+  - 全球
+  role: kol
+  lang: zh
+  priority: medium
+  risk: medium
+  replies: false
+  note: '同事收集批次(2026-09-17); 粉丝160万; bio: co-founder @HedgehogLabHQ @Project_DARC
+
+    '
+  followers: 1609665
+  positioning: 科技创业与教育评论
+  tags:
+  - 科技
+  - 创业
+  - 教育
+  - 社会
+- handle: hellosuoha
+  uid: '1401718840535379970'
+  name: 梭教授说
+  homepage: https://x.com/hellosuoha
+  markets:
+  - 全球
+  role: kol
+  lang: zh
+  priority: medium
+  risk: medium
+  replies: false
+  note: '同事收集批次(2026-09-17); 粉丝18万; bio: 世界是一个巨大的楚门世界
+
+    TG：@hellosuoha'
+  followers: 185523
+  positioning: 加密货币市场每日晨报
+  tags:
+  - 加密货币
+  - BTC
+  - ETH
+  - 市场情绪
+- handle: KotlinerBTC
+  uid: '3039828572'
+  name: Curry_TW
+  homepage: https://x.com/KotlinerBTC
+  markets:
+  - 全球
+  role: kol
+  lang: zh
+  priority: medium
+  risk: medium
+  replies: false
+  note: '同事收集批次(2026-09-17); 粉丝1万; bio: 我不會預測股價漲跌，但我翻譯交易數據的竊竊私語，讓你明白他們在想什麼。'
+  followers: 11193
+  positioning: 美股期权与波动率分析
+  tags:
+  - 期权
+  - 隐含波动率
+  - 美股
+  - 技术分析
+- handle: xtony1314
+  uid: '1589272961235619840'
+  name: 逍遥XTony（2分钟版）
+  homepage: https://x.com/xtony1314
+  markets:
+  - 全球
+  role: kol
+  lang: zh
+  priority: medium
+  risk: medium
+  replies: false
+  note: '同事收集批次(2026-09-17); 粉丝12万; bio: 前摩根高管 | 独立交易员 | 干学创始人 | 抽象艺术家
+
+    历史成绩：实盘 5W'
+  followers: 121743
+  positioning: 币圈交易观点分享
+  tags:
+  - 币圈
+  - 交易
+  - 币安
+  - 吐槽
+- handle: yuyy614893671
+  uid: '1597654998971604992'
+  name: 金融汪
+  homepage: https://x.com/yuyy614893671
+  markets:
+  - 全球
+  role: kol
+  lang: zh
+  priority: medium
+  risk: medium
+  replies: false
+  note: '同事收集批次(2026-09-17); 粉丝7万; bio: 油管频道：金融汪 ，网址：https://www.youtube.com/@sh'
+  followers: 71197
+  positioning: 金融市场资讯解读
+  tags:
+  - 巴菲特
+  - 伯克希尔
+  - 宏观
+  - 财经
+- handle: MosesWang16
+  uid: '1533166798937407492'
+  name: Alpha投资频道_专注美股
+  homepage: https://x.com/MosesWang16
+  markets:
+  - 全球
+  role: kol
+  lang: zh
+  priority: medium
+  risk: medium
+  replies: false
+  note: '同事收集批次(2026-09-17); 粉丝0万; bio: 专注科技与关键产业链的美股市场分析；跟踪财报、政策、地缘局势与资金动向；分享高质'
+  followers: 439
+  positioning: 科技美股产业链分析
+  tags:
+  - 美股
+  - 科技
+  - 特斯拉
+  - Meta
+  - 产业链
+- handle: aleabitoreddit
+  uid: '1940360837547565056'
+  name: Serenity
+  homepage: https://x.com/aleabitoreddit
+  markets:
+  - 全球
+  role: kol
+  lang: en
+  priority: medium
+  risk: medium
+  replies: false
+  note: '同事收集批次(2026-09-17); 粉丝103万; bio: Only on X, don’t trust fake accs
+
+
+    AI/Sem'
+  followers: 1035261
+  positioning: AI与半导体供应链研究
+  tags:
+  - AI
+  - 半导体
+  - 存储芯片
+  - 供应链
+- handle: MichaelDell
+  uid: '58560480'
+  name: Michael Dell
+  homepage: https://x.com/MichaelDell
+  markets:
+  - 全球
+  role: kol
+  lang: en
+  priority: medium
+  risk: medium
+  replies: false
+  note: '同事收集批次(2026-09-17); 粉丝817万; bio: Founder, Chairman and CEO Dell Technolog'
+  followers: 8180253
+  positioning: 科技企业家个人观点
+  tags:
+  - 戴尔
+  - 科技
+  - 投资
+  - 教育
 filters:
   include_keywords:
   - piyasa
