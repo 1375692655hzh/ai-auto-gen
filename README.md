@@ -44,9 +44,26 @@ git sparse-checkout set workbench
 
 ## 快速开始（全量用户）
 
+三步（Windows；先装 [Python ≥3.10](https://www.python.org/downloads/)（推荐 3.11，安装时勾选 Add to PATH），视频配音/出片另需 [Node.js ≥20](https://nodejs.org) LTS）：
+
 ```bash
+git clone https://github.com/1375692655hzh/ai-auto-gen.git
+cd ai-auto-gen
+bin\setup-workbench.cmd      # 一键配置: pip 依赖 + npm 依赖 + 环境体检(幂等, 可重跑)
+bin\workbench-open.cmd       # 双击即用: 拉起工作台(本机数据站未开会顺带拉起)并打开浏览器
+```
+
+起来之后所有 key 配置都在网页**设置页**完成（信息源连接 / 翻译 / 成稿 / TTS / YouTube / Gemini，每项带注册来源引导）。**日常使用只需 `bin\workbench-open.cmd` 这一个命令**；详细说明见 [workbench/README.md](workbench/README.md)。
+
+<details>
+<summary>开发者 / 手动完整安装（按需展开）</summary>
+
+`bin\setup-workbench.cmd` 已覆盖**工作台必需**的依赖（fastapi/uvicorn/pyyaml/requests + 成稿增强包 + 视频 npm 依赖）；下面是全板块手动安装与逐条命令口径，供开发者/排障用：
+
+```bash
+# 手动装齐三板块依赖(工作台用户不需要) + playwright(仅腾讯元宝源需要)
 pip install -r ai-workflow/generator/requirements.txt -r global-news-sources/requirements.txt -r workbench/requirements.txt
-playwright install chromium
+pip install playwright && playwright install chromium
 
 python cli.py doctor                 # 环境体检（密钥/依赖/服务探活；发布仓未就位只算 warn）
 python cli.py sources list           # 板块一: 全部源 + 四标签 + 启用/健康状态
@@ -60,6 +77,7 @@ python cli.py flows run morning-paper --auto   # 跑每日早报(断点续跑, �
 python cli.py publish status         # 待发队列 + 发布账本
 python cli.py publish run --draft    # 草稿验证(真发需去掉 --draft 并人工确认)
 ```
+</details>
 
 ## 安全模型
 

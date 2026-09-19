@@ -8,10 +8,15 @@ cd /d "%~dp0.."
 rem 只匹配端口号: serve_lan 绑 0.0.0.0 场景也能正确判活
 netstat -ano | findstr ":8787" | findstr LISTENING >nul && exit /b 0
 if not exist data mkdir data
-where py >nul 2>nul
-if errorlevel 1 (
-  start "" /min cmd /c "python -u cli.py sources serve >> data\serve_task.log 2>&1"
-) else (
-  start "" /min cmd /c "py -3.11 -u cli.py sources serve >> data\serve_task.log 2>&1"
+rem probe python launcher with fallback (2026-09-20: py -3.11 alone breaks on
+rem Store-Python (no py launcher) or 3.12-only machines -- same fix as config.py_cmd)
+set PYEXE=
+py -3.11 -c "1" >nul 2>&1 && set PYEXE=py -3.11
+if not defined PYEXE py -3 -c "1" >nul 2>&1 && set PYEXE=py -3
+if not defined PYEXE python -c "1" >nul 2>&1 && set PYEXE=python
+if not defined PYEXE (
+  echo [ERROR] Python 3.10+ not found. Install from python.org and re-run.
+  exit /b 1
 )
+start "" /min cmd /c "%PYEXE% -u cli.py sources serve >> data\serve_task.log 2>&1"
 exit /b 0

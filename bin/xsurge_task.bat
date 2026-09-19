@@ -7,12 +7,17 @@ cd /d "%~dp0.."
 if not exist data mkdir data
 if exist data\xsurge_task.log for %%F in (data\xsurge_task.log) do if %%~zF gtr 5242880 move /y data\xsurge_task.log data\xsurge_task.1.log >nul 2>&1
 echo ===== %date% %time% 轮开始 ===== >> data\xsurge_task.log
-where py >nul 2>nul
-if errorlevel 1 (
-  python -u cli.py workbench refresh-x-surge >> data\xsurge_task.log 2>&1
-) else (
-  py -3.11 -u cli.py workbench refresh-x-surge >> data\xsurge_task.log 2>&1
+rem probe python launcher with fallback (2026-09-20: py -3.11 alone breaks on
+rem Store-Python (no py launcher) or 3.12-only machines -- same fix as config.py_cmd)
+set PYEXE=
+py -3.11 -c "1" >nul 2>&1 && set PYEXE=py -3.11
+if not defined PYEXE py -3 -c "1" >nul 2>&1 && set PYEXE=py -3
+if not defined PYEXE python -c "1" >nul 2>&1 && set PYEXE=python
+if not defined PYEXE (
+  echo [ERROR] Python 3.10+ not found. Install from python.org and re-run.
+  exit /b 1
 )
+%PYEXE% -u cli.py workbench refresh-x-surge >> data\xsurge_task.log 2>&1
 set AAG_RC=%errorlevel%
 echo ===== %date% %time% 轮结束 rc=%AAG_RC% ===== >> data\xsurge_task.log
 exit /b %AAG_RC%

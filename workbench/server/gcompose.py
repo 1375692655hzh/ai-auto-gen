@@ -109,6 +109,53 @@ _TPL_SCAFFOLD = {
 }
 
 
+# ── 用户可编辑模板库(2026-09-11 用户需求"透明可编辑/可新建删减"; 对齐人设库播种范式) ──
+# 存储 settings.json compose.templates = [{id,name,free,paid,zero}]; 同 id 覆盖内置,
+# 新 id 追加; templates_seeded=首跑播种标记(内置 13 张落成用户卡, 人人平等可删改)。
+_T_CAPS = {"name": 24, "free": 600, "paid": 600}
+
+
+def clean_tpl_card(p: dict) -> dict | None:
+    """用户模板卡消毒: id slug 化+字段白名单+长度顶; 非法返回 None。"""
+    if not isinstance(p, dict):
+        return None
+    tid = re.sub(r"[^a-z0-9_-]", "", str(p.get("id") or "").lower())[:24]
+    if not tid:
+        return None
+    out = {"id": tid, "zero": bool(p.get("zero"))}
+    for f in ("name", "free", "paid"):
+        v = re.sub(r"\s+", " ", str(p.get(f) or "")).strip()   # 骨架与内置同格式: 压单行
+        out[f] = v[:_T_CAPS[f]]
+    if not out["name"]:
+        return None
+    return out
+
+
+def tpl_lib(cfg: dict | None = None) -> dict:
+    """有效模板库 → {id: {name,free,paid,zero,user}}。内置打底, settings 同 id 覆盖;
+    templates_removed=删除墓碑(命中内置 id 直接跳过, 否则删内置卡会以出厂形态弹回——
+    2026-09-11 glm 审查 P0; 对齐 seed_tombstone 先例)。"""
+    cfg = cfg if cfg is not None else config.load()
+    comp = cfg.get("compose") or {}
+    removed = {re.sub(r"[^a-z0-9_-]", "", str(r).lower())
+               for r in comp.get("templates_removed") or [] if str(r or "").strip()}
+    lib = {tid: {"name": v[0], "free": v[1], "paid": v[2],
+                 "zero": tid in ZERO_OPINION_TEMPLATES, "user": False}
+           for tid, v in _TPL_SCAFFOLD.items() if tid not in removed}
+    for t in comp.get("templates") or []:
+        c = clean_tpl_card(t)
+        if c and c["id"] not in removed:
+            lib[c["id"]] = {**c, "user": True}
+    return lib
+
+
+def builtin_tpls() -> dict:
+    """内置模板的出厂原样(恢复默认/播种用), 不受用户覆盖影响。"""
+    return {tid: {"name": v[0], "free": v[1], "paid": v[2],
+                  "zero": tid in ZERO_OPINION_TEMPLATES, "user": False}
+            for tid, v in _TPL_SCAFFOLD.items()}
+
+
 # ── X 计权字数(grok 2026-09 核实: 拉丁=1/CJK=2/emoji=2/URL 恒=23(t.co);
 #    一期不含 NFC 规范化, meta 注明; 后续可整体换 twitter-text v3 权重表) ─────
 _URL_RE = re.compile(r"https?://\S+")
@@ -549,14 +596,32 @@ def grok_cli_ready() -> tuple[bool, str]:
     return True, exe
 
 
+def _grok_cli_env() -> dict:
+    """grok CLI 进程环境: Rust/reqwest 只读 env 代理不读 Windows 注册表——大陆裸连
+    x.ai 会话挂死零输出(2026-09-11 实测 300s 超时; 显式注入注册表代理后 7s 返回)。
+    env 已有代理或系统无代理时原样返回。"""
+    import urllib.request
+    env = dict(os.environ)
+    if env.get("HTTP_PROXY") or env.get("HTTPS_PROXY"):
+        return env
+    proxies = urllib.request.getproxies()          # env 优先, Windows 下回落注册表
+    p = proxies.get("https") or proxies.get("http")
+    if p:
+        if not p.startswith("http"):
+            p = "http://" + p
+        env["HTTP_PROXY"] = env["HTTPS_PROXY"] = p
+    return env
+
+
 def _grok_cli_call(system: str, user: str, model: str = "",
                    timeout: int = 300) -> str | None:
     """单轮无头调用 grok CLI → 正文文本。信封取 .text(实测 2026-09-11)。
     --disable-web-search + --no-subagents + 提示词护栏三重压制工具行为(防搜索污染素材数字)。"""
-    exe = grok_cli_path()
-    if not exe:
-        print("[grok-cli] 未安装 grok CLI, 本链位跳过", flush=True)
+    ready, note = grok_cli_ready()   # 预检 exe+登录态(2026-09-20): 已装未登录的会话可能
+    if not ready:                    # 挂到 300s 超时才落位——快筛直接跳过, 链落下一模型
+        print(f"[grok-cli] 跳过本链位({note})", flush=True)
         return None
+    exe = note                       # ready 分支的 note 即 CLI 可执行路径
     cmd = [exe, "-p", user, "--output-format", "json",
            "--disable-web-search", "--no-subagents", "--max-turns", "2",
            "--system-prompt-override", (system or "") + "\n\n" + _GROK_GUARD]
@@ -565,6 +630,7 @@ def _grok_cli_call(system: str, user: str, model: str = "",
     try:
         r = subprocess.run(cmd, capture_output=True, text=True,
                            encoding="utf-8", errors="replace", timeout=timeout,
+                           env=_grok_cli_env(),
                            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
     except subprocess.TimeoutExpired:               # subprocess.run 超时已杀子进程
         print(f"[grok-cli] 超时(>{timeout}s), 本链位跳过", flush=True)
@@ -621,8 +687,11 @@ def _compose_prompt(params: dict, materials: list, contexts: list,
                     tech_facts: str, opinions: dict, tickers: list) -> tuple[str, str]:
     lang = LANGS.get(params["lang"], "English")
     limit = TIER_LIMIT[params["tier"]]
-    tpl = _TPL_SCAFFOLD[params["template"]]
-    scaffold = "模板「" + tpl[0] + "」: " + (tpl[2] if params["tier"] == "paid" else tpl[1])
+    # 优先用 run_compose 传入的模板快照(生成中途库被删/改不失锚), 兜底才重读库
+    tpl = params.get("_tpl") or tpl_lib().get(params["template"]) \
+        or builtin_tpls()[TPL_DEFAULT]
+    scaffold = "模板「" + tpl["name"] + "」: " + \
+        ((tpl["paid"] or tpl["free"]) if params["tier"] == "paid" else tpl["free"])
     mat = "\n\n".join(f"【素材{i + 1}·{m.get('source')} {m.get('time')}】\n{m.get('text')}"
                       for i, m in enumerate(materials))
     sup = "\n".join(contexts) if contexts else "(无)"
@@ -817,10 +886,17 @@ def run_compose(request: dict) -> tuple[dict, int]:
         return {"error": "no_items", "hint": "先勾选参与生成的素材"}, 4
     modules = [m for m in (request.get("modules") or []) if m in MODULES]
     tpl_req = _TPL_LEGACY.get(request.get("template"), request.get("template"))
+    lib = tpl_lib()                                # 用户模板库覆盖内置(2026-09-11 可编辑模板)
     params = {"platform": request.get("platform") if request.get("platform") in PLATFORMS else "x",
               "lang": request.get("lang") if request.get("lang") in LANGS else "en",
               "tier": request.get("tier") if request.get("tier") in TIER_LIMIT else "free",
-              "template": tpl_req if tpl_req in TEMPLATES else TPL_DEFAULT}
+              "template": tpl_req if tpl_req in lib else TPL_DEFAULT}
+    # 模板快照(glm P1: 行情/聚合耗时数分钟, 中途被删/改时 666/993 两处不得再重读库)。
+    # 下划线键为进程内快照, 落盘前剔除。
+    params["_tpl"] = lib.get(params["template"]) or builtin_tpls()[TPL_DEFAULT]
+    tpl_fallback_note = ""
+    if tpl_req and tpl_req != params["template"]:
+        tpl_fallback_note = f"模板 {tpl_req} 已删除或不存在, 回落「{params['_tpl']['name']}」"
     pid = "p" + time.strftime("%m%d%H%M%S")
     cfg = config.load()
     source_pref = (cfg.get("market") or {}).get("source_pref", "auto")
@@ -830,6 +906,8 @@ def run_compose(request: dict) -> tuple[dict, int]:
                 "hint": "到设置页配置「成稿模型」(内容生成专用, 独立于翻译链, 可配多条按优先级兜底)"}, 4
 
     notes, contexts, images, ta = [], [], [], {}
+    if tpl_fallback_note:
+        notes.append(tpl_fallback_note)
     tick("retrieve", 5, "素材识别与信息补全")
     mats = []
     groups = []
@@ -947,7 +1025,7 @@ def run_compose(request: dict) -> tuple[dict, int]:
             elif weighted_len(text) > limit:
                 text = _hard_truncate(text, limit)
                 notes.append("成稿超字数上限, 已按句读硬截断")
-        if params["template"] in ZERO_OPINION_TEMPLATES:     # 零观点披露类: 硬剔观点标记行
+        if (params.get("_tpl") or {}).get("zero"):   # 零观点(快照判定, 中途改勾不失锚)
             text, dropped = _strip_opinion_lines(text)
             if dropped:
                 notes.append("零观点模板: 已剔除观点标记行")
@@ -958,7 +1036,8 @@ def run_compose(request: dict) -> tuple[dict, int]:
 
     POSTS_DIR.mkdir(parents=True, exist_ok=True)
     result = {"id": pid, "text": text, "tags": tags, "images": images,
-              "params": params, "modules": modules, "tickers": tickers,
+              "params": {k: v for k, v in params.items() if not k.startswith("_")},   # 快照键不落盘
+              "modules": modules, "tickers": tickers,
               "weighted_len": max(map(weighted_len, thread)) if thread else weighted_len(text), "limit": limit,
               "notes": notes, "created_at": _now()}
     if used:

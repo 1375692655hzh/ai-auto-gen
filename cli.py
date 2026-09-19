@@ -91,12 +91,15 @@ def doctor(json_out: bool = False) -> int:
     # Python
     checks.append(_check("python>=3.10", sys.version_info >= (3, 10),
                          f"当前 {sys.version.split()[0]}, 请装 3.10+"))
-    # Playwright
+    # Playwright(仅腾讯元宝源 yuanbao_fetch 需要, 且为函数内惰性 import——
+    # 不用该源的工作台/绝大多数来源用户无需安装, 缺失只算 warn 不拦 doctor, 2026-09-20)
     try:
         import playwright  # noqa
         checks.append(_check("playwright", True))
     except ImportError:
-        checks.append(_check("playwright", False, "pip install playwright && playwright install chromium"))
+        checks.append(_check("playwright", False,
+                             "仅腾讯元宝源需要: pip install playwright && playwright install chromium"
+                             " (工作台/绝大多数来源不需要)", warn=True))
     # FastAPI(供数服务 sources serve 才需要)
     try:
         import fastapi, uvicorn  # noqa

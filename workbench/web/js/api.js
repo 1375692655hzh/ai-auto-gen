@@ -156,6 +156,15 @@ WB.trans = (function () {
       if (d.unconfigured && !sessionStorage.getItem("wb_tr_warned")) {
         sessionStorage.setItem("wb_tr_warned", "1");   // 每次刷新只提醒一次
         if (WB.toast) WB.toast("翻译未配置: 到设置页「翻译模型」填 DeepSeek 等 key(免费位 muse 有云端地区封锁, 大陆网络不可用, 见设置页说明)");
+      } else if (d.chain_dead && !sessionStorage.getItem("wb_tr_dead_warned")) {
+        sessionStorage.setItem("wb_tr_dead_warned", "1");  // 同上, 每次刷新只提醒一次
+        /* 链已配置但整批全链失败(常见: 出厂 OmniRoute 免费位在未装 OmniRoute 的机器上是死链)。
+           带链接引导跳设置页; WB.toast 只收纯文本, 就地建一条可点版本(内容为固定字符串)。 */
+        const t = document.createElement("div");
+        t.className = "toast";
+        t.innerHTML = "翻译模型链不可用 — 到 <a href=\"#/settings\">设置 → 翻译模型</a> 配置模型链";
+        document.body.appendChild(t);
+        setTimeout(() => t.remove(), 8000);           // 带链接多留时间供点击
       }
       (d.results || []).forEach((res) => {
         const b = batch.find((x) => x.i === res.i);

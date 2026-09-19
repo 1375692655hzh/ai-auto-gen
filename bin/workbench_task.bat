@@ -10,7 +10,18 @@ netstat -ano | findstr ":8788" | findstr LISTENING >nul && exit /b 0
 rem launch via run_detached.py (DETACHED_PROCESS): start /b gets killed when the parent
 rem (wscript/scheduled task) exits; detached survives. Wait 8s then re-check the port;
 rem exit 3 if bind failed (silent_run passes the code through; watchdog counts it).
-py -3.11 bin\run_detached.py workbench serve
+rem probe python launcher with fallback (2026-09-20: py -3.11 alone breaks on
+rem Store-Python (no py launcher) or 3.12-only machines -- same fix as config.py_cmd)
+set PYEXE=
+py -3.11 -c "1" >nul 2>&1 && set PYEXE=py -3.11
+if not defined PYEXE py -3 -c "1" >nul 2>&1 && set PYEXE=py -3
+if not defined PYEXE python -c "1" >nul 2>&1 && set PYEXE=python
+if not defined PYEXE (
+  echo [ERROR] Python 3.10+ not found. Install from python.org and re-run.
+  exit /b 1
+)
+
+%PYEXE% bin\run_detached.py workbench serve
 timeout /t 8 /nobreak >nul
 netstat -ano | findstr ":8788" | findstr LISTENING >nul && exit /b 0
 exit /b 3

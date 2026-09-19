@@ -93,7 +93,13 @@ def _translate_one(chain: list, text: str) -> str | None:
 
 def translate_batch(items: list) -> dict:
     """items: [{"i": 前端序号, "text": 原文}] →
-    {"results": [{"i","hash","zh"}], "failed": n, "native": n, "cached": n, "unconfigured": bool}"""
+    {"results": [{"i","hash","zh"}], "failed": n, "native": n, "cached": n,
+     "unconfigured": bool, "chain_dead": bool}
+
+    chain_dead(2026-09-20): 链已配置但整批全链失败触发熔断、或仍处熔断冷却——
+    分发用户常见态(出厂 OmniRoute 免费位在未装 OmniRoute 的机器上是死链, 但
+    因三项齐全被当作已配置, 前端拿不到 unconfigured 只见静默不译)。前端据此
+    弹一次"到设置页配翻译链"的引导, 不再静默。"""
     from . import config as wb_config
     cfg = wb_config.load().get("translate") or {}
     chain = x_surge.translate_chain(cfg)
@@ -126,6 +132,7 @@ def translate_batch(items: list) -> dict:
         todo.append((i, h, text))
     unconfigured = not chain
     cooldown = (not unconfigured) and time.time() < x_surge._breaker_until()
+    dead = False                                   # 本批是否触发熔断(刚死)
     if unconfigured or cooldown:
         failed = len(todo)
     else:
@@ -143,8 +150,10 @@ def translate_batch(items: list) -> dict:
                 streak += 1
             if streak >= 5:          # 连续全链失败=账号级限流, 熔断止损防视口批次空烧
                 x_surge._trip_breaker("ondemand_chain_dead")
+                dead = True
                 break
     if station_hit or (todo and not unconfigured and not cooldown):
         _save(cache)
     return {"results": results, "failed": failed, "native": native, "cached": cached,
-            "station_reuse": station_hit, "unconfigured": unconfigured, "cooldown": cooldown}
+            "station_reuse": station_hit, "unconfigured": unconfigured,
+            "chain_dead": bool(dead or cooldown), "cooldown": cooldown}
