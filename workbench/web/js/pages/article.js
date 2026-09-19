@@ -103,7 +103,7 @@ WB.pages.article = {
     tab(t) { if (t === "gen" && !this.historyLoaded) this.loadGenHistory(); },
   },
   computed: {
-    /* 账号管理行过滤: 关键词(名称/handle) + 市场/定位/标签三列筛选 + 仅看关注;
+    /* 账号管理行过滤: 关键词(名称/handle/定位, 大小写不敏感) + 市场/定位/标签三列筛选 + 仅看关注(AND 叠加);
        排序服务端已定(关注优先→粉丝降级) */
     xacctRows() {
       const st = this.xaccts;
@@ -119,7 +119,8 @@ WB.pages.article = {
       if (st.followOnly) rows = rows.filter((a) => a.follow);
       if (q) rows = rows.filter((a) =>
         (a.name || "").toLowerCase().includes(q) ||
-        (a.handle || "").toLowerCase().includes(q));
+        (a.handle || "").toLowerCase().includes(q) ||
+        (a.positioning || "").toLowerCase().includes(q));
       return rows;
     },
     /* 筛选候选: 市场 chips / 定位与标签 datalist(取池内实际值去重) */
@@ -1739,7 +1740,7 @@ WB.pages.article = {
             停用 {{ xaccts.meta.disabled_n || 0 }} · 显示 {{ xacctRows.length }}</span>
           <span v-if="xaccts.meta.err" class="badge red" style="margin-left:8px">{{ xaccts.meta.err }}</span></h3>
         <div class="feed-toolbar" style="flex-wrap:wrap">
-          <input type="text" v-model="xaccts.q" class="mat-search" placeholder="搜索(名称/handle)" style="width:180px">
+          <input type="text" v-model="xaccts.q" class="mat-search" placeholder="搜索(名称/handle/定位)" style="width:180px">
           <span class="chip" :class="{on: !xaccts.mkt}" @click="xaccts.mkt=''">全部市场</span>
           <span v-for="m in xacctMarkets" :key="m" class="chip"
                 :class="{on: xaccts.mkt === m}" @click="xaccts.mkt = xaccts.mkt === m ? '' : m">{{ m }}</span>
