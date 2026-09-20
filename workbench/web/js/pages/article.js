@@ -117,10 +117,19 @@ WB.pages.article = {
       if (tagQ) rows = rows.filter((a) =>
         (a.tags || []).some((t) => t.toLowerCase().includes(tagQ)));
       if (st.followOnly) rows = rows.filter((a) => a.follow);
-      if (q) rows = rows.filter((a) =>
-        (a.name || "").toLowerCase().includes(q) ||
-        (a.handle || "").toLowerCase().includes(q) ||
-        (a.positioning || "").toLowerCase().includes(q));
+      if (q) {
+        const qn = q.replace(/^@+/, "");   // 支持 @handle 形式搜索(剥前缀)
+        rows = rows.filter((a) =>
+          (a.name || "").toLowerCase().includes(qn) ||
+          (a.handle || "").toLowerCase().includes(qn) ||
+          (a.positioning || "").toLowerCase().includes(qn));
+        // 前缀命中优先(2026-09-19 用户裁决): 名称a开头 > @handle a开头 > 其余包含;
+        // 同级保持服务端次序(关注优先→粉丝降级, JS sort 稳定)
+        const rank = (a) =>
+          (a.name || "").toLowerCase().startsWith(qn) ? 0
+          : (a.handle || "").toLowerCase().startsWith(qn) ? 1 : 2;
+        rows = rows.slice().sort((x, y) => rank(x) - rank(y));
+      }
       return rows;
     },
     /* 筛选候选: 市场 chips / 定位与标签 datalist(取池内实际值去重) */
