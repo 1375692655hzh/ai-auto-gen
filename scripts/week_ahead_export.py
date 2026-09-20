@@ -2,6 +2,9 @@
 
 依赖: pip install requests   (仅此一个三方包, 无需任何 API Key)
 口径: 全部北京时间; 条目统一 {"time": "YYYY-MM-DD HH:MM", "text": 中文可读句, "source": 来源名}
+time 语义(2026-09-20 裁决): time=抓取时刻(发布时间); 被预告的事件/财报日期全在
+未来, 属"被预告的内容"不是发布时间, 只保留在正文里(前缀 [日期/时点] 或"周X"字样),
+避免下游按 time DESC 排序时未来条目置顶。
 
 四个函数(可按需只用其中几个):
   calendar_week()      一周财经前瞻: 明天起 7 天经济事件(中文, importance>=2, 含预期/前值)
@@ -33,8 +36,10 @@ _BJ = datetime.timezone(datetime.timedelta(hours=8))
 
 def calendar_week(page_size: int = 150) -> list:
     """华尔街见闻经济日历·明天起 7 天。importance>=2(2=重要 3=重磅), 中文事件名,
-    附预期值; 事件时间官方秒级。失败抛异常(网络类), 调用方自行容错。"""
+    附预期值; 事件时间官方秒级。失败抛异常(网络类), 调用方自行容错。
+    time=抓取时刻; 事件时刻拼进正文前缀 [YYYY-MM-DD HH:MM]。"""
     now = datetime.datetime.now()
+    fetched = now.strftime("%Y-%m-%d %H:%M")
     start = (now + datetime.timedelta(days=1)).replace(hour=0, minute=0, second=0)
     r = requests.get(
         "https://api-one-wscn.awtmt.com/apiv1/finance/macrodatas",
@@ -50,17 +55,18 @@ def calendar_week(page_size: int = 150) -> list:
         event = (i.get("title") or i.get("event") or "").strip()
         if not ts or imp < 2 or not event:
             continue
+        ev = datetime.datetime.fromtimestamp(ts).strftime("%Y-%m-%d %H:%M")
         head = "【重磅】" if imp >= 3 else ""
         tail = []
         if i.get("forecast"):
             tail.append(f"预期 {i['forecast']}")
         if i.get("actual"):
             tail.append(f"前值 {i['actual']}")
-        out.append({"time": datetime.datetime.fromtimestamp(ts).strftime("%Y-%m-%d %H:%M"),
-                    "text": f"{head}{i.get('country', '')} {event}"
+        out.append({"time": fetched,
+                    "text": f"[{ev}] {head}{i.get('country', '')} {event}"
                             + ("：" + " / ".join(tail) if tail else ""),
                     "source": "一周前瞻"})
-    out.sort(key=lambda x: x["time"])
+    out.sort(key=lambda x: x["text"])     # 正文前缀 [事件时刻] 定宽, 字典序=事件时点序
     return out[:int(page_size)]
 
 
@@ -85,16 +91,17 @@ def _fmt_rows(rows: list, cap: int = 12) -> str:
 
 def earnings_week(max_days: int = 5) -> list:
     """明天起 max_days 个交易日的美股财报, 每天一条聚合(周末/假期空日自动跳过)。
-    注意: 内部对 nasdaq API 连发带 0.5s 间隔, 整体耗时约 3-5 秒。"""
+    注意: 内部对 nasdaq API 连发带 0.5s 间隔, 整体耗时约 3-5 秒。
+    time=抓取时刻; 被预告的财报日期由正文"周X美股财报"承载。"""
     out = []
+    fetched = datetime.datetime.now(_BJ).strftime("%Y-%m-%d %H:%M")
     day = datetime.datetime.now(_BJ).date() + datetime.timedelta(days=1)
     while len(out) < int(max_days):
         if day.weekday() < 5:                          # 跳过周末
-            d = day.strftime("%Y-%m-%d")
-            rows = _nasdaq_earnings_date(d)
+            rows = _nasdaq_earnings_date(day.strftime("%Y-%m-%d"))
             if rows:
                 wk = "一二三四五六日"[day.weekday()]
-                out.append({"time": d,
+                out.append({"time": fetched,
                             "text": f"周{wk}美股财报 {len(rows)} 家: " + _fmt_rows(rows),
                             "source": "Nasdaq"})
             _time.sleep(0.5)
@@ -103,12 +110,13 @@ def earnings_week(max_days: int = 5) -> list:
 
 
 def earnings_today() -> list:
-    """今日美股财报(单条聚合; 非交易日返回空列表)。"""
+    """今日美股财报(单条聚合; 非交易日返回空列表)。
+    time=抓取时刻; "今日"即事件日期(=抓取当天), 正文已表达。"""
     today = datetime.datetime.now(_BJ).strftime("%Y-%m-%d")
     rows = _nasdaq_earnings_date(today)
     if not rows:
         return []
-    return [{"time": today,
+    return [{"time": datetime.datetime.now(_BJ).strftime("%Y-%m-%d %H:%M"),
              "text": f"今日美股财报 {len(rows)} 家: " + _fmt_rows(rows),
              "source": "Nasdaq"}]
 
@@ -124,11 +132,13 @@ _FF_IMPACT = {"High": "重磅", "Medium": "重要", "Holiday": "休市"}
 def ff_calendar_week() -> list:
     """ForexFactory 本周经济日历(英文事件名, Medium/High/休市, Low 噪声丢弃)。
     数据域 nfs.faireconomy.media 限频很紧(连抓即 429), 请 >=4h 一次; 429 捕获后
-    隔几小时重试即可, 周历本身一周才更新一次, 实时性要求低。"""
+    隔几小时重试即可, 周历本身一周才更新一次, 实时性要求低。
+    time=抓取时刻; 事件北京时间拼进正文前缀 [YYYY-MM-DD HH:MM]。"""
     r = requests.get("https://nfs.faireconomy.media/ff_calendar_thisweek.json",
                      headers={"User-Agent": _UA, "Referer": "https://www.forexfactory.com/"},
                      timeout=15)
     r.raise_for_status()
+    fetched = datetime.datetime.now(_BJ).strftime("%Y-%m-%d %H:%M")
     out = []
     for it in r.json():
         imp = (it.get("impact") or "").strip()
@@ -144,9 +154,12 @@ def ff_calendar_week() -> list:
             parts.append(f"预期 {it['forecast']}")
         if it.get("previous"):
             parts.append(f"前值 {it['previous']}")
-        out.append({"time": t.strftime("%Y-%m-%d %H:%M"),
-                    "text": " ".join(p for p in parts if p) + f"（{_FF_IMPACT[imp]}）",
+        out.append({"time": fetched,
+                    "text": f"[{t.strftime('%Y-%m-%d %H:%M')}] "
+                            + " ".join(p for p in parts if p)
+                            + f"（{_FF_IMPACT[imp]}）",
                     "source": "ForexFactory"})
+    out.sort(key=lambda x: x["text"])     # 正文前缀 [事件时刻] 定宽, 字典序=事件时点序
     return out
 
 

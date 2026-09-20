@@ -972,7 +972,9 @@ def fetch_cftc_cot(page_size: int = 10) -> list:
 
 
 def fetch_nasdaq_earnings() -> list:
-    """Nasdaq 财报日历(每日): 当日发财报的公司(代码/盘前盘后/EPS 预期)。C 级条款未核实, 个人研究用。"""
+    """Nasdaq 财报日历(每日): 当日发财报的公司(代码/盘前盘后/EPS 预期)。C 级条款未核实, 个人研究用。
+    time 口径(2026-09-20 裁决): 日历里的日期是"被预告的财报事件日期"不是发布时间,
+    time 一律输出抓取时刻, 事件日期只留在正文("今日"即抓取当天)。"""
     today = datetime.datetime.now(_BJ).strftime("%Y-%m-%d")
     r = requests.get("https://api.nasdaq.com/api/calendar/earnings",
                      params={"date": today},
@@ -985,15 +987,18 @@ def fetch_nasdaq_earnings() -> list:
     for x in rows[:12]:
         eps = x.get("epsForecast") or ""
         picks.append(f"{x.get('symbol')}({x.get('time') or ''}{', 预期' + eps if eps else ''})")
-    return [{"time": today,
+    return [{"time": datetime.datetime.now(_BJ).strftime("%Y-%m-%d %H:%M"),
              "text": f"今日美股财报 {len(rows)} 家: " + "、".join(picks),
              "source": "Nasdaq"}]
 
 
 def fetch_earnings_week(max_days: int = 5) -> list:
     """本周财报前瞻: 明天起未来 max_days 个交易日, 每天一条聚合(与 nasdaq_earnings
-    只出今日互补)。同接口循环日期参数, 间隔 0.5s 防限频; 空日(假期)跳过。"""
+    只出今日互补)。同接口循环日期参数, 间隔 0.5s 防限频; 空日(假期)跳过。
+    time 口径(2026-09-20 裁决): 被预告的财报事件日期(未来)不是发布时间, time 一律
+    输出本轮抓取时刻; 事件日期由正文的"周X美股财报"承载, 不再写进 time。"""
     out = []
+    fetched = datetime.datetime.now(_BJ).strftime("%Y-%m-%d %H:%M")
     day = datetime.datetime.now(_BJ).date() + datetime.timedelta(days=1)
     while len(out) < int(max_days):
         if day.weekday() < 5:                          # 跳过周末
@@ -1011,7 +1016,7 @@ def fetch_earnings_week(max_days: int = 5) -> list:
                     picks.append(f"{x.get('symbol')}({x.get('time') or ''}"
                                  f"{', 预期' + eps if eps else ''})")
                 wk = "一二三四五六日"[day.weekday()]
-                out.append({"time": d,
+                out.append({"time": fetched,
                             "text": f"周{wk}美股财报 {len(rows)} 家: " + "、".join(picks),
                             "source": "Nasdaq"})
             time.sleep(0.5)
@@ -1048,8 +1053,11 @@ def fetch_wscn_live(page_size: int = 50) -> list:
 def fetch_jin10_calendar() -> list:
     """金十财经日历(今日, CDN 周文件零鉴权): 经济数据+事件, 星级标注, 与见闻日历不同口径互备。
     weekKey 先试 ISO 周数再试北京周一日期键;  payload 支持数组/日期键字典两种形态
-    (移植自 NEWS 项目 jin10-calendar-fetcher.ts)。"""
+    (移植自 NEWS 项目 jin10-calendar-fetcher.ts)。
+    time 口径(2026-09-20 裁决): 事件时点是"今天几点发生"不是发布时间, time 一律输出
+    抓取时刻, 事件时点改拼进正文前缀 [HH:MM] 不丢信息。"""
     now = datetime.datetime.now(_BJ)
+    fetched = now.strftime("%Y-%m-%d %H:%M")
     iso_year, iso_week, _ = now.isocalendar()
     monday = now - datetime.timedelta(days=now.weekday())
     payloads = []
@@ -1119,10 +1127,12 @@ def fetch_jin10_calendar() -> list:
             fore = pick(row, ("consensus", "forecast", "预期", "预测值"))
             prev = pick(row, ("previous", "prev", "前值"))
             nums = f" [公布:{act or '-'} 预期:{fore or '-'} 前值:{prev or '-'}]"
-            out.append({"time": f"{today} {tl or '00:00'}",
-                        "text": f"[{typ}]{'★' * max(1, min(star, 3))} {country + ' ' if country else ''}{title}{nums}",
+            out.append({"time": fetched,
+                        "text": f"[{typ}][{tl or '时点未定'}]"
+                                f"{'★' * max(1, min(star, 3))} "
+                                f"{country + ' ' if country else ''}{title}{nums}",
                         "source": "金十日历"})
-    out.sort(key=lambda x: x["time"])
+    out.sort(key=lambda x: x["text"])     # 正文前缀 [HH:MM] 定宽, 字典序=事件时点序
     return out
 
 

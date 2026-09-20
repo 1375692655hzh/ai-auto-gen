@@ -842,7 +842,11 @@ FF_IMPACT = {"High": "重磅", "Medium": "重要", "Holiday": "休市"}
 def fetch_ff_calendar_week() -> list:
     """ForexFactory 本周经济日历(一周前瞻, Medium+High, Low 噪声丢弃)。
     nfs.faireconomy.media 是 ForexFactory 官方数据分发域; date 为 ISO(带 GMT
-    偏移), 转北京时间。text 在 fetcher 层合成好(store 只认 text 字段)。"""
+    偏移), 转北京时间。text 在 fetcher 层合成好(store 只认 text 字段)。
+    time 口径(2026-09-20 裁决): 一周前瞻的事件时刻全在未来, 不是发布时间——time
+    一律输出抓取时刻, 事件北京时间改拼进正文前缀 [YYYY-MM-DD HH:MM] 不丢信息。"""
+    fetched = datetime.datetime.now(
+        datetime.timezone(datetime.timedelta(hours=8))).strftime("%Y-%m-%d %H:%M")
     r = _get("https://nfs.faireconomy.media/ff_calendar_thisweek.json",
              "https://www.forexfactory.com/")
     out = []
@@ -863,16 +867,21 @@ def fetch_ff_calendar_week() -> list:
             parts.append(f"预期 {it['forecast']}")
         if it.get("previous"):
             parts.append(f"前值 {it['previous']}")
-        out.append({"time": t,
-                    "text": " ".join(p for p in parts if p) + f"（{FF_IMPACT[imp]}）",
+        out.append({"time": fetched,
+                    "text": f"[{t}] " + " ".join(p for p in parts if p)
+                            + f"（{FF_IMPACT[imp]}）",
                     "source": "ForexFactory"})
+    out.sort(key=lambda x: x["text"])     # 正文前缀 [事件时刻] 定宽, 字典序=事件时点序
     return out
 
 
 def fetch_calendar_week(page_size: int = 150) -> list:
     """一周财经前瞻(华尔街见闻经济日历·明天起未来7天, importance>=2, 中文)。
-    与 calendar 源(只出今天)同接口互补不重叠; 时间戳带日期, 天然支撑周前瞻。"""
+    与 calendar 源(只出今天)同接口互补不重叠; 时间戳带日期, 天然支撑周前瞻。
+    time 口径(2026-09-20 裁决): 前瞻的事件时刻全在未来, 不是发布时间——time 一律
+    输出抓取时刻, 事件时刻改拼进正文前缀 [YYYY-MM-DD HH:MM] 不丢信息。"""
     now = datetime.datetime.now()
+    fetched = now.strftime("%Y-%m-%d %H:%M")
     start = (now + datetime.timedelta(days=1)).replace(hour=0, minute=0, second=0)
     r = _get("https://api-one-wscn.awtmt.com/apiv1/finance/macrodatas",
              "https://wallstreetcn.com/calendar",
@@ -890,17 +899,18 @@ def fetch_calendar_week(page_size: int = 150) -> list:
         event = (i.get("title") or i.get("event") or "").strip()
         if not event:
             continue
+        ev = datetime.datetime.fromtimestamp(ts).strftime("%Y-%m-%d %H:%M")
         head = "【重磅】" if imp >= 3 else ""
         tail = []
         if i.get("forecast"):
             tail.append(f"预期 {i['forecast']}")
         if i.get("actual"):
             tail.append(f"前值 {i['actual']}")
-        out.append({"time": datetime.datetime.fromtimestamp(ts).strftime("%Y-%m-%d %H:%M"),
-                    "text": f"{head}{i.get('country', '')} {event}"
+        out.append({"time": fetched,
+                    "text": f"[{ev}] {head}{i.get('country', '')} {event}"
                             + ("：" + " / ".join(tail) if tail else ""),
                     "source": "一周前瞻"})
-    out.sort(key=lambda x: x["time"])
+    out.sort(key=lambda x: x["text"])     # 正文前缀 [事件时刻] 定宽, 字典序=事件时点序
     return out[:int(page_size)]
 
 

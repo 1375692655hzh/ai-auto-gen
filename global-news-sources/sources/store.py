@@ -506,8 +506,14 @@ def query(markets: list | None = None, kinds: list | None = None,
             args += [ct, ct, cid]
         elif ct:
             sql += " AND time<?"; args.append(ct)
-    sql += " ORDER BY time DESC, id ASC LIMIT ?"
+    # 排序兜底(2026-09-20 裁决): time 语义=发布时间。published_at_known=0(时间不可信:
+    # 纯日期或抓取兜底)且 time 落在未来的条目, 是历史漏网源把"被预告的事件/日历日期"
+    # 当 time 写入所致(如 earnings_week 曾输出未来财报日)——这类条目不参与 time DESC
+    # 抢位, 统一沉底, 防未来日期置顶; 正常条目顺序不变。keyset cursor 仍按原始 time
+    # 过滤, 沉底条目在深翻页可能被裁掉(它们本不该置顶, 可接受降级)。
+    sql += " ORDER BY (published_at_known=0 AND time>?) ASC, time DESC, id ASC LIMIT ?"
     lim = min(limit, 1000)
+    args.append(datetime.now().strftime("%Y-%m-%d %H:%M"))
     args.append(lim + 1)
     conn = _connect()
     try:
@@ -553,7 +559,12 @@ def export_snapshot(out_dir: Path | None = None) -> dict:
     dist.mkdir(parents=True, exist_ok=True)
     conn = _connect()
     try:
-        rows = conn.execute("SELECT * FROM items ORDER BY time DESC, id ASC").fetchall()
+        # 与 query() 同口径(2026-09-20 裁决): known=0 且 time 在未来的漏网条目沉底,
+        # 不让"事件日期当发布时间"的条目在静态快照里置顶。
+        rows = conn.execute(
+            "SELECT * FROM items ORDER BY (published_at_known=0 AND time>?) ASC, "
+            "time DESC, id ASC",
+            (datetime.now().strftime("%Y-%m-%d %H:%M"),)).fetchall()
     finally:
         conn.close()
     items = [_row_to_dict(r) for r in rows]
