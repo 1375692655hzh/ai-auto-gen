@@ -250,6 +250,13 @@ def run(dry_run: bool = False, export: bool = True) -> dict:
             rep["feishu"] = feishu.run_digest(rep["started_at"])
         except Exception as ex:
             rep["failures"].append(f"feishu({type(ex).__name__}: {str(ex)[:60]})")
+    # (2026-09-21) 账号成分推送(2h节流在函数内部, 到点才真推), 与旧摘要共用轮末预算。
+    if time.time() < tail_deadline:
+        try:
+            from sources import feishu
+            rep["feishu_push"] = feishu.run_account_push()
+        except Exception as ex:
+            rep["failures"].append(f"feishu_push({type(ex).__name__}: {str(ex)[:60]})")
     # 顺序裁决(2026-09-16): translate 先于 llm_tag——用户对翻译有 15min 时效承诺,
     # 标签无时效承诺且有规则打标兜底; 免费池经代理后单批变慢, 后者会吃光轮末预算。
     # (2026-09-17) feishu 摘要插在 translate 后(译文就绪) llm_tag 前(标签可等)。

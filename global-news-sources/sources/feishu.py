@@ -6,6 +6,9 @@ A. 15min 情报摘要(run_digest): refresh 轮末调用——本轮新增 twitte
 B. 1min 账号池监控(watch_loop): FxTwitter v2 时间线逐账号对比 last_seen,
    有更新即发群(原文+链接)。账号池 = sources.feishu.watch.handles(用户指定),
    每轮循环重读配置, 改完即生效; 首见账号只登记不回填(防入群刷屏)。
+C. 账号成分推送(run_account_push, 2026-09-21): 每2h 收集近2h X帖 → 9大类投影
+   (L1优先/继承作者) → 按账号成分mix选各主题热度Top → @账号所有人发群。
+   复用A的refresh轮末挂点(A已停用不冲突), 配置 sources.feishu.account_push。
 
 配置(sources.feishu, 写 config.local.yaml — 凭证绝不入库):
   enabled: true
@@ -40,7 +43,8 @@ def _conf() -> dict:
             "chat_id": str(c.get("chat_id") or ""),
             "digest_models": c.get("digest_models") or [],
             "min_items": int(c.get("min_items", 2)),
-            "watch": dict(c.get("watch") or {})}
+            "watch": dict(c.get("watch") or {}),
+            "account_push": dict(c.get("account_push") or {})}
 
 
 def _state_path(name: str) -> Path:
@@ -313,3 +317,289 @@ def watch_loop() -> int:
         if changed:
             _save_state(_WATCH_STATE, st)
         time.sleep(interval)
+
+
+# ── C. 账号成分推送 run_account_push(2026-09-21, 复用废弃的15min摘要挂点) ────
+# 每 interval_h(默认2h) 收集近 window_h 的 X 帖 → 投影到 9 大类 → 按每个账号的
+# 成分 mix(如 美股60/亚太10/AI30) 选各主题热度Top → @账号所有人 发群。
+# 分类纪律(与 2026-09-21 分类方案一致): 条目 L1 投影优先, 无标签则继承作者账号
+# (池 tags/note 规则, 已停用账号如土耳其池不参与); 投不进任何类 = 不推(宁漏勿误)。
+# 热度 = FxTwitter 现拉浏览量(_enrich_stats 复用), 缺失按 0 参与排序。
+# 配置(sources.feishu.account_push, config.local.yaml):
+#   enabled / interval_h=2 / window_h=2 / chat_id(缺省用上层feishu.chat_id)
+#   top_total=10(每账号总条数, 按mix%最大余数法分到各主题, 每主题≥1)
+#   accounts: [{name, owner(显示名) | owner_open_id(ou_..真@), mix: {主题: 百分比}}]
+_PUSH_STATE = "feishu-account-push.json"
+
+TOPICS = ("美股", "A股", "亚太股市", "加密", "AI与科技",
+          "产业链与制造", "宏观与政策", "大宗与周期", "投教科普")
+
+# L1(19赛道) → 大类; 金融与加密走 L2 细分(_CRYPTO_L2/市场规则), 不在此表。
+_L1_TOPIC = {
+    "互联网与传媒": "AI与科技", "半导体": "AI与科技", "AI与算力": "AI与科技",
+    "消费电子": "AI与科技", "通信与卫星": "AI与科技",
+    "汽车与智能驾驶": "产业链与制造", "新能源与电力": "产业链与制造",
+    "军工与航空航天": "产业链与制造", "交通运输": "产业链与制造",
+    "工业与机器人": "产业链与制造", "医药生物": "产业链与制造", "消费": "产业链与制造",
+    "油气与能源": "大宗与周期", "金属与矿业": "大宗与周期", "化工与新材料": "大宗与周期",
+    "农业与食品": "大宗与周期", "地产与基建": "大宗与周期",
+    "宏观与政策": "宏观与政策",
+}
+_CRYPTO_L2 = {"加密资产", "支付金科", "交易所"}
+# 文本加密锁(附加不替换): 命中即补"加密"主题, 防止币帖被纯美股作者继承独占。
+_CRYPTO_TXT_PAT = re.compile(
+    r"(?i)\b(btc|bitcoin|ethereum|eth|xrp|solana|stablecoin|crypto|altcoin)\b")
+_APAC_MKTS = ("香港", "台湾", "日本", "韩国")
+_EDU_PAT = re.compile("教学|课程|科普|入门|教程|教育|方法论|怎么读|一文读懂|估值课")
+_TAG_TOPIC = {"美股": "美股", "加密": "加密", "AI": "AI与科技", "科技": "AI与科技",
+              "A股": "A股", "港股": "亚太股市", "台股": "亚太股市",
+              "日股": "亚太股市", "韩股": "亚太股市"}
+
+
+def _push_conf(conf: dict) -> dict:
+    ap = conf.get("account_push") or {}
+    return {"enabled": bool(ap.get("enabled", False)),
+            "interval_h": float(ap.get("interval_h") or 2),
+            "window_h": float(ap.get("window_h") or 2),
+            "chat_id": str(ap.get("chat_id") or conf.get("chat_id") or ""),
+            "top_total": int(ap.get("top_total") or 10),
+            "accounts": [a for a in (ap.get("accounts") or []) if isinstance(a, dict)]}
+
+
+def _pool_accounts() -> list:
+    """启用账号池(只读; local 覆盖规则镜像 fetchers.basic; 任何异常=空池不炸)。"""
+    import yaml
+    pool_f = Path(__file__).resolve().parents[1] / "config" / "twitter_pool.yaml"
+    try:
+        pool = yaml.safe_load(pool_f.read_text(encoding="utf-8")) or {}
+        loc = pool_f.with_name("twitter_pool.local.yaml")
+        if loc.is_file():
+            lp = yaml.safe_load(loc.read_text(encoding="utf-8")) or {}
+            base = {str(a.get("handle", "")).lower(): a for a in (pool.get("accounts") or [])}
+            for a in (lp.get("accounts") or []):
+                base[str(a.get("handle", "")).lower()] = a
+            pool["accounts"] = list(base.values())
+        return [a for a in (pool.get("accounts") or [])
+                if a.get("enabled", True) and a.get("handle")]
+    except Exception:
+        return []
+
+
+def _author_topics() -> dict:
+    """{handle小写: {大类}} —— 池 tags + note/positioning 投教信号。"""
+    out: dict[str, set] = {}
+    for a in _pool_accounts():
+        h = str(a.get("handle") or "").strip().lstrip("@").lower()
+        if not h:
+            continue
+        tp = {_TAG_TOPIC[str(t).strip()] for t in (a.get("tags") or [])
+              if str(t).strip() in _TAG_TOPIC}
+        blob = f"{a.get('note') or ''} {a.get('positioning') or ''}"
+        if _EDU_PAT.search(blob):
+            tp.add("投教科普")
+        out[h] = tp
+    return out
+
+
+def _item_topics(sectors: str, markets: str, author: str, a_topics: dict,
+                 text: str = "") -> set:
+    """条目 → 大类集合。L1 投影优先(加密锁最高), 无标签继承作者, 再无=空(不推);
+    文本命中加密词则附加"加密"(不替换已有主题)。"""
+    tp: set = set()
+    try:
+        secs = json.loads(sectors or "[]")
+    except ValueError:
+        secs = []
+    try:
+        mkts = json.loads(markets or "[]")
+    except ValueError:
+        mkts = []
+    for s in secs:
+        parts = str(s).split(">")
+        l1 = parts[0] if parts else ""
+        l2 = parts[1] if len(parts) > 1 else ""
+        if l1 == "金融与加密":
+            if l2 in _CRYPTO_L2:
+                tp.add("加密")
+            else:                                   # 银行/券商等 → 按市场落股市桶
+                if "A股" in mkts:
+                    tp.add("A股")
+                elif "美国" in mkts:
+                    tp.add("美股")
+                elif any(m in mkts for m in _APAC_MKTS):
+                    tp.add("亚太股市")
+        elif l1 in _L1_TOPIC:
+            tp.add(_L1_TOPIC[l1])
+    if tp:
+        if _CRYPTO_TXT_PAT.search(text or ""):
+            tp.add("加密")
+        return tp
+    tp = set(a_topics.get(str(author or "").strip().lstrip("@").lower() or "", ()))
+    if _CRYPTO_TXT_PAT.search(text or ""):
+        tp.add("加密")
+    return tp
+
+
+def _split_quota(mix: dict, total: int) -> dict:
+    """mix{主题:pct>0} → 各主题条数(和=total, 每主题≥1; 最大余数法)。"""
+    themes = [t for t, p in mix.items() if p and p > 0]
+    if not themes:
+        return {}
+    total = max(total, len(themes))
+    raw = {t: mix[t] / sum(mix[t] for t in themes) * total for t in themes}
+    quota = {t: max(1, int(raw[t])) for t in themes}
+    while sum(quota.values()) > total:              # 每主题≥1 可能超编 → 砍小数部分最大者
+        t_cut = max(themes, key=lambda t: (quota[t] - raw[t], raw[t]))
+        if quota[t_cut] <= 1:
+            break
+        quota[t_cut] -= 1
+    while sum(quota.values()) < total:              # 余数从大到小补
+        quota[min(themes, key=lambda t: raw[t] - quota[t])] += 1
+    return quota
+
+
+def _fmt_views(v) -> str:
+    if v is None:
+        return ""
+    try:
+        v = int(v)
+    except (TypeError, ValueError):
+        return ""
+    return f"{v / 10000:.1f}万".replace(".0万", "万") if v >= 10000 else str(v)
+
+
+def _pick_for_account(items: list, acc: dict, top_total: int) -> dict:
+    """按成分选各主题热度Top。条目在一个账号卡内最多出现一次(归入mix最高的命中主题,
+    该主题满额再落其他命中主题)。返回 {主题: [item按热度降序]}。"""
+    mix = {str(k): float(v) for k, v in (acc.get("mix") or {}).items()
+           if str(k) in TOPICS and float(v) > 0}
+    if not mix:
+        return {}
+    quota = _split_quota(mix, top_total)
+    order = sorted(mix, key=lambda t: -mix[t])      # 主题排序=成分占比降序
+    per = {t: [] for t in order}
+    for it in sorted(items, key=lambda x: (-(x.get("views") or 0),
+                                           -(x.get("likes") or 0))):
+        hit = [t for t in order if t in (it.get("topics") or ())]
+        if not hit:
+            continue
+        for t in sorted(hit, key=lambda t: -mix[t]):
+            if len(per[t]) < quota[t]:
+                per[t].append(it)
+                break
+    return {t: per[t] for t in order if per[t]}
+
+
+def _compose_push(acc: dict, per: dict, mix: dict, bj: str, cand: int) -> str:
+    """账号卡文本。@owner(owner_open_id 有值=真@, 否则文字); 原文优先, 截120字。"""
+    oid = str(acc.get("owner_open_id") or "").strip()
+    owner = str(acc.get("owner") or "").strip() or "账号所有人"
+    head = f'<at user_id="{oid}"></at>' if oid else f"@{owner}"
+    mix_s = " · ".join(f"{t}{int(p)}%" for t, p in
+                       sorted(mix.items(), key=lambda kv: -kv[1]))
+    lines = [f"{head} 账号「{acc.get('name') or '?'}」近2h按成分选题",
+             f"成分: {mix_s}｜窗口 {bj}｜候选 {cand} 条"]
+    for t, its in per.items():
+        lines.append(f"\n▍{t}（Top{len(its)}）")
+        for i, it in enumerate(its, 1):
+            v = _fmt_views(it.get("views"))
+            vs = f"👁{v} " if v else ""
+            txt = (it.get("text") or it.get("text_zh") or "").replace("\n", " ")[:120]
+            lines.append(f"{i}. {vs}@{it.get('author_handle') or '?'}: {txt}")
+            lines.append(str(it.get("url") or ""))
+        if len("\n".join(lines)) > MAX_TEXT - 300:
+            lines.append("…(篇幅所限略)")
+            break
+    lines.append("\n—— 数据站按账号成分自动整理")
+    return "\n".join(lines)[:MAX_TEXT]
+
+
+def run_account_push(dry_run: bool = False, force: bool = False,
+                     window_h: float | None = None) -> dict:
+    """入口(refresh 轮末挂点 / cli feishu push)。dry_run=组卡打印不发不记状态。"""
+    conf = _conf()
+    ap = _push_conf(conf)
+    rep = {"enabled": ap["enabled"], "dry_run": dry_run, "accounts": len(ap["accounts"]),
+           "sent": 0, "errors": []}
+    if not ap["accounts"]:
+        rep["skipped"] = "无账号成分配置(account_push.accounts)"
+        return rep
+    if not dry_run:
+        if not ap["enabled"]:
+            rep["skipped"] = "未启用(account_push.enabled)"
+            return rep
+        st = _load_state(_PUSH_STATE)
+        last = float(st.get("last_ts") or 0)
+        due = force or (time.time() - last) >= ap["interval_h"] * 3600
+        if not due:
+            rep["skipped"] = f"距上次推送不足 {ap['interval_h']}h"
+            return rep
+    import datetime as _dt
+    win_h = float(window_h if window_h is not None else ap["window_h"])
+    since = (_dt.datetime.now() - _dt.timedelta(hours=win_h)
+             ).strftime("%Y-%m-%d %H:%M:%S")
+    conn = _store._connect()
+    try:
+        rows = conn.execute(
+            "SELECT source_id, time, text, text_zh, url, author_handle, sectors, markets "
+            "FROM items WHERE fetched_at>=? AND source_id LIKE '%twitter%' "
+            "ORDER BY time DESC LIMIT 400", (since,)).fetchall()
+    finally:
+        conn.close()
+    seen, items = set(), []
+    for r in rows:
+        u = str(r[4] or "")
+        if u and u in seen:                          # flash/views 双源同帖去重
+            continue
+        if u:
+            seen.add(u)
+        raw_txt = re.sub(r"^@\w+:\s*", "", str(r[2] or ""))   # 库内文本带"@作者:"前缀
+        items.append({"text": raw_txt, "text_zh": r[3], "url": u,
+                      "author_handle": r[5], "sectors": r[6], "markets": r[7],
+                      "views": None, "likes": None})
+    rep["items"] = len(items)
+    if not items:
+        rep["skipped"] = f"窗口 {win_h}h 内无 X 新帖, 静默"
+        if not dry_run:
+            st = _load_state(_PUSH_STATE)
+            st["last_ts"] = time.time()
+            _save_state(_PUSH_STATE, st)
+        return rep
+    a_topics = _author_topics()
+    for it in items:
+        it["topics"] = _item_topics(it["sectors"], it["markets"],
+                                     it["author_handle"], a_topics, it["text"])
+    cand = [it for it in items if it["topics"]]
+    rep["classified"] = len(cand)
+    _enrich_stats(cand, max_handles=40)              # 热度: FxTwitter 现拉浏览量
+    bj = time.strftime("%m-%d %H:%M", time.localtime(time.time() - win_h * 3600)) \
+        + "~" + time.strftime("%H:%M")
+    send_conf = dict(conf)
+    send_conf["chat_id"] = ap["chat_id"]
+    preview = []
+    ok_any = dry_run
+    for acc in ap["accounts"]:
+        mix = {str(k): float(v) for k, v in (acc.get("mix") or {}).items()
+               if str(k) in TOPICS and float(v) > 0}
+        per = _pick_for_account(cand, acc, ap["top_total"])
+        if not per:
+            rep["errors"].append(f"{acc.get('name') or '?'}: 窗口内无命中素材")
+            continue
+        text = _compose_push(acc, per, mix, bj, len(cand))
+        if dry_run:
+            preview.append(text)
+            continue
+        ok, err = send_text(send_conf, text)
+        if ok:
+            ok_any = True
+            rep["sent"] += 1
+            time.sleep(0.5)
+        else:
+            rep["errors"].append(f"{acc.get('name') or '?'} 发送失败: {err}")
+    if dry_run:
+        rep["preview"] = preview
+    elif ok_any:
+        st = _load_state(_PUSH_STATE)
+        st["last_ts"] = time.time()
+        _save_state(_PUSH_STATE, st)
+    return rep

@@ -371,6 +371,15 @@ def sources_cmd(args) -> int:
             rep = feishu_mod.run_digest(since)
             print(json.dumps(rep, ensure_ascii=False, indent=1))
             return EXIT_OK
+        if args.action == "push":
+            rep = feishu_mod.run_account_push(dry_run=bool(getattr(args, "dry_run", False)),
+                                              force=bool(getattr(args, "force", False)),
+                                              window_h=(float(args.window) if getattr(args, "window", None) else None))
+            print(json.dumps({k: v for k, v in rep.items() if k != "preview"},
+                             ensure_ascii=False, indent=1))
+            for i, msg in enumerate(rep.get("preview") or [], 1):
+                print(f"\n===== dry-run 卡片 {i} =====\n{msg}")
+            return EXIT_OK
         return feishu_mod.watch_loop()
     return EXIT_FAIL
 
@@ -729,9 +738,14 @@ def main() -> int:
     ps_en.add_argument("state", nargs="?", choices=["on", "off"], default=None,
                        help="on/off, 缺省=翻转当前状态")
     ps_en.add_argument("--json", action="store_true")
-    ps_fs = ssub.add_parser("feishu", help="飞书披露(15min X热点摘要 / 1min 账号池监控)")
-    ps_fs.add_argument("action", choices=["digest", "watch", "test"],
-                       help="digest=手动跑一轮摘要; watch=常驻监控循环; test=发测试消息")
+    ps_fs = ssub.add_parser("feishu", help="飞书披露(15min X热点摘要 / 1min 账号池监控 / 账号成分推送)")
+    ps_fs.add_argument("action", choices=["digest", "watch", "test", "push"],
+                       help="digest=手动跑一轮摘要; watch=常驻监控循环; test=发测试消息; "
+                            "push=账号成分推送(--dry-run组卡预览不发)")
+    ps_fs.add_argument("--dry-run", action="store_true", help="push: 只组卡打印, 不发群不记节流状态")
+    ps_fs.add_argument("--force", action="store_true", help="push: 忽略2h节流立即推")
+    ps_fs.add_argument("--window", type=float, dest="window", default=None,
+                       help="push: 自定义收集窗口小时数(缺省用配置window_h)")
 
     p_fl = sub.add_parser("flows", help="生成工作流(板块二)")
     fsub = p_fl.add_subparsers(dest="sub", required=True)
