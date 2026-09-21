@@ -3272,6 +3272,120 @@ accounts:
   positioning: 戴尔科技CEO
   tags:
   - 科技
+- handle: sama
+  uid: '1605'
+  name: Sam Altman
+  homepage: https://x.com/sama
+  markets:
+  - 全球
+  role: kol
+  lang: en
+  priority: medium
+  risk: medium
+  replies: false
+  note: '手工录入批次(2026-09-21); 粉丝625万; bio: The mission of OpenAI is to ensure that AGI benefits all of humanity'
+  followers: 6257978
+  positioning: OpenAI使命：AGI造福人类
+  tags:
+  - AI
+- handle: finkd
+  uid: '20749410'
+  name: Mark Zuckerberg
+  homepage: https://x.com/finkd
+  markets:
+  - 全球
+  role: kol
+  lang: en
+  priority: medium
+  risk: medium
+  replies: false
+  note: 手工录入批次(2026-09-21); 粉丝240万
+  followers: 2409497
+  positioning: 发布Muse AI产品信息
+  tags:
+  - AI
+  - 科技
+- handle: DarioAmodei
+  uid: '874126509245476864'
+  name: Dario Amodei
+  homepage: https://x.com/DarioAmodei
+  markets:
+  - 全球
+  role: kol
+  lang: en
+  priority: medium
+  risk: medium
+  replies: false
+  note: '手工录入批次(2026-09-21); 粉丝80万; bio: Anthropic CEO. http://darioamodei.com'
+  followers: 805313
+  positioning: Anthropic CEO
+  tags:
+  - AI
+- handle: JensenHuang
+  uid: '2070631956824698880'
+  name: Jensen Huang
+  homepage: https://x.com/JensenHuang
+  markets:
+  - 全球
+  role: kol
+  lang: en
+  priority: medium
+  risk: medium
+  replies: false
+  note: '手工录入批次(2026-09-21); 粉丝108万; bio: Founder and CEO of NVIDIA.'
+  followers: 1089300
+  positioning: NVIDIA创始人兼CEO
+  tags:
+  - 科技
+  - AI
+- handle: LipBuTan1
+  uid: '1548488713440595968'
+  name: Lip-Bu Tan
+  homepage: https://x.com/LipBuTan1
+  markets:
+  - 全球
+  role: kol
+  lang: en
+  priority: medium
+  risk: medium
+  replies: false
+  note: '手工录入批次(2026-09-21); 粉丝3万; bio: CEO of Intel Corporation, Chairman of Walden International, Founding Managing Pa'
+  followers: 39259
+  positioning: 英特尔CEO
+  tags:
+  - 科技
+- handle: LisaSu
+  uid: '836224570013138944'
+  name: Lisa Su
+  homepage: https://x.com/LisaSu
+  markets:
+  - 全球
+  role: kol
+  lang: en
+  priority: medium
+  risk: medium
+  replies: false
+  note: '手工录入批次(2026-09-21); 粉丝30万; bio: Chair and CEO of @AMD'
+  followers: 305889
+  positioning: AMD董事长兼CEO
+  tags:
+  - 科技
+- handle: sundarpichai
+  uid: '14130366'
+  name: Sundar Pichai
+  homepage: https://x.com/sundarpichai
+  markets:
+  - 全球
+  role: kol
+  lang: en
+  priority: medium
+  risk: medium
+  replies: false
+  note: '手工录入批次(2026-09-21); 粉丝1158万; bio: CEO, Google and Alphabet'
+  followers: 11581648
+  positioning: 谷歌与Alphabet CEO
+  tags:
+  - 科技
 filters:
   include_keywords:
   - piyasa

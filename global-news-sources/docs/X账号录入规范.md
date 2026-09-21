@@ -334,3 +334,20 @@ accounts:
 |MosesWang16|1533166798937407492|全球|kol|zh|medium|2026-09-17|粉丝0万|
 |aleabitoreddit|1940360837547565056|全球|kol|en|medium|2026-09-17|粉丝103万|
 |MichaelDell|58560480|全球|kol|en|medium|2026-09-17|粉丝817万|
+
+## 十、2026-09-21 科技巨头CEO批次录入（7 新账号）
+
+来源：用户截图清单（8 条，1 条重复）。`@satyanadella` 已在池内（0917批次），intake 去重门跳过。
+**身份核验注记**：`@finkd` 经 FxTwitter 实证为 Mark Zuckerberg 的号（uid=20749410），并非 BlackRock 的 Larry Fink；按 handle 真实身份入库。
+
+|handle|uid|markets|role|lang|priority|录入日|备注|
+|---|---|---|---|---|---|---|---|
+|sama|1605|全球|kol|en|medium|2026-09-21|粉丝625万; OpenAI CEO|
+|finkd|20749410|全球|kol|en|medium|2026-09-21|粉丝240万; Mark Zuckerberg|
+|DarioAmodei|874126509245476864|全球|kol|en|medium|2026-09-21|粉丝80万; Anthropic CEO|
+|JensenHuang|2070631956824698880|全球|kol|en|medium|2026-09-21|粉丝108万; NVIDIA CEO|
+|LipBuTan1|1548488713440595968|全球|kol|en|medium|2026-09-21|粉丝3万; Intel CEO|
+|LisaSu|836224570013138944|全球|kol|en|medium|2026-09-21|粉丝30万; AMD董事长兼CEO|
+|sundarpichai|14130366|全球|kol|en|medium|2026-09-21|粉丝1158万; Google/Alphabet CEO|
+
+画像（定位=bio一句话/标签=10桶词表）已随批回填；执行链 = `scripts/xpool_intake.py --apply` → `scripts/backfill_xpool_profile.py --handles ...` → `scripts/sync_seeds.py`。
