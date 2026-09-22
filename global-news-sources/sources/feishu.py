@@ -357,6 +357,42 @@ _CRYPTO_L2 = {"加密资产", "支付金科", "交易所"}
 # 文本加密锁(附加不替换): 命中即补"加密"主题, 防止币帖被纯美股作者继承独占。
 _CRYPTO_TXT_PAT = re.compile(
     r"(?i)\b(btc|bitcoin|ethereum|eth|xrp|solana|stablecoin|crypto|altcoin)\b")
+# 观点型判定(v1 规则, 2026-09-22 用户裁决"观点优先, 流量为次"): 账号身份是大V/分析师/
+# 交易员 → 其帖默认观点; 条目类型=分析 → 观点; 文本命中第一人称/立场词 → 观点。
+_OPINION_ROLES = {"analyst", "trader", "kol", "insider"}
+_OPINION_PAT = re.compile(
+    r"(?i)\b(i think|in my view|my take|i believe|we should|must (buy|sell|avoid)|"
+    r"overvalued|undervalued|bubble|mispriced|我认为|依我看|我的看法|看多|看空|"
+    r"加仓|减仓|清仓|抄底|追高|逻辑是|观点[是:])")
+_TIME_FMT = ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M")
+
+
+def _parse_time(s: str):
+    import datetime as _dt
+    for f in _TIME_FMT:
+        try:
+            return _dt.datetime.strptime(str(s or "").strip(), f)
+        except ValueError:
+            continue
+    return None
+
+
+def _rate(it: dict, now) -> float:
+    """浏览增速 = 浏览量/发布时长(小时), 时长<15min 按0.25h 兜底防除零/爆表。"""
+    v = it.get("views") or 0
+    if not v:
+        return 0.0
+    t = _parse_time(it.get("time"))
+    age_h = max((now - t).total_seconds() / 3600, 0.25) if t else 24.0
+    return v / min(age_h, 24.0)
+
+
+def _is_opinion(it: dict) -> bool:
+    if str(it.get("author_role") or "") in _OPINION_ROLES:
+        return True
+    if str(it.get("item_type") or "") == "分析":
+        return True
+    return bool(_OPINION_PAT.search(it.get("text") or ""))
 _APAC_MKTS = ("香港", "台湾", "日本", "韩国")
 _EDU_PAT = re.compile("教学|课程|科普|入门|教程|教育|方法论|怎么读|一文读懂|估值课")
 _TAG_TOPIC = {"美股": "美股", "加密": "加密", "AI": "AI与科技", "科技": "AI与科技",
@@ -476,9 +512,12 @@ def _fmt_views(v) -> str:
     return f"{v / 10000:.1f}万".replace(".0万", "万") if v >= 10000 else str(v)
 
 
-def _pick_for_account(items: list, acc: dict, top_total: int) -> dict:
-    """按成分选各主题热度Top。条目在一个账号卡内最多出现一次(归入mix最高的命中主题,
-    该主题满额再落其他命中主题)。返回 {主题: [item按热度降序]}。"""
+def _pick_for_account(items: list, acc: dict, top_total: int, now=None) -> dict:
+    """按成分选各主题 Top。排序(2026-09-22 用户裁决): 观点型优先, 其下按浏览增速
+    (浏览量/发布时长)降序; 条目在一个账号卡内最多出现一次(归入mix最高的命中主题,
+    该主题满额再落其他命中主题)。返回 {主题: [item按序]}。"""
+    import datetime as _dt
+    now = now or _dt.datetime.now()
     mix = {str(k): float(v) for k, v in (acc.get("mix") or {}).items()
            if str(k) in TOPICS and float(v) > 0}
     if not mix:
@@ -486,8 +525,8 @@ def _pick_for_account(items: list, acc: dict, top_total: int) -> dict:
     quota = _split_quota(mix, top_total)
     order = sorted(mix, key=lambda t: -mix[t])      # 主题排序=成分占比降序
     per = {t: [] for t in order}
-    for it in sorted(items, key=lambda x: (-(x.get("views") or 0),
-                                           -(x.get("likes") or 0))):
+    ranked = sorted(items, key=lambda x: (0 if _is_opinion(x) else 1, -_rate(x, now)))
+    for it in ranked:
         hit = [t for t in order if t in (it.get("topics") or ())]
         if not hit:
             continue
@@ -498,9 +537,17 @@ def _pick_for_account(items: list, acc: dict, top_total: int) -> dict:
     return {t: per[t] for t in order if per[t]}
 
 
-def _compose_push(acc: dict, per: dict, mix: dict, bj: str, cand: int) -> str:
-    """账号卡文本。私发(dm+open_id)=称呼名不带@标签; 群发=有open_id真@否则文字@;
-    原文优先, 截120字。"""
+def _fmt_rate(r: float) -> str:
+    return f"{_fmt_views(int(r))}/时" if r >= 1 else ""
+
+
+def _compose_push(acc: dict, per: dict, mix: dict, bj: str, cand: int,
+                  hits: dict | None = None, now=None) -> list:
+    """账号卡 → 消息块列表(飞书单条长度限制, 超长自动分块, 每块≤2800字)。
+    每条目=【观点|资讯】增速@作者 + 中文译文(未译标注) + 原文全文 + 链接, 不截断。
+    主题节内: 观点在前资讯在后, 各自按浏览增速降序(_pick 已排好)。"""
+    import datetime as _dt
+    now = now or _dt.datetime.now()
     oid = str(acc.get("owner_open_id") or "").strip()
     owner = str(acc.get("owner") or "").strip() or "账号所有人"
     name = acc.get("name") or "?"
@@ -512,21 +559,79 @@ def _compose_push(acc: dict, per: dict, mix: dict, bj: str, cand: int) -> str:
         head = f"@{owner} 账号「{name}」"
     mix_s = " · ".join(f"{t}{int(p)}%" for t, p in
                        sorted(mix.items(), key=lambda kv: -kv[1]))
-    lines = [f"{head}近2h按成分选题",
-             f"成分: {mix_s}｜窗口 {bj}｜候选 {cand} 条"]
+    body: list = [f"{head}近几小时按成分选题",
+                  f"成分: {mix_s}｜窗口 {bj}｜候选命中 {cand} 条（按观点优先+浏览增速取Top，每板块显示 命中/取用）"]
     for t, its in per.items():
-        lines.append(f"\n▍{t}（Top{len(its)}）")
+        n_hit = (hits or {}).get(t, len(its))
+        n_op = sum(1 for x in its if _is_opinion(x))
+        body.append(f"\n▍{t}（命中{n_hit}·取{len(its)}｜观点{n_op}/资讯{len(its)-n_op}）")
         for i, it in enumerate(its, 1):
+            tag = "观点" if _is_opinion(it) else "资讯"
+            rt = _fmt_rate(_rate(it, now))
             v = _fmt_views(it.get("views"))
-            vs = f"👁{v} " if v else ""
-            txt = (it.get("text") or it.get("text_zh") or "").replace("\n", " ")[:120]
-            lines.append(f"{i}. {vs}@{it.get('author_handle') or '?'}: {txt}")
-            lines.append(str(it.get("url") or ""))
-        if len("\n".join(lines)) > MAX_TEXT - 300:
-            lines.append("…(篇幅所限略)")
-            break
-    lines.append("\n—— 数据站按账号成分自动整理")
-    return "\n".join(lines)[:MAX_TEXT]
+            vs = f"👁{v}" if v else ""
+            rs = f"·{rt}" if rt else ""
+            zh = (it.get("text_zh") or "").strip()
+            zh_line = f"译: {zh}" if zh else "译: [未译]"
+            body.append(f"{i}.【{tag}】{vs}{rs} @{it.get('author_handle') or '?'}")
+            body.append(zh_line)
+            body.append(f"原: {it.get('text') or ''}")
+            body.append(str(it.get("url") or ""))
+    body.append("\n—— 数据站按账号成分自动整理(观点优先·浏览增速排序)")
+    chunks, cur, cur_len = [], [], 0
+    for ln in body:                                  # 分块: 行粒度, ≤2800字/块
+        if cur_len + len(ln) > 2800 and cur:
+            chunks.append("\n".join(cur))
+            cur, cur_len = [f"（续）{head}"], 0
+        cur.append(ln)
+        cur_len += len(ln) + 1
+    if cur:
+        chunks.append("\n".join(cur))
+    return [c[:MAX_TEXT] for c in chunks]
+
+
+_SYS_TR = """你是财经翻译。输入是编号的X帖子原文JSON数组, 逐条译成简体中文,
+保留数字/代码/符号, 语气忠实。只输出JSON数组(同序), 每元素为对应中文译文字符串。"""
+
+
+def _translate_missing(conf: dict, items: list, cap: int = 12) -> int:
+    """推送前兜底翻译: 对被选中且缺 text_zh 的条目批量过一遍 LLM(链=digest_models
+    缺省复用 translate.models, 云端zen_bridge/本地omniroute 均可), 失败静默保[未译]。
+    返回补译成功数。"""
+    todo = [it for it in items if not (it.get("text_zh") or "").strip()][:cap]
+    if not todo:
+        return 0
+    import requests
+    models = conf.get("digest_models") or (_cfg_section().get("translate") or {}).get("models") or []
+    payload = json.dumps([str(it.get("text") or "")[:600] for it in todo],
+                         ensure_ascii=False)
+    for m in models:
+        base = str(m.get("base_url") or "").strip().rstrip("/")
+        model = str(m.get("model") or "").strip()
+        if not (base and model):
+            continue
+        try:
+            r = requests.post(f"{base}/chat/completions",
+                              headers={"Authorization": f"Bearer {str(m.get('api_key') or 'x')}",
+                                       "Content-Type": "application/json"},
+                              json={"model": model,
+                                    "messages": [{"role": "system", "content": _SYS_TR},
+                                                 {"role": "user", "content": payload}]},
+                              timeout=90)
+            r.raise_for_status()
+            out = (r.json().get("choices") or [{}])[0].get("message", {}).get("content") or ""
+            out = re.sub(r"^```(json)?|```$", "", out.strip(), flags=re.M).strip()
+            arr = json.loads(out)
+            if isinstance(arr, list):
+                n = 0
+                for it, zh in zip(todo, arr):
+                    if isinstance(zh, str) and zh.strip():
+                        it["text_zh"] = zh.strip()
+                        n += 1
+                return n
+        except Exception:
+            continue
+    return 0
 
 
 def run_account_push(dry_run: bool = False, force: bool = False,
@@ -556,8 +661,9 @@ def run_account_push(dry_run: bool = False, force: bool = False,
     conn = _store._connect()
     try:
         rows = conn.execute(
-            "SELECT source_id, time, text, text_zh, url, author_handle, sectors, markets "
-            "FROM items WHERE fetched_at>=? AND source_id LIKE '%twitter%' "
+            "SELECT source_id, time, text, text_zh, url, author_handle, sectors, markets, "
+            "item_type, author_role FROM items "
+            "WHERE fetched_at>=? AND source_id LIKE '%twitter%' "
             "ORDER BY time DESC LIMIT 400", (since,)).fetchall()
     finally:
         conn.close()
@@ -569,8 +675,9 @@ def run_account_push(dry_run: bool = False, force: bool = False,
         if u:
             seen.add(u)
         raw_txt = re.sub(r"^@\w+:\s*", "", str(r[2] or ""))   # 库内文本带"@作者:"前缀
-        items.append({"text": raw_txt, "text_zh": r[3], "url": u,
+        items.append({"text": raw_txt, "text_zh": r[3], "url": u, "time": r[1],
                       "author_handle": r[5], "sectors": r[6], "markets": r[7],
+                      "item_type": r[8], "author_role": r[9],
                       "views": None, "likes": None})
     rep["items"] = len(items)
     if not items:
@@ -593,6 +700,7 @@ def run_account_push(dry_run: bool = False, force: bool = False,
     send_conf["chat_id"] = ap["chat_id"]
     preview = []
     ok_any = dry_run
+    rep["translated"] = 0
     for acc in ap["accounts"]:
         mix = {str(k): float(v) for k, v in (acc.get("mix") or {}).items()
                if str(k) in TOPICS and float(v) > 0}
@@ -600,25 +708,32 @@ def run_account_push(dry_run: bool = False, force: bool = False,
         if not per:
             rep["errors"].append(f"{acc.get('name') or '?'}: 窗口内无命中素材")
             continue
-        text = _compose_push(acc, per, mix, bj, len(cand))
+        picked = [it for its in per.values() for it in its]
+        rep["translated"] += _translate_missing(conf, picked)      # 兜底翻译被选中条目
+        hits = {t: sum(1 for it in cand if t in (it.get("topics") or ()))
+                for t in per}
+        chunks = _compose_push(acc, per, mix, bj, len(cand), hits)
         if dry_run:
-            preview.append(text)
+            preview.extend(chunks)
             continue
         oid = str(acc.get("owner_open_id") or "").strip()
-        if acc.get("dm"):
-            if not oid:
-                rep["errors"].append(f"{acc.get('name') or '?'}: dm=true 但缺 owner_open_id, 回退群发")
-                ok, err = send_text(send_conf, text)
+        for ci, text in enumerate(chunks):
+            if acc.get("dm"):
+                if not oid:
+                    if ci == 0:
+                        rep["errors"].append(
+                            f"{acc.get('name') or '?'}: dm=true 但缺 owner_open_id, 回退群发")
+                    ok, err = send_text(send_conf, text)
+                else:
+                    ok, err = send_text(send_conf, text, {"type": "open_id", "id": oid})
             else:
-                ok, err = send_text(send_conf, text, {"type": "open_id", "id": oid})
-        else:
-            ok, err = send_text(send_conf, text)
-        if ok:
-            ok_any = True
-            rep["sent"] += 1
-            time.sleep(0.5)
-        else:
-            rep["errors"].append(f"{acc.get('name') or '?'} 发送失败: {err}")
+                ok, err = send_text(send_conf, text)
+            if ok:
+                ok_any = True
+                rep["sent"] += 1
+                time.sleep(0.5)
+            else:
+                rep["errors"].append(f"{acc.get('name') or '?'} 发送失败: {err}")
     if dry_run:
         rep["preview"] = preview
     elif ok_any:

@@ -1,9 +1,11 @@
-"""账号成分推送回归(2026-09-21): 9类投影 / 作者继承 / 配额切分 / 选卡组卡 / 节流。
+"""账号成分推送回归(2026-09-21/22): 9类投影/作者继承/配额/组卡/节流/
+观点优先/浏览增速排序/兜底翻译/私发路由。
 
 裸克隆可跑(离线全 mock, 不实抓不发群):
   python -m pytest global-news-sources/tests/test_feishu_account_push.py -q
 """
 
+import datetime as _dt
 import importlib
 import json
 import sys
@@ -31,7 +33,6 @@ def test_item_topics_fin_non_crypto_by_market():
     assert feishu._item_topics('["金融与加密>券商"]', '["美国"]', "a", {}) == {"美股"}
     assert feishu._item_topics('["金融与加密>银行"]', '["A股"]', "a", {}) == {"A股"}
     assert feishu._item_topics('["金融与加密>银行"]', '["香港"]', "a", {}) == {"亚太股市"}
-    # 市场不明确 → 空集(宁漏勿误)
     assert feishu._item_topics('["金融与加密>银行"]', '["全球"]', "a", {}) == set()
 
 
@@ -49,20 +50,17 @@ def test_item_topics_l1_beats_author():
 
 
 def test_item_topics_crypto_text_lock_additive():
-    # 币帖由纯美股作者发出: 继承美股 + 文本锁附加加密(不替换)
     at = {"uw": {"美股"}}
     tp = feishu._item_topics("[]", '["美国"]', "uw", at,
-                             "BREAKING: Bitcoin rises above \$84,000")
+                             "BREAKING: Bitcoin rises above $84,000")
     assert tp == {"美股", "加密"}
-    # L1 命中时文本锁同样附加
     tp2 = feishu._item_topics('["宏观与政策>货币政策"]', "[]", "a", {},
                               "ETH ETF inflows surge")
     assert tp2 == {"宏观与政策", "加密"}
-    # 无命中词不受影响
     assert feishu._item_topics("[]", "[]", "uw", at, "NVDA earnings beat") == {"美股"}
 
 
-# ── 2. 作者继承: 池 tags 映射 + 投教信号 + 停用排除 ──────────────────────────
+# ── 2. 作者继承: 池 tags 映射 + 投教信号 ────────────────────────────────────
 def test_author_topics_from_pool(monkeypatch):
     # 桩模拟 _pool_accounts 的产出契约(只含启用账号; enabled 过滤在 _pool_accounts 内)
     monkeypatch.setattr(feishu, "_pool_accounts", lambda: [
@@ -92,91 +90,91 @@ def test_split_quota_thirds_and_single():
 
 
 def test_split_quota_largest_remainder_direction():
-    # 补位必须给余数最大的主题(50/15/15/20×10 → 余数AI.5=产业链.5 > 美股0/宏观0)
     q = feishu._split_quota({"美股": 50, "AI与科技": 15, "产业链与制造": 15, "宏观与政策": 20}, 10)
     assert q == {"美股": 5, "AI与科技": 2, "产业链与制造": 1, "宏观与政策": 2}
-    # 五主题 50/10/10/10/10(和90) → 补位给美股而非小主题
     q2 = feishu._split_quota({"美股": 50, "亚太股市": 10, "AI与科技": 10,
                               "宏观与政策": 10, "投教科普": 10}, 10)
     assert q2["美股"] == 6 and sum(q2.values()) == 10
 
 
-# ── 4. 选卡: 热度降序 / 条目单次出现 / 满额溢出到次优主题 ────────────────────
-def _mk(handle, topics, views, url):
+# ── 4. 选卡: 观点优先/增速降序/条目单次出现/配额 ─────────────────────────────
+def _mk(handle, topics, views, url, *, age_h=1.0, role="", itype="", text=None, zh=""):
+    t = (_dt.datetime.now() - _dt.timedelta(hours=age_h)).strftime("%Y-%m-%d %H:%M")
     return {"author_handle": handle, "topics": set(topics), "views": views,
-            "likes": 0, "text": f"post-{handle}-{views}", "text_zh": "", "url": url}
+            "likes": 0, "text": text or f"post-{handle}-{views}", "text_zh": zh,
+            "url": url, "time": t, "author_role": role, "item_type": itype}
 
 
-def test_pick_orders_by_views_and_dedup():
+def test_pick_orders_and_dedup():
     items = [_mk("a", {"美股"}, 900, "u1"), _mk("b", {"美股"}, 12000, "u2"),
              _mk("c", {"美股", "AI与科技"}, 500, "u3")]
-    acc = {"mix": {"美股": 70, "AI与科技": 30}}
-    per = feishu._pick_for_account(items, acc, 3)
-    assert [i["url"] for i in per["美股"]] == ["u2", "u1"]
-    assert per["AI与科技"][0]["url"] == "u3"      # 单次出现: c 只出现在AI(美股满2/2)
+    per = feishu._pick_for_account(items, {"mix": {"美股": 70, "AI与科技": 30}}, 3)
+    assert [i["url"] for i in per["美股"]] == ["u2", "u1"]      # 同龄=views序
+    assert per["AI与科技"][0]["url"] == "u3"                     # 单次出现
+
+
+def test_pick_opinion_first_then_rate():
+    items = [_mk("kol1", {"美股"}, 500, "u1", role="kol", age_h=1.0),        # 观点 500/时
+             _mk("media1", {"美股"}, 50000, "u2", role="media", age_h=1.0),   # 资讯 5万/时
+             _mk("kol2", {"美股"}, 800, "u3", role="trader", age_h=2.0),      # 观点 400/时
+             _mk("media2", {"美股"}, 3000, "u4", role="data_bot", age_h=3.0)]  # 资讯 1千/时
+    per = feishu._pick_for_account(items, {"mix": {"美股": 100}}, 4)
+    assert [i["url"] for i in per["美股"]] == ["u1", "u3", "u2", "u4"]
+    # 观点层在前(u1>u3), 资讯层在后(u2>u4)——高流量资讯压不过低流量观点
 
 
 def test_pick_quota_respected():
     items = [_mk(f"h{i}", {"美股"}, 100 - i, f"u{i}") for i in range(8)]
     per = feishu._pick_for_account(items, {"mix": {"美股": 60, "加密": 40}}, 5)
-    assert len(per["美股"]) == 3                   # 60% of 5
-    assert "加密" not in per                       # 无命中素材的主题不出现
+    assert len(per["美股"]) == 3
+    assert "加密" not in per
 
 
-# ── 5. 组卡: @人 / 成分串 / 主题序 / 原文截断 / 长度熔断 ──────────────────────
+# ── 5. 组卡: @人/成分串/主题序/全文双语/分块 ─────────────────────────────────
 def test_compose_push_basic():
-    per = {"美股": [_mk("b", {"美股"}, 12000, "u2"), _mk("a", {"美股"}, 9, "u1")]}
+    per = {"美股": [_mk("b", {"美股"}, 12000, "u2", zh="比特币突破8.4万"),
+                    _mk("a", {"美股"}, 9, "u1")]}
     mix = {"美股": 60, "AI与科技": 40}
-    txt = feishu._compose_push(
-        {"name": "Owen聊投资", "owner": "Owen"}, per, mix, "09-21 10:00~12:00", 33)
+    txt = "\n".join(feishu._compose_push(
+        {"name": "Owen聊投资", "owner": "Owen"}, per, mix, "09-21 10:00~12:00", 33))
     assert "@Owen 账号「Owen聊投资」" in txt
     assert "美股60% · AI与科技40%" in txt
-    assert "▍美股（Top2）" in txt and "👁1.2万" in txt
-    assert txt.index("u2") < txt.index("u1")       # 热度降序
+    assert "▍美股（命中2·取2" in txt and "👁1.2万" in txt
+    assert "译: 比特币突破8.4万" in txt and "译: [未译]" in txt
+    assert txt.index("u2") < txt.index("u1")
+
+
+def test_compose_push_full_text_no_truncation():
+    long_en = "word " * 400
+    per = {"AI与科技": [_mk("x", {"AI与科技"}, 5, "u", text=long_en)]}
+    txt = "\n".join(feishu._compose_push(
+        {"name": "N", "owner": "O"}, per, {"AI与科技": 100}, "t", 1))
+    assert "word word word word" in txt               # 不再截120字
 
 
 def test_compose_push_real_at_tag():
     per = {"AI与科技": [_mk("x", {"AI与科技"}, 5, "u")]}
-    txt = feishu._compose_push(
+    txt = "\n".join(feishu._compose_push(
         {"name": "N", "owner": "张三", "owner_open_id": "ou_abc"}, per, {"AI与科技": 100},
-        "t", 1)
+        "t", 1))
     assert '<at user_id="ou_abc"></at>' in txt
 
 
 def test_compose_push_dm_header():
     per = {"AI与科技": [_mk("x", {"AI与科技"}, 5, "u")]}
-    txt = feishu._compose_push(
+    txt = "\n".join(feishu._compose_push(
         {"name": "N", "owner": "张三", "owner_open_id": "ou_abc", "dm": True},
-        per, {"AI与科技": 100}, "t", 1)
+        per, {"AI与科技": 100}, "t", 1))
     assert "<at" not in txt and "张三 你好｜账号「N」" in txt
 
 
-def test_send_text_receive_routing(monkeypatch):
-    calls = []
-
-    def fake_post(url, payload, token="", timeout=20):
-        calls.append((url, payload))
-        return {"code": 0}
-
-    monkeypatch.setattr(feishu, "_post", fake_post)
-    monkeypatch.setattr(feishu, "_token", lambda c: "tk")
-    conf = {"enabled": True, "app_id": "a", "app_secret": "s", "chat_id": "oc_g"}
-    assert feishu.send_text(conf, "hi")[0]                       # 缺省群发
-    assert "receive_id_type=chat_id" in calls[-1][0] and calls[-1][1]["receive_id"] == "oc_g"
-    assert feishu.send_text(conf, "hi", {"type": "open_id", "id": "ou_x"})[0]
-    assert "receive_id_type=open_id" in calls[-1][0] and calls[-1][1]["receive_id"] == "ou_x"
-    # 私发不可见(230002)报错带指引
-    monkeypatch.setattr(feishu, "_post",
-                        lambda u, p, token="", timeout=20: {"code": 230002, "msg": "not visible"})
-    ok, err = feishu.send_text(conf, "hi", {"type": "open_id", "id": "ou_x"})
-    assert not ok and "可用范围" in err
-
-
 def test_compose_push_length_guard():
-    items = [_mk(f"h{i}", {"美股"}, i, f"u{i}") for i in range(200)]
-    txt = feishu._compose_push({"name": "N", "owner": "O"}, {"美股": items},
-                               {"美股": 100}, "t", 200)
-    assert len(txt) <= feishu.MAX_TEXT
+    items = [_mk(f"h{i}", {"美股"}, i, f"u{i}", text="长文内容" * 100) for i in range(60)]
+    chunks = feishu._compose_push({"name": "N", "owner": "O"}, {"美股": items},
+                                  {"美股": 100}, "t", 200)
+    assert len(chunks) > 1                            # 超长自动分块
+    assert all(len(c) <= feishu.MAX_TEXT for c in chunks)
+    assert "（续）" in chunks[1]
 
 
 def test_fmt_views():
@@ -186,18 +184,56 @@ def test_fmt_views():
     assert feishu._fmt_views(None) == ""
 
 
-# ── 6. run_account_push 集成(dry-run 全链 mock) ──────────────────────────────
+# ── 6. 观点信号 / 增速计算 / 兜底翻译 ────────────────────────────────────────
+def test_is_opinion_signals():
+    assert feishu._is_opinion({"author_role": "kol", "text": "", "item_type": ""})
+    assert feishu._is_opinion({"author_role": "", "text": "", "item_type": "分析"})
+    assert feishu._is_opinion({"author_role": "media", "item_type": "快讯",
+                               "text": "I think this rally is overextended"})
+    assert not feishu._is_opinion({"author_role": "media", "item_type": "快讯",
+                                   "text": "BREAKING: CPI rises 3%"})
+
+
+def test_rate_normalizes_by_age():
+    now = _dt.datetime.now()
+    new = {"views": 1000,
+           "time": (now - _dt.timedelta(minutes=30)).strftime("%Y-%m-%d %H:%M")}
+    old = {"views": 1000,
+           "time": (now - _dt.timedelta(hours=10)).strftime("%Y-%m-%d %H:%M")}
+    assert abs(feishu._rate(new, now) - 2000) < 100   # 0.5h±分钟粒度容差
+    assert abs(feishu._rate(old, now) - 100) < 5
+    assert feishu._rate({"views": None, "time": ""}, now) == 0.0
+
+
+def test_translate_missing(monkeypatch):
+    import requests as _rq
+
+    class _R:
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return {"choices": [{"message": {"content": '```json\n["译A", "译B"]\n```'}}]}
+
+    monkeypatch.setattr(_rq, "post", lambda *a, **k: _R())
+    conf = {"digest_models": [{"base_url": "http://x/v1", "api_key": "k", "model": "m"}]}
+    items = [{"text": "A", "text_zh": ""}, {"text": "B", "text_zh": None}]
+    n = feishu._translate_missing(conf, items)
+    assert n == 2 and items[0]["text_zh"] == "译A" and items[1]["text_zh"] == "译B"
+
+
+# ── 7. run_account_push 集成(dry-run 全链 mock) ──────────────────────────────
 class _FakeConn:
     def execute(self, sql, params):
         class _R:
             def fetchall(inner):
                 return [
-                    ("src_twitter_a", "t1", "NVDA earnings beat", "", "u1", "UW",
-                     '["半导体>代工"]', '["美国"]'),
-                    ("src_twitter_b", "t2", "BTC breakout", "", "u2", "crypto_kol",
-                     '[]', '["全球"]'),
-                    ("src_twitter_a", "t3", "dup of u1", "", "u1", "UW",
-                     '["半导体>代工"]', '["美国"]'),
+                    ("src_twitter_a", "2026-09-22 10:00", "NVDA earnings beat", "",
+                     "u1", "UW", '["半导体>代工"]', '["美国"]', "快讯", "analyst"),
+                    ("src_twitter_b", "2026-09-22 10:30", "BTC breakout", "",
+                     "u2", "crypto_kol", '[]', '["全球"]', "快讯", "media"),
+                    ("src_twitter_a", "2026-09-22 11:00", "dup of u1", "",
+                     "u1", "UW", '["半导体>代工"]', '["美国"]', "快讯", "analyst"),
                 ]
         return _R()
 
@@ -214,19 +250,22 @@ def test_run_account_push_dry_run(monkeypatch):
                          "accounts": [{"name": "Owen聊投资", "owner": "Owen",
                                        "mix": {"美股": 60, "加密": 20,
                                                "AI与科技": 20}}]}})
-    monkeypatch.setattr(feishu, "_store", type("S", (), {"_connect": staticmethod(_FakeConn)})())
+    monkeypatch.setattr(feishu, "_store",
+                        type("S", (), {"_connect": staticmethod(_FakeConn)})())
     monkeypatch.setattr(feishu, "_author_topics",
                         lambda: {"crypto_kol": {"加密"}, "uw": {"美股"}})
     monkeypatch.setattr(feishu, "_enrich_stats",
                         lambda items, max_handles=40: [it.update(views=1000) for it in items])
+    monkeypatch.setattr(feishu, "_translate_missing", lambda conf, items, cap=12: 0)
     rep = feishu.run_account_push(dry_run=True)
-    assert rep.get("items") == 2 and rep.get("classified") == 2   # u1重复(url同)去重后2条
-    assert len(rep["preview"]) == 1
-    card = rep["preview"][0]
-    assert "oc_new" not in card                                   # 卡片不含chat_id
+    assert rep.get("items") == 2 and rep.get("classified") == 2
+    assert rep.get("translated") == 0
+    card = "\n".join(rep["preview"])
+    assert "oc_new" not in card
     # u1 的 L1=半导体→AI与科技(条目投影优先于作者美股继承), 窗口内无美股素材 → 无美股节
     assert "「Owen聊投资」" in card and "▍加密" in card and "▍AI与科技" in card
     assert "▍美股" not in card
+    assert "【观点】" in card and "【资讯】" in card     # u1=analyst观点, u2=media资讯
 
 
 def test_run_account_push_throttle_gate(monkeypatch):
@@ -236,6 +275,28 @@ def test_run_account_push_throttle_gate(monkeypatch):
                                            "mix": {"美股": 100}}]}}
     monkeypatch.setattr(feishu, "_conf", lambda: conf)
     monkeypatch.setattr(feishu, "_load_state",
-                        lambda name: {"last_ts": time.time()} if name == feishu._PUSH_STATE else {})
-    rep = feishu.run_account_push()                               # 刚推过 → 静默
+                        lambda name: ({"last_ts": time.time()}
+                                      if name == feishu._PUSH_STATE else {}))
+    rep = feishu.run_account_push()                     # 刚推过 → 静默
     assert "skipped" in rep and "不足" in rep["skipped"]
+
+
+# ── 8. send_text 接收路由(群/私发) ───────────────────────────────────────────
+def test_send_text_receive_routing(monkeypatch):
+    calls = []
+
+    def fake_post(url, payload, token="", timeout=20):
+        calls.append((url, payload))
+        return {"code": 0}
+
+    monkeypatch.setattr(feishu, "_post", fake_post)
+    monkeypatch.setattr(feishu, "_token", lambda c: "tk")
+    conf = {"enabled": True, "app_id": "a", "app_secret": "s", "chat_id": "oc_g"}
+    assert feishu.send_text(conf, "hi")[0]              # 缺省群发
+    assert "receive_id_type=chat_id" in calls[-1][0] and calls[-1][1]["receive_id"] == "oc_g"
+    assert feishu.send_text(conf, "hi", {"type": "open_id", "id": "ou_x"})[0]
+    assert "receive_id_type=open_id" in calls[-1][0] and calls[-1][1]["receive_id"] == "ou_x"
+    monkeypatch.setattr(feishu, "_post",
+                        lambda u, p, token="", timeout=20: {"code": 230002, "msg": "not visible"})
+    ok, err = feishu.send_text(conf, "hi", {"type": "open_id", "id": "ou_x"})
+    assert not ok and "可用范围" in err
