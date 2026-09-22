@@ -143,6 +143,35 @@ def test_compose_push_real_at_tag():
     assert '<at user_id="ou_abc"></at>' in txt
 
 
+def test_compose_push_dm_header():
+    per = {"AI与科技": [_mk("x", {"AI与科技"}, 5, "u")]}
+    txt = feishu._compose_push(
+        {"name": "N", "owner": "张三", "owner_open_id": "ou_abc", "dm": True},
+        per, {"AI与科技": 100}, "t", 1)
+    assert "<at" not in txt and "张三 你好｜账号「N」" in txt
+
+
+def test_send_text_receive_routing(monkeypatch):
+    calls = []
+
+    def fake_post(url, payload, token="", timeout=20):
+        calls.append((url, payload))
+        return {"code": 0}
+
+    monkeypatch.setattr(feishu, "_post", fake_post)
+    monkeypatch.setattr(feishu, "_token", lambda c: "tk")
+    conf = {"enabled": True, "app_id": "a", "app_secret": "s", "chat_id": "oc_g"}
+    assert feishu.send_text(conf, "hi")[0]                       # 缺省群发
+    assert "receive_id_type=chat_id" in calls[-1][0] and calls[-1][1]["receive_id"] == "oc_g"
+    assert feishu.send_text(conf, "hi", {"type": "open_id", "id": "ou_x"})[0]
+    assert "receive_id_type=open_id" in calls[-1][0] and calls[-1][1]["receive_id"] == "ou_x"
+    # 私发不可见(230002)报错带指引
+    monkeypatch.setattr(feishu, "_post",
+                        lambda u, p, token="", timeout=20: {"code": 230002, "msg": "not visible"})
+    ok, err = feishu.send_text(conf, "hi", {"type": "open_id", "id": "ou_x"})
+    assert not ok and "可用范围" in err
+
+
 def test_compose_push_length_guard():
     items = [_mk(f"h{i}", {"美股"}, i, f"u{i}") for i in range(200)]
     txt = feishu._compose_push({"name": "N", "owner": "O"}, {"美股": items},

@@ -3,7 +3,10 @@
 # 来源: 腾讯文档《账号定位》2026-09-22 录入(https://docs.qq.com/sheet/DQXR5T2JtVGx1YWZr);
 # 副类门槛: 占比<10% 的类别按表头规则剔除(第3行A股5%/第4行A股5%+亚太5% 已剔)。
 # mix 键 = 9 大类封闭枚举(与 feishu.TOPICS 一致); name = X handle(去@); owner = 负责人。
-# 真@提醒: 给对应条目补 owner_open_id(ou_.., 飞书管理后台查)。
+# 推送方式(2026-09-22): 缺省=群发卡片; 补 owner_open_id(ou_..)=群里真@提醒;
+# 再加 dm: true = 私发个人(机器人直接发到该成员私聊, 卡片不带@标签)。
+# 前置: 私发要求飞书应用"可用范围"包含该成员; open_id 获取=飞书客户端个人资料卡
+# →右上角更多→复制 Open ID(或开放平台 API 调试台查用户)。
 accounts:
   - name: 花街 S 姐
     owner: 王小月

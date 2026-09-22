@@ -94,18 +94,26 @@ def _token(conf: dict) -> str:
     return tok
 
 
-def send_text(conf: dict, text: str) -> tuple[bool, str]:
-    """发文本消息到群。返回 (ok, err)。"""
-    if not (conf["enabled"] and conf["app_id"] and conf["chat_id"]):
-        return False, "feishu 未配置(enabled/app_id/chat_id)"
+def send_text(conf: dict, text: str, receive: dict | None = None) -> tuple[bool, str]:
+    """发文本消息。receive={"type":"chat_id"|"open_id","id":...}; 缺省=群(chat_id)。
+    open_id(ou_..)=私发个人(应用需在该成员可用范围内)。返回 (ok, err)。"""
+    rid_type = str((receive or {}).get("type") or "chat_id")
+    rid = str((receive or {}).get("id") or "")
+    if rid_type == "chat_id" and not rid:
+        rid = conf["chat_id"]
+    if not (conf["enabled"] and conf["app_id"] and rid):
+        return False, "feishu 未配置(enabled/app_id/接收ID)"
     try:
-        d = _post("https://open.feishu.cn/open-apis/im/v1/messages?receive_id_type=chat_id",
-                  {"receive_id": conf["chat_id"], "msg_type": "text",
+        d = _post(f"https://open.feishu.cn/open-apis/im/v1/messages?receive_id_type={rid_type}",
+                  {"receive_id": rid, "msg_type": "text",
                    "content": json.dumps({"text": text[:MAX_TEXT]}, ensure_ascii=False)},
                   token=_token(conf))
         if d.get("code") == 0:
             return True, ""
-        return False, f"code={d.get('code')} {str(d.get('msg'))[:100]}"
+        err = f"code={d.get('code')} {str(d.get('msg'))[:100]}"
+        if d.get("code") == 230002:
+            err += "（机器人对收件人不可见: 群发=先拉进群, 私发=应用可用范围需含该成员）"
+        return False, err
     except Exception as e:
         return False, f"{type(e).__name__}: {str(e)[:100]}"
 
@@ -491,13 +499,20 @@ def _pick_for_account(items: list, acc: dict, top_total: int) -> dict:
 
 
 def _compose_push(acc: dict, per: dict, mix: dict, bj: str, cand: int) -> str:
-    """账号卡文本。@owner(owner_open_id 有值=真@, 否则文字); 原文优先, 截120字。"""
+    """账号卡文本。私发(dm+open_id)=称呼名不带@标签; 群发=有open_id真@否则文字@;
+    原文优先, 截120字。"""
     oid = str(acc.get("owner_open_id") or "").strip()
     owner = str(acc.get("owner") or "").strip() or "账号所有人"
-    head = f'<at user_id="{oid}"></at>' if oid else f"@{owner}"
+    name = acc.get("name") or "?"
+    if acc.get("dm") and oid:
+        head = f"{owner} 你好｜账号「{name}」"
+    elif oid:
+        head = f'<at user_id="{oid}"></at> 账号「{name}」'
+    else:
+        head = f"@{owner} 账号「{name}」"
     mix_s = " · ".join(f"{t}{int(p)}%" for t, p in
                        sorted(mix.items(), key=lambda kv: -kv[1]))
-    lines = [f"{head} 账号「{acc.get('name') or '?'}」近2h按成分选题",
+    lines = [f"{head}近2h按成分选题",
              f"成分: {mix_s}｜窗口 {bj}｜候选 {cand} 条"]
     for t, its in per.items():
         lines.append(f"\n▍{t}（Top{len(its)}）")
@@ -589,7 +604,15 @@ def run_account_push(dry_run: bool = False, force: bool = False,
         if dry_run:
             preview.append(text)
             continue
-        ok, err = send_text(send_conf, text)
+        oid = str(acc.get("owner_open_id") or "").strip()
+        if acc.get("dm"):
+            if not oid:
+                rep["errors"].append(f"{acc.get('name') or '?'}: dm=true 但缺 owner_open_id, 回退群发")
+                ok, err = send_text(send_conf, text)
+            else:
+                ok, err = send_text(send_conf, text, {"type": "open_id", "id": oid})
+        else:
+            ok, err = send_text(send_conf, text)
         if ok:
             ok_any = True
             rep["sent"] += 1
