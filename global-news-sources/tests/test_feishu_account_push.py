@@ -91,6 +91,16 @@ def test_split_quota_thirds_and_single():
     assert feishu._split_quota({}, 8) == {}
 
 
+def test_split_quota_largest_remainder_direction():
+    # 补位必须给余数最大的主题(50/15/15/20×10 → 余数AI.5=产业链.5 > 美股0/宏观0)
+    q = feishu._split_quota({"美股": 50, "AI与科技": 15, "产业链与制造": 15, "宏观与政策": 20}, 10)
+    assert q == {"美股": 5, "AI与科技": 2, "产业链与制造": 1, "宏观与政策": 2}
+    # 五主题 50/10/10/10/10(和90) → 补位给美股而非小主题
+    q2 = feishu._split_quota({"美股": 50, "亚太股市": 10, "AI与科技": 10,
+                              "宏观与政策": 10, "投教科普": 10}, 10)
+    assert q2["美股"] == 6 and sum(q2.values()) == 10
+
+
 # ── 4. 选卡: 热度降序 / 条目单次出现 / 满额溢出到次优主题 ────────────────────
 def _mk(handle, topics, views, url):
     return {"author_handle": handle, "topics": set(topics), "views": views,

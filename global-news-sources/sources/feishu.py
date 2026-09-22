@@ -454,7 +454,7 @@ def _split_quota(mix: dict, total: int) -> dict:
             break
         quota[t_cut] -= 1
     while sum(quota.values()) < total:              # 余数从大到小补
-        quota[min(themes, key=lambda t: raw[t] - quota[t])] += 1
+        quota[max(themes, key=lambda t: raw[t] - quota[t])] += 1
     return quota
 
 

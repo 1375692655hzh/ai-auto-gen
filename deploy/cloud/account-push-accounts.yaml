@@ -1,0 +1,46 @@
+# 账号成分推送清单(账号成分+账号名称+账号所有人) —— 云端 upgrade-account-push.sh 每次运行
+# 以本文件覆盖 config.local.yaml 的 sources.feishu.account_push.accounts, 改清单=改本文件+git pull+重跑脚本。
+# 来源: 腾讯文档《账号定位》2026-09-22 录入(https://docs.qq.com/sheet/DQXR5T2JtVGx1YWZr);
+# 副类门槛: 占比<10% 的类别按表头规则剔除(第3行A股5%/第4行A股5%+亚太5% 已剔)。
+# mix 键 = 9 大类封闭枚举(与 feishu.TOPICS 一致); name = X handle(去@); owner = 负责人。
+# 真@提醒: 给对应条目补 owner_open_id(ou_.., 飞书管理后台查)。
+accounts:
+  - name: 花街 S 姐
+    owner: 王小月
+    mix: {美股: 50, AI与科技: 15, 产业链与制造: 15, 宏观与政策: 20}
+  - name: 凡人老王
+    owner: 蔡嘉旺
+    mix: {美股: 25, A股: 50, 产业链与制造: 10, 宏观与政策: 15}
+  - name: 财经俏佳人Shelly
+    owner: 赵佳楠
+    mix: {美股: 50, 亚太股市: 10, AI与科技: 10, 宏观与政策: 10, 投教科普: 10}
+  - name: Fiona 第一线
+    owner: 王小月
+    mix: {美股: 50, AI与科技: 20, 产业链与制造: 20}
+  - name: Owenwin888
+    owner: 黄正汉
+    mix: {美股: 60, 亚太股市: 10, AI与科技: 30}
+  - name: MarketButcher88
+    owner: 黄正汉
+    mix: {美股: 50, 加密: 30, AI与科技: 20}
+  - name: Stonk Stark
+    owner: 王小月
+    mix: {美股: 50, A股: 10, 加密: 20, AI与科技: 20}
+  - name: williamzyzovo
+    owner: 张洋
+    mix: {美股: 50, AI与科技: 50}
+  - name: anan1US
+    owner: 谢成
+    mix: {美股: 60, 亚太股市: 10, 宏观与政策: 20, 投教科普: 10}
+  - name: williamzyovo
+    owner: 张洋
+    mix: {美股: 50, AI与科技: 25, 产业链与制造: 15, 宏观与政策: 10}
+  - name: Vicky7sz
+    owner: 王斯琪
+    mix: {美股: 50, 加密: 10, 宏观与政策: 20, 投教科普: 20}
+  - name: lvjiuch
+    owner: 贺冰洁
+    mix: {美股: 50, AI与科技: 10, 宏观与政策: 20, 投教科普: 20}
+  - name: Erica_Liu66
+    owner: 贺冰洁
+    mix: {美股: 20, A股: 10, 加密: 10, 宏观与政策: 50, 投教科普: 10}

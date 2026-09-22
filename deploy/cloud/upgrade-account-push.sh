@@ -29,8 +29,15 @@ shutil.copy2(p, p.with_name(f"config.local.backup-{datetime.datetime.now():%Y%m%
 ap = fs.setdefault("account_push", {}) or {}
 ap.update({"enabled": True, "interval_h": 2, "window_h": 2,
            "chat_id": "oc_eb27ec292106627b466b4cd7b8500cbb", "top_total": 10})
-if not (ap.get("accounts") or []):        # 已有账号清单则完全尊重, 只补缺
-    ap["accounts"] = [{"name": "Owen聊投资", "owner": "Owen",
+# 账号清单真源 = 仓内 deploy/cloud/account-push-accounts.yaml(腾讯文档2026-09-22录入13号),
+# 每次升级覆盖同步; 文件缺失才尊重已有配置/回退示例。
+repo_accs_f = Path("deploy/cloud/account-push-accounts.yaml")
+if repo_accs_f.is_file():
+    lst = (yaml.safe_load(repo_accs_f.read_text(encoding="utf-8")) or {}).get("accounts")
+    if isinstance(lst, list) and lst:
+        ap["accounts"] = lst
+elif not (ap.get("accounts") or []):
+    ap["accounts"] = [{"name": "Owenwin888", "owner": "黄正汉",
                        "mix": {"美股": 60, "亚太股市": 10, "AI与科技": 30}}]
 fs["account_push"] = ap
 p.write_text(yaml.safe_dump(cfg, allow_unicode=True, sort_keys=False), encoding="utf-8")
