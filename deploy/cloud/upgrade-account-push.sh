@@ -59,16 +59,16 @@ if repo_accs_f.is_file():
 elif not (ap.get("accounts") or []):
     ap["accounts"] = [{"name": "Owenwin888", "owner": "黄正汉",
                        "mix": {"美股": 60, "亚太股市": 10, "AI与科技": 30}}]
-# MiniMax-M3 翻译链注入(0923: 兜底翻译主力, 实测3.9s/批·零思考泄漏; key 走 env 防泄密)
+# MiniMax-M3 翻译链注入(0923: 兜底备胎——zen免费桶全挂时链尾自动落它, 用户定位"备用"; key 走 env 防泄密)
 mm_key = os.environ.get("AAG_MINIMAX_KEY", "").strip()
 lst = [m for m in (fs.get("digest_models") or []) if isinstance(m, dict)]
 has_mm = any("minimaxi" in str(m.get("base_url") or "") for m in lst)
 if mm_key and not has_mm:
-    lst.insert(0, {"base_url": "https://api.minimaxi.com/v1", "api_key": mm_key,
+    lst.append({"base_url": "https://api.minimaxi.com/v1", "api_key": mm_key,
                    "model": "MiniMax-M3",
                    "extra": {"thinking": {"type": "disabled"}, "max_tokens": 16384}})
     fs["digest_models"] = lst
-    print("翻译链: MiniMax-M3 已注链头(思考关闭)")
+    print("翻译链: MiniMax-M3 已注链尾(兜底备用, 思考关闭)")
 elif has_mm:
     print("翻译链: 已含 MiniMax(幂等跳过)")
 else:
