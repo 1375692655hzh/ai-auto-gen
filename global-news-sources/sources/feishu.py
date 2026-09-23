@@ -761,17 +761,18 @@ def _translate_missing(conf: dict, items: list, cap: int = 12) -> int:
                 if not (base and model):
                     continue
                 try:
+                    extra = m.get("extra") if isinstance(m.get("extra"), dict) else {}
                     r = requests.post(f"{base}/chat/completions",
                                       headers={"Authorization": f"Bearer {str(m.get('api_key') or 'x')}",
                                                "Content-Type": "application/json"},
                                       json={"model": model,
                                             "messages": [{"role": "system", "content": _SYS_TR},
-                                                         {"role": "user", "content": payload}]},
+                                                         {"role": "user", "content": payload}], **extra},
                                       timeout=90)
                     r.raise_for_status()
                     out = (r.json().get("choices") or [{}])[0].get("message", {}).get("content") or ""
-                    out = re.sub(r"^```(json)?|```$", "", out.strip(), flags=re.M).strip()
-                    arr = json.loads(out)
+                    out = re.sub(r"<think>.*?</think>", "", out, flags=re.S)  # M2.x 思考混 content
+                    arr = json.loads(re.sub(r"^```(json)?|```$", "", out.strip(), flags=re.M).strip())
                     if isinstance(arr, list):
                         for it, zh in zip(batch, arr):
                             if isinstance(zh, str) and zh.strip():
@@ -791,15 +792,17 @@ def _translate_missing(conf: dict, items: list, cap: int = 12) -> int:
                 if not (base and model):
                     continue
                 try:
+                    extra = m.get("extra") if isinstance(m.get("extra"), dict) else {}
                     r = requests.post(f"{base}/chat/completions",
                                       headers={"Authorization": f"Bearer {str(m.get('api_key') or 'x')}",
                                                "Content-Type": "application/json"},
                                       json={"model": model,
                                             "messages": [{"role": "system", "content": _SYS_TR},
-                                                         {"role": "user", "content": payload}]},
+                                                         {"role": "user", "content": payload}], **extra},
                                       timeout=60)
                     r.raise_for_status()
                     out = (r.json().get("choices") or [{}])[0].get("message", {}).get("content") or ""
+                    out = re.sub(r"<think>.*?</think>", "", out, flags=re.S)
                     arr = json.loads(re.sub(r"^```(json)?|```$", "", out.strip(),
                                             flags=re.M).strip())
                     if isinstance(arr, list) and arr and isinstance(arr[0], str) and arr[0].strip():
