@@ -67,12 +67,13 @@ def _model_chain(conf: dict) -> list:
         mb = str(m.get("base_url") or "").strip() or base
         mk = str(m.get("api_key") or "").strip() or key
         mm = str(m.get("model") or "").strip() or DEFAULT_MODEL
+        ex = m.get("extra") if isinstance(m.get("extra"), dict) else {}
         if mk:
-            chain.append((mb, mk, mm, f"#{n+1}:{mm}"))
+            chain.append((mb, mk, mm, f"#{n+1}:{mm}", ex))
     if not chain:
         if key:
             chain.append((base, key, conf.get("model") or DEFAULT_MODEL,
-                          f"#0:{conf.get('model') or DEFAULT_MODEL}"))
+                          f"#0:{conf.get('model') or DEFAULT_MODEL}", {}))
         return chain
     return chain
 
@@ -123,7 +124,7 @@ def _text_hash(text: str) -> str:
                        .encode("utf-8")).hexdigest()
 
 
-def _chat(base: str, key: str, model: str, prompt: str) -> str:
+def _chat(base: str, key: str, model: str, prompt: str, extra: dict | None = None) -> str:
     import requests
     r = requests.post(f"{base.rstrip('/')}/chat/completions",
                       headers={"Authorization": f"Bearer {key}",
@@ -131,10 +132,11 @@ def _chat(base: str, key: str, model: str, prompt: str) -> str:
                       json={"model": model,
                             "messages": [{"role": "system", "content": _SYS},
                                          {"role": "user", "content": prompt}],
-                            "temperature": 0},
+                            "temperature": 0, **(extra or {})},
                       timeout=90)
     r.raise_for_status()
-    return r.json()["choices"][0]["message"]["content"]
+    content = r.json()["choices"][0]["message"]["content"]
+    return re.sub(r"<think>.*?</think>", "", content, flags=re.S)   # M2.x 思考混 content 防线
 
 
 def run(since_fetched_at: str) -> dict:
@@ -234,9 +236,9 @@ def run(since_fetched_at: str) -> dict:
             chain_errs = []
             for step in range(len(chain)):              # 从粘性位起逐链位尝试
                 pos = (chain_pos + step) % len(chain)
-                b, k, m, tag = chain[pos]
+                b, k, m, tag, ex = chain[pos]
                 try:
-                    out = _chat(b, k, m, prompt)
+                    out = _chat(b, k, m, prompt, ex)
                     used = tag
                     chain_pos = pos
                     break
