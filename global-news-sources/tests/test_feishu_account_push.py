@@ -376,3 +376,14 @@ def test_fv_and_persona_score():
     assert feishu._persona_score("美股标普500大涨, 英伟达财报超预期", mix) >= 5
     assert feishu._persona_score("日本牙科激光疗法新潮流", mix) == 0
     assert feishu._persona_score("Nasdaq falls as Fed officials speak", mix) >= 4  # 英文小写兜底
+
+
+def test_split_quota_no_overrun():
+    # M4防回归(review复现): 极端mix下修剪不得带 sum>total 退出
+    q = feishu._split_quota({"a": 50, "b": 1, "c": 1, "d": 48}, 10)
+    assert sum(q.values()) == 10 and all(v >= 1 for v in q.values())
+    for mix, total in [({"美股": 90, "加密": 10}, 10), ({"a": 33, "b": 33, "c": 34}, 7),
+                       ({"a": 99, "b": 1}, 2), ({"a": 25, "b": 25, "c": 25, "d": 25}, 3)]:
+        qq = feishu._split_quota(mix, total)
+        assert sum(qq.values()) <= max(total, len(mix))
+        assert all(v >= 1 for v in qq.values())

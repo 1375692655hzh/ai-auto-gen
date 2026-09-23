@@ -3,7 +3,7 @@
 
 复用 feishu.py 的数据管道(窗口收集/九类投影/兜底翻译/排序/行生成), 只把落地层
 从飞书电子表格换成腾讯文档 MCP(mcporter 子进程): 每账号一个表格, 每次推送新增
-子表"年-月-日-时:分", 全量命中候选逐行写入(9列), 表格开"所有人可编辑",
+子表"年-月-日-时:分", 全量命中候选逐行写入(11列, 0923加金融价值/人设匹配), 表格开"所有人可编辑",
 飞书群里只发一条短@通知+表格链接(通知通道仍走飞书, 与 doc 模式同格式)。
 
 用法:
@@ -58,10 +58,13 @@ def _mc(service: str, tool: str, args: dict) -> dict:
                        errors="replace", timeout=_MC_TIMEOUT)
     out = (r.stdout or "").strip()
     try:
-        d = json.loads(out[out.index("{"):])
+        d = json.loads(out)                           # low-7: 优先整段解析, 诊断噪声才找首个{
     except Exception:
-        raise RuntimeError(f"{tool} 输出解析失败 rc={r.returncode}: "
-                           f"{out[:150]} | {str(r.stderr)[:150]}")
+        try:
+            d = json.loads(out[out.index("{"):])
+        except Exception:
+            raise RuntimeError(f"{tool} 输出解析失败 rc={r.returncode}: "
+                               f"{out[:150]} | {str(r.stderr)[:150]}")
     if d.get("error"):
         raise RuntimeError(f"{tool}: {str(d['error'])[:150]}")
     return d
@@ -103,20 +106,21 @@ def _safe_sheet_title(t: str) -> str:
 
 
 def _ensure_sheet(file_id: str, title: str) -> str:
-    """子表就绪 → sheet_id。首推=重命名默认子表; 同名已存在=幂等直用; 否则尾部新建。"""
+    """子表就绪 → sheet_id。首推=重命名默认子表; 同名已存在=加 -2 新建(M5:
+    复用同名子表从row0重写会覆盖上一批, 与飞书版 -2 策略对齐); 否则尾部新建。"""
     info = _mc("sheet-mcp", "get_sheet_info", {"file_id": file_id})
     sheets = info.get("sheets") or []
     if not sheets:
         raise RuntimeError("表格无子表(异常)")
-    for sh in sheets:
-        if str(sh.get("sheet_name") or "") == title:
-            return str(sh["sheet_id"])
     first = sheets[0]
     if str(first.get("sheet_name") or "").strip().lower() in _DEFAULT_SHEET_NAMES:
         _mc("sheet-mcp", "rename_sheet",
             {"file_id": file_id, "sheet_id": first["sheet_id"], "name": title})
         return str(first["sheet_id"])
-    for t in (title, f"{title}-2"):
+    names = {str(sh.get("sheet_name") or "") for sh in sheets}
+    for t in (title, f"{title}-2", f"{title}-3"):
+        if t in names:
+            continue
         d = _mc("sheet-mcp", "add_sheet",
                 {"file_id": file_id, "name": t, "append_index": True})
         sid = str(d.get("sheet_id") or "")
@@ -188,8 +192,8 @@ def _ensure_doc_tencent(st: dict, acc: dict) -> tuple:
     title = f"选题推送-{key}"[:36]
     d = _mc("tencent-docs", "manage.create_file", {"title": title, "file_type": "sheet"})
     file_id, url = str(d.get("file_id") or ""), str(d.get("url") or "")
-    if not file_id:
-        raise RuntimeError(f"建表返回缺 file_id: {json.dumps(d, ensure_ascii=False)[:150]}")
+    if not (file_id and url):                         # low-6: 空url不缓存(防半成品缓存致重复建表)
+        raise RuntimeError(f"建表返回缺 file_id/url: {json.dumps(d, ensure_ascii=False)[:150]}")
     _mc("tencent-docs", "manage.set_privilege", {"file_id": file_id, "policy": 3})
     docs[key] = {"file_id": file_id, "url": url}
     return file_id, url, True
@@ -273,7 +277,8 @@ def main() -> int:
             rep["errors"].append(f"{name}: 窗口内无命中素材")
             continue
         title = _safe_sheet_title(feishu._doc_sheet_title())
-        rep["translated"] += feishu._translate_missing(conf, rows_items, cap=200)
+        rep["translated"] += (0 if args.dry_run else
+                              feishu._translate_missing(conf, rows_items, cap=200))
         drows = feishu._doc_rows(acc, mix, ordered, bj, len(cand))
         drows[0] = ["\t".join(str(c) for c in drows[0])]   # 首行档案拼单格(合并A1:I1前提)
         if args.dry_run:

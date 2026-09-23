@@ -254,7 +254,7 @@ def run(dry_run: bool = False, export: bool = True) -> dict:
     if time.time() < tail_deadline:
         try:
             from sources import feishu
-            rep["feishu_push"] = feishu.run_account_push()
+            rep["feishu_push"] = feishu.run_account_push(deadline=tail_deadline)  # M3: 尾预算透传
         except Exception as ex:
             rep["failures"].append(f"feishu_push({type(ex).__name__}: {str(ex)[:60]})")
     # 顺序裁决(2026-09-16): translate 先于 llm_tag——用户对翻译有 15min 时效承诺,

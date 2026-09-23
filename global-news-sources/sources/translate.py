@@ -31,6 +31,8 @@ SLEEP = 0.3
 _ZH_LANGS = {"zh", "zh-cn", "zh-tw", "zh-hk", "zh-hans", "zh-hant"}
 _CJK_RE = re.compile(r"[一-鿿]")
 _TR_CHARS = set("çğıöşüÇĞİÖŞÜ")                     # 土耳其语特征字符
+_EXTRA_OK = {"thinking", "max_tokens", "max_completion_tokens", "top_p",
+             "seed", "reasoning_split", "stream"}      # extra 白名单(low-5: 防覆盖model/messages)
 _SYS = """你是专业财经新闻翻译器。把每条输入译成简体中文, 术语按中文财经媒体惯例(如 Fed=美联储, KAP=土耳其公开披露平台)。
 保留不译: 数字、股票代码(2330.TW/NVDA)、@账号、#话题、$TICKER、URL、机构缩写(Fed/SEC/TCMB/BIST 等首次保留可附中文)。
 只输出 JSON 数组 [{"i":序号,"zh":"译文","title_zh":"标题译文(无标题给空串)"}], 不要任何多余文字。"""
@@ -67,7 +69,8 @@ def _model_chain(conf: dict) -> list:
         mb = str(m.get("base_url") or "").strip() or base
         mk = str(m.get("api_key") or "").strip() or key
         mm = str(m.get("model") or "").strip() or DEFAULT_MODEL
-        ex = m.get("extra") if isinstance(m.get("extra"), dict) else {}
+        ex = {k: v for k, v in (m.get("extra") or {}).items()
+              if k in _EXTRA_OK} if isinstance(m.get("extra"), dict) else {}
         if mk:
             chain.append((mb, mk, mm, f"#{n+1}:{mm}", ex))
     if not chain:

@@ -81,13 +81,14 @@ PYEOF
 echo "== 3/4 机器人凭证(请抄走) =="
 CFG=""
 for c in ai-workflow/generator/config.local.yaml global-news-sources/config.local.yaml; do
-  if [ -f "$c" ] && grep -q "app_id:" "$c" 2>/dev/null; then CFG="$c"; break; fi
+  if [ -f "$c" ] && grep -qE "^\s*app_id:\s*\S" "$c" 2>/dev/null; then CFG="$c"; break; fi
 done
-[ -n "$CFG" ] && grep -E "^\s*(app_id|app_secret):" "$CFG" \
+[ -n "$CFG" ] && grep -E "^\s*app_id:" "$CFG" \
+  && grep -E "^\s*app_secret:" "$CFG" | sed 's/\(app_secret: .\{4\}\).*/\1****(掩码, 完整值见配置文件)/' \
   || echo "!! 凭证文件未定位到(不影响推送, 仅展示用)"
 
 echo "== 4/4 dry-run 自检(不发群) =="
-"$PY" cli.py sources feishu push --dry-run --window 6 | head -60
+"$PY" cli.py sources feishu push --dry-run --window 6 | head -60 || true   # M6: head关管BrokenPipe不致误杀(pipefail+set -e)
 
 echo
 echo "完成。后续: 账号成分/名称/所有人 改配置的 sources.feishu.account_push.accounts"

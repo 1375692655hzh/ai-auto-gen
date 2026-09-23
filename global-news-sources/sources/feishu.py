@@ -81,7 +81,7 @@ def _post(url: str, payload: dict, token: str = "", timeout: int = 20) -> dict:
         try:
             return json.loads(e.read().decode())
         except Exception:
-            raise
+            raise e                                     # low-2: 重抛HTTPError保状态码, 不压成JSON解析错
 
 
 # ── 飞书客户端 ─────────────────────────────────────────────────────────────
@@ -183,6 +183,16 @@ def _digest_prompt(items: list[dict], bj: str) -> str:
             + json.dumps(lines, ensure_ascii=False))
 
 
+_LLM_EXTRA_OK = {"thinking", "max_tokens", "max_completion_tokens", "top_p",
+                 "seed", "reasoning_split", "stream"}
+
+
+def _llm_extra(m: dict) -> dict:
+    """链项 extra 请求体透传(白名单过滤, low-5: 防 **extra 静默覆盖 model/messages)。"""
+    ex = m.get("extra") if isinstance(m.get("extra"), dict) else {}
+    return {k: v for k, v in ex.items() if k in _LLM_EXTRA_OK}
+
+
 def _llm_digest(conf: dict, prompt: str) -> str:
     models = conf["digest_models"] or (_cfg_section().get("translate") or {}).get("models") or []
     import requests
@@ -193,15 +203,18 @@ def _llm_digest(conf: dict, prompt: str) -> str:
         if not (base and model):
             continue
         try:
+            extra = _llm_extra(m)                       # low-1: MiniMax链尾兜底时关思考/防思考混content
             r = requests.post(f"{base.rstrip('/')}/chat/completions",
                               headers={"Authorization": f"Bearer {key or 'x'}",
                                        "Content-Type": "application/json"},
                               json={"model": model,
                                     "messages": [{"role": "system", "content": _SYS},
-                                                 {"role": "user", "content": prompt}]},
+                                                 {"role": "user", "content": prompt}],
+                                    **extra},
                               timeout=120)
             r.raise_for_status()
             out = (r.json().get("choices") or [{}])[0].get("message", {}).get("content")
+            out = re.sub(r"<think>.*?</think>", "", out or "", flags=re.S)
             if out and out.strip():
                 return out.strip()
         except Exception:
@@ -500,9 +513,10 @@ def _split_quota(mix: dict, total: int) -> dict:
     raw = {t: mix[t] / sum(mix[t] for t in themes) * total for t in themes}
     quota = {t: max(1, int(raw[t])) for t in themes}
     while sum(quota.values()) > total:              # 每主题≥1 可能超编 → 砍小数部分最大者
-        t_cut = max(themes, key=lambda t: (quota[t] - raw[t], raw[t]))
-        if quota[t_cut] <= 1:
+        cuttable = [t for t in themes if quota[t] > 1]   # M4: 只在可砍集里选, 防带 sum>total 退出
+        if not cuttable:
             break
+        t_cut = max(cuttable, key=lambda t: (quota[t] - raw[t], raw[t]))
         quota[t_cut] -= 1
     while sum(quota.values()) < total:              # 余数从大到小补
         quota[max(themes, key=lambda t: raw[t] - quota[t])] += 1
@@ -542,15 +556,16 @@ def _ensure_doc(conf: dict, acc: dict, ap: dict, st: dict) -> tuple:
             return "", "建表返回缺 token"
         if not url:
             url = f"https://feishu.cn/sheets/{token}"
+        note = ""
         if ap.get("chat_id"):                     # 授权目标群可编辑
             p = _post(f"https://open.feishu.cn/open-apis/drive/v1/permissions/{token}/members"
                       "?type=sheet&need_notification=false",
                       {"member_type": "chat", "member_id": ap["chat_id"], "perm": "edit"},
                       token=_token(conf))
             if p.get("code") != 0:                # 授权失败不阻断, 链接仍可访问性受影响
-                url += f" (群授权失败 code={p.get('code')}, 机器人分享链接可达)"
-        docs[key] = {"token": token, "url": url}
-        return token, url
+                note = f" (群授权失败 code={p.get('code')}, 机器人分享链接可达)"
+        docs[key] = {"token": token, "url": url}   # 缓存只存净URL(M1: 错误尾巴永久污染修复)
+        return token, url + note                   # 通知文本带备注, 缓存干净
     except Exception as e:
         return "", f"{type(e).__name__}: {str(e)[:80]}"
 
@@ -581,7 +596,9 @@ def _doc_write_rows(conf: dict, token: str, sid: str, rows: list) -> str:
     import requests
     n_cols = len(_DOC_COLS)
     for start in range(0, len(rows), _DOC_BATCH_ROWS):
-        chunk = rows[start:start + _DOC_BATCH_ROWS]
+        chunk = [[f"'{c}" if isinstance(c, str) and c[:1] in "=+-@" else c
+                  for c in row]                       # 公式防护: USER_ENTERED下前导符转文本
+                 for row in rows[start:start + _DOC_BATCH_ROWS]]
         rng = f"{sid}!A{start + 1}:{chr(ord('A') + n_cols - 1)}{start + len(chunk)}"
         try:
             r = requests.put(
@@ -905,10 +922,12 @@ def _save_zh(batch: list):
         pass
 
 
-def _translate_missing(conf: dict, items: list, cap: int = 12) -> int:
+def _translate_missing(conf: dict, items: list, cap: int = 12,
+                       deadline: float | None = None) -> int:
     """推送前兜底翻译: 对缺 text_zh 的条目批量过一遍 LLM(链=digest_models
     缺省复用 translate.models, 云端zen_bridge/本地均可), 12条/批循环到 cap,
     LLM 批次偶发漏翻 → 共两轮(第二轮只补仍缺); 成功即回写库(下轮同条目免重翻)。
+    deadline(epoch) 过线即停(M3: refresh轮末尾预算防挤占后续llm_tag)。
     失败静默保[未译]。返回补译成功数。"""
     import requests
     todo = [it for it in items if not (it.get("text_zh") or "").strip()][:cap]
@@ -917,10 +936,14 @@ def _translate_missing(conf: dict, items: list, cap: int = 12) -> int:
     models = conf.get("digest_models") or (_cfg_section().get("translate") or {}).get("models") or []
     done = 0
     for _round in range(2):
+        if deadline and time.time() > deadline:
+            break
         todo = [it for it in todo if not (it.get("text_zh") or "").strip()]
         if not todo:
             break
         for batch in _tr_batches(todo):
+            if deadline and time.time() > deadline:
+                break
             payload = json.dumps([str(it.get("text") or "")[:_TR_TEXT_MAX] for it in batch],
                                  ensure_ascii=False)
             for m in models:
@@ -929,7 +952,7 @@ def _translate_missing(conf: dict, items: list, cap: int = 12) -> int:
                 if not (base and model):
                     continue
                 try:
-                    extra = m.get("extra") if isinstance(m.get("extra"), dict) else {}
+                    extra = _llm_extra(m)                    # low-5: 白名单透传
                     r = requests.post(f"{base}/chat/completions",
                                       headers={"Authorization": f"Bearer {str(m.get('api_key') or 'x')}",
                                                "Content-Type": "application/json"},
@@ -953,6 +976,8 @@ def _translate_missing(conf: dict, items: list, cap: int = 12) -> int:
         # 终极兜底: 批量两轮后仍缺的逐条单翻——批量JSON输出偶发漏项, 单条成功率≈100%,
         # 保证披露里不再出现[未译](0923 用户裁决: 未译必须消灭而非降概率)
         for it in [x for x in todo if not (x.get("text_zh") or "").strip()]:
+            if deadline and time.time() > deadline:
+                break
             payload = json.dumps([str(it.get("text") or "")[:_TR_TEXT_MAX]], ensure_ascii=False)
             for m in models:
                 base = str(m.get("base_url") or "").strip().rstrip("/")
@@ -960,7 +985,7 @@ def _translate_missing(conf: dict, items: list, cap: int = 12) -> int:
                 if not (base and model):
                     continue
                 try:
-                    extra = m.get("extra") if isinstance(m.get("extra"), dict) else {}
+                    extra = _llm_extra(m)                    # low-5: 白名单透传
                     r = requests.post(f"{base}/chat/completions",
                                       headers={"Authorization": f"Bearer {str(m.get('api_key') or 'x')}",
                                                "Content-Type": "application/json"},
@@ -984,7 +1009,8 @@ def _translate_missing(conf: dict, items: list, cap: int = 12) -> int:
 
 
 def run_account_push(dry_run: bool = False, force: bool = False,
-                     window_h: float | None = None) -> dict:
+                     window_h: float | None = None,
+                     deadline: float | None = None) -> dict:
     """入口(refresh 轮末挂点 / cli feishu push)。dry_run=组卡打印不发不记状态。"""
     conf = _conf()
     ap = _push_conf(conf)
@@ -1068,7 +1094,9 @@ def run_account_push(dry_run: bool = False, force: bool = False,
                 rep["errors"].append(f"{acc.get('name') or '?'}: 窗口内无命中素材")
                 continue
             title = _doc_sheet_title()
-            rep["translated"] += _translate_missing(conf, rows_items, cap=200)
+            if not dry_run:                          # M2: dry-run 不烧 LLM 不写库(升级脚本自检高频触发)
+                rep["translated"] += _translate_missing(conf, rows_items, cap=200,
+                                                        deadline=deadline)
             rows = _doc_rows(acc, mix, ordered, bj, len(cand))
             if dry_run:
                 preview.append(f"[doc] {acc.get('name')} {title} 子表 {len(rows)} 行"
@@ -1098,7 +1126,9 @@ def run_account_push(dry_run: bool = False, force: bool = False,
             rep["errors"].append(f"{acc.get('name') or '?'}: 窗口内无命中素材")
             continue
         picked = [it for its in per.values() for it in its]
-        rep["translated"] += _translate_missing(conf, picked)      # 兜底翻译被选中条目
+        if not dry_run:                              # M2: dry-run 不烧 LLM
+            rep["translated"] += _translate_missing(conf, picked,
+                                                    deadline=deadline)  # 兜底翻译被选中条目
         hits = {t: sum(1 for it in cand if t in (it.get("topics") or ()))
                 for t in per}
         chunks = _compose_push(acc, per, mix, bj, len(cand), hits)
