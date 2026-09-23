@@ -29,6 +29,8 @@ shutil.copy2(p, p.with_name(f"config.local.backup-{datetime.datetime.now():%Y%m%
 ap = fs.setdefault("account_push", {}) or {}
 ap.update({"enabled": True, "interval_h": 2, "window_h": 2,
            "chat_id": "oc_eb27ec292106627b466b4cd7b8500cbb", "top_total": 10})
+ap["doc"] = dict(ap.get("doc") or {})
+ap["doc"].update({"enabled": True})   # 飞书电子表格披露(需应用开云文档权限, 缺权限自动回退消息卡片)
 # 账号清单真源 = 仓内 deploy/cloud/account-push-accounts.yaml(腾讯文档2026-09-22录入13号),
 # 每次升级覆盖同步; 文件缺失才尊重已有配置/回退示例。
 repo_accs_f = Path("deploy/cloud/account-push-accounts.yaml")

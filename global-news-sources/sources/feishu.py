@@ -74,8 +74,14 @@ def _post(url: str, payload: dict, token: str = "", timeout: int = 20) -> dict:
     if token:
         headers["Authorization"] = f"Bearer {token}"
     req = urllib.request.Request(url, data=json.dumps(payload).encode(), headers=headers)
-    with urllib.request.urlopen(req, timeout=timeout) as r:
-        return json.loads(r.read().decode())
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            return json.loads(r.read().decode())
+    except urllib.error.HTTPError as e:                 # 飞书错误体在响应里, 透出不裸抛
+        try:
+            return json.loads(e.read().decode())
+        except Exception:
+            raise
 
 
 # ── 飞书客户端 ─────────────────────────────────────────────────────────────
@@ -407,6 +413,7 @@ def _push_conf(conf: dict) -> dict:
             "window_h": float(ap.get("window_h") or 2),
             "chat_id": str(ap.get("chat_id") or conf.get("chat_id") or ""),
             "top_total": int(ap.get("top_total") or 10),
+            "doc": dict(ap.get("doc") or {}),
             "accounts": [a for a in (ap.get("accounts") or []) if isinstance(a, dict)]}
 
 
@@ -502,6 +509,126 @@ def _split_quota(mix: dict, total: int) -> dict:
     return quota
 
 
+# ── C2. 飞书电子表格披露(doc 模式, 2026-09-23 用户裁决替代分块消息) ─────────
+# 每账号一个电子表格(首次推送时创建+授权给群), 每次推送新增子表"年-月-日-时:分",
+# 全量命中候选逐行写入(不再受消息长度/条数限制), 群里只发一条短@+链接通知。
+# 表头: 第1行=账号/所属人/成分/窗口/命中; 第2行=列名; 第3行起每条一行。
+_DOC_COLS = ["主题", "类型", "作者", "浏览量", "浏览增速(次/时)",
+             "中文译文", "原文内容", "原文链接", "发布时间"]
+_DOC_BATCH_ROWS = 200
+
+
+def _doc_enabled(ap: dict) -> bool:
+    return bool((ap.get("doc") or {}).get("enabled", False))
+
+
+def _ensure_doc(conf: dict, acc: dict, ap: dict, st: dict) -> tuple:
+    """账号 → (spreadsheet_token, url)。首次创建「选题推送-{账号名}」并授权群可编辑,
+    之后从状态缓存直取。返回 ("", "") = 失败(调用方回退消息模式)。"""
+    docs = st.setdefault("docs", {})
+    key = str(acc.get("name") or "")
+    hit = docs.get(key) or {}
+    if hit.get("token") and hit.get("url"):
+        return hit["token"], hit["url"]
+    try:
+        d = _post("https://open.feishu.cn/open-apis/sheets/v3/spreadsheets",
+                  {"title": f"选题推送-{key}"}, token=_token(conf))
+        if d.get("code") != 0:
+            return "", f"建表失败 code={d.get('code')} {str(d.get('msg'))[:80]}"
+        data = d.get("data") or {}
+        spread = data.get("spreadsheet") or {}
+        token, url = str(spread.get("spreadsheet_token") or ""), str(spread.get("url") or "")
+        if not token:
+            return "", "建表返回缺 token"
+        if not url:
+            url = f"https://feishu.cn/sheets/{token}"
+        if ap.get("chat_id"):                     # 授权目标群可编辑
+            p = _post(f"https://open.feishu.cn/open-apis/drive/v1/permissions/{token}/members"
+                      "?type=sheet&need_notification=false",
+                      {"member_type": "chat", "member_id": ap["chat_id"], "perm": "edit"},
+                      token=_token(conf))
+            if p.get("code") != 0:                # 授权失败不阻断, 链接仍可访问性受影响
+                url += f" (群授权失败 code={p.get('code')}, 机器人分享链接可达)"
+        docs[key] = {"token": token, "url": url}
+        return token, url
+    except Exception as e:
+        return "", f"{type(e).__name__}: {str(e)[:80]}"
+
+
+def _doc_sheet_title(now=None) -> str:
+    import datetime as _dt
+    t = now or _dt.datetime.now()
+    return f"{t.year}-{t.month}-{t.day}-{t.hour}:{t.minute:02d}"
+
+
+def _doc_add_sheet(conf: dict, token: str, title: str) -> tuple:
+    """新建子表 → (sheet_id, err)。同名(同分钟重推)自动加 -2 后缀重试一次。"""
+    for t in (title, f"{title}-2"):
+        try:
+            d = _post(f"https://open.feishu.cn/open-apis/sheets/v2/spreadsheets/{token}"
+                      "/sheets_post/", {"title": t}, token=_token(conf))
+            if d.get("code") == 0:
+                sid = str(((d.get("data") or {}).get("sheet") or {}).get("id") or "")
+                if sid:
+                    return sid, ""
+        except Exception as e:
+            return "", f"{type(e).__name__}: {str(e)[:80]}"
+    return "", "子表创建失败"
+
+
+def _doc_write_rows(conf: dict, token: str, sid: str, rows: list) -> str:
+    """按 _DOC_BATCH_ROWS 行分批 PUT 写入, 全部成功返回 ""。"""
+    import requests
+    n_cols = len(_DOC_COLS)
+    for start in range(0, len(rows), _DOC_BATCH_ROWS):
+        chunk = rows[start:start + _DOC_BATCH_ROWS]
+        rng = f"{sid}!A{start + 1}:{chr(ord('A') + n_cols - 1)}{start + len(chunk)}"
+        try:
+            r = requests.put(
+                f"https://open.feishu.cn/open-apis/sheets/v2/spreadsheets/{token}/values"
+                "?valueInputOption=USER_ENTERED",
+                headers={"Authorization": f"Bearer {_token(conf)}",
+                         "Content-Type": "application/json"},
+                data=json.dumps({"valueRange": {"range": rng, "values": chunk}},
+                                ensure_ascii=False).encode(), timeout=30)
+            d = r.json()
+            if d.get("code") != 0:
+                return f"写入失败 code={d.get('code')} {str(d.get('msg'))[:80]}"
+        except Exception as e:
+            return f"{type(e).__name__}: {str(e)[:80]}"
+    return ""
+
+
+def _doc_rows(acc: dict, mix: dict, ordered: list, bj: str, cand_n: int,
+              now=None) -> list:
+    """账号卡 → 二维行数组: 第1行档案 + 第2行列名 + 全量条目行(主题按mix降序,
+    节内观点在前增速降序)。ordered = [(主题, [item...]), ...]。"""
+    import datetime as _dt
+    now = now or _dt.datetime.now()
+    mix_s = " · ".join(f"{t}{int(p)}%" for t, p in sorted(mix.items(), key=lambda kv: -kv[1]))
+    rows = [[f"账号: {acc.get('name') or '?'}", f"所属人: {acc.get('owner') or '?'}",
+             f"成分: {mix_s}", f"窗口: {bj}", f"命中: {cand_n} 条"], list(_DOC_COLS)]
+    for t, its in ordered:
+        for it in its:
+            rows.append([
+                t, "观点" if _is_opinion(it) else "资讯",
+                str(it.get("author_handle") or ""), int(it.get("views") or 0),
+                int(_rate(it, now)),
+                (it.get("text_zh") or "").strip() or "[未译]",
+                str(it.get("text") or ""), str(it.get("url") or ""),
+                str(it.get("time") or "")])
+    return rows
+
+
+def _doc_order_all(cand: list, mix: dict, now=None) -> list:
+    """doc 模式不用配额: 全量命中按 主题(mix降序)→观点→增速 组织。"""
+    import datetime as _dt
+    now = now or _dt.datetime.now()
+    order = sorted(mix, key=lambda t: -mix[t])
+    ranked = sorted(cand, key=lambda x: (0 if _is_opinion(x) else 1, -_rate(x, now)))
+    return [(t, [it for it in ranked if t in (it.get("topics") or ())]) for t in order]
+
+
 def _fmt_views(v) -> str:
     if v is None:
         return ""
@@ -595,43 +722,45 @@ _SYS_TR = """你是财经翻译。输入是编号的X帖子原文JSON数组, 逐
 
 
 def _translate_missing(conf: dict, items: list, cap: int = 12) -> int:
-    """推送前兜底翻译: 对被选中且缺 text_zh 的条目批量过一遍 LLM(链=digest_models
-    缺省复用 translate.models, 云端zen_bridge/本地omniroute 均可), 失败静默保[未译]。
-    返回补译成功数。"""
+    """推送前兜底翻译: 对缺 text_zh 的条目批量过一遍 LLM(链=digest_models
+    缺省复用 translate.models, 云端zen_bridge/本地均可), 12条/批循环到 cap,
+    失败静默保[未译]。返回补译成功数。"""
+    import requests
     todo = [it for it in items if not (it.get("text_zh") or "").strip()][:cap]
     if not todo:
         return 0
-    import requests
     models = conf.get("digest_models") or (_cfg_section().get("translate") or {}).get("models") or []
-    payload = json.dumps([str(it.get("text") or "")[:600] for it in todo],
-                         ensure_ascii=False)
-    for m in models:
-        base = str(m.get("base_url") or "").strip().rstrip("/")
-        model = str(m.get("model") or "").strip()
-        if not (base and model):
-            continue
-        try:
-            r = requests.post(f"{base}/chat/completions",
-                              headers={"Authorization": f"Bearer {str(m.get('api_key') or 'x')}",
-                                       "Content-Type": "application/json"},
-                              json={"model": model,
-                                    "messages": [{"role": "system", "content": _SYS_TR},
-                                                 {"role": "user", "content": payload}]},
-                              timeout=90)
-            r.raise_for_status()
-            out = (r.json().get("choices") or [{}])[0].get("message", {}).get("content") or ""
-            out = re.sub(r"^```(json)?|```$", "", out.strip(), flags=re.M).strip()
-            arr = json.loads(out)
-            if isinstance(arr, list):
-                n = 0
-                for it, zh in zip(todo, arr):
-                    if isinstance(zh, str) and zh.strip():
-                        it["text_zh"] = zh.strip()
-                        n += 1
-                return n
-        except Exception:
-            continue
-    return 0
+    done = 0
+    for batch_start in range(0, len(todo), 12):
+        batch = todo[batch_start:batch_start + 12]
+        payload = json.dumps([str(it.get("text") or "")[:600] for it in batch],
+                             ensure_ascii=False)
+        for m in models:
+            base = str(m.get("base_url") or "").strip().rstrip("/")
+            model = str(m.get("model") or "").strip()
+            if not (base and model):
+                continue
+            try:
+                r = requests.post(f"{base}/chat/completions",
+                                  headers={"Authorization": f"Bearer {str(m.get('api_key') or 'x')}",
+                                           "Content-Type": "application/json"},
+                                  json={"model": model,
+                                        "messages": [{"role": "system", "content": _SYS_TR},
+                                                     {"role": "user", "content": payload}]},
+                                  timeout=90)
+                r.raise_for_status()
+                out = (r.json().get("choices") or [{}])[0].get("message", {}).get("content") or ""
+                out = re.sub(r"^```(json)?|```$", "", out.strip(), flags=re.M).strip()
+                arr = json.loads(out)
+                if isinstance(arr, list):
+                    for it, zh in zip(batch, arr):
+                        if isinstance(zh, str) and zh.strip():
+                            it["text_zh"] = zh.strip()
+                            done += 1
+                    break                       # 本批成功, 下一批
+            except Exception:
+                continue
+    return done
 
 
 def run_account_push(dry_run: bool = False, force: bool = False,
@@ -701,9 +830,47 @@ def run_account_push(dry_run: bool = False, force: bool = False,
     preview = []
     ok_any = dry_run
     rep["translated"] = 0
+    rep["docs"] = 0
+    st = _load_state(_PUSH_STATE)
+    docs_dirty = False
     for acc in ap["accounts"]:
         mix = {str(k): float(v) for k, v in (acc.get("mix") or {}).items()
                if str(k) in TOPICS and float(v) > 0}
+        if not mix:
+            rep["errors"].append(f"{acc.get('name') or '?'}: mix 无效")
+            continue
+        if _doc_enabled(ap):
+            ordered = _doc_order_all(cand, mix)
+            rows_items = [it for _, its in ordered for it in its]
+            if not rows_items:
+                rep["errors"].append(f"{acc.get('name') or '?'}: 窗口内无命中素材")
+                continue
+            title = _doc_sheet_title()
+            rep["translated"] += _translate_missing(conf, rows_items, cap=24)
+            rows = _doc_rows(acc, mix, ordered, bj, len(cand))
+            if dry_run:
+                preview.append(f"[doc] {acc.get('name')} {title} 子表 {len(rows)} 行"
+                               f"(首行 {rows[0]})")
+                continue
+            token, url_or_err = _ensure_doc(conf, acc, ap, st)
+            if not token:
+                rep["errors"].append(f"{acc.get('name') or '?'} doc回退消息: {url_or_err}")
+            else:
+                docs_dirty = True
+                sid, aerr = _doc_add_sheet(conf, token, title)
+                werr = _doc_write_rows(conf, token, sid, rows) if sid else aerr
+                if sid and not werr:
+                    rep["docs"] += 1
+                    ok_any = True
+                    oid = str(acc.get("owner_open_id") or "").strip()
+                    owner = str(acc.get("owner") or "").strip() or "账号所有人"
+                    head = (f'<at user_id="{oid}"></at>' if oid else f"@{owner}")
+                    send_text(send_conf, f"{head} 账号「{acc.get('name')}」{title} 选题已更新"
+                              f"（命中{len(cand)}条·{len(rows_items)}行）→ {url_or_err}")
+                    time.sleep(0.5)
+                    continue
+                rep["errors"].append(f"{acc.get('name') or '?'} doc回退消息: {werr or aerr}")
+        # 消息卡片路径(doc 关闭或 doc 失败回退)
         per = _pick_for_account(cand, acc, ap["top_total"])
         if not per:
             rep["errors"].append(f"{acc.get('name') or '?'}: 窗口内无命中素材")
@@ -736,8 +903,10 @@ def run_account_push(dry_run: bool = False, force: bool = False,
                 rep["errors"].append(f"{acc.get('name') or '?'} 发送失败: {err}")
     if dry_run:
         rep["preview"] = preview
-    elif ok_any:
-        st = _load_state(_PUSH_STATE)
-        st["last_ts"] = time.time()
-        _save_state(_PUSH_STATE, st)
+    else:
+        if docs_dirty:
+            _save_state(_PUSH_STATE, st)
+        if ok_any:
+            st["last_ts"] = time.time()
+            _save_state(_PUSH_STATE, st)
     return rep

@@ -222,6 +222,57 @@ def test_translate_missing(monkeypatch):
     assert n == 2 and items[0]["text_zh"] == "译A" and items[1]["text_zh"] == "译B"
 
 
+# ── 6b. doc 模式(飞书电子表格披露, 2026-09-23) ───────────────────────────────
+def test_doc_sheet_title_format():
+    import datetime as _dt
+    t = _dt.datetime(2026, 9, 23, 9, 30)
+    assert feishu._doc_sheet_title(t) == "2026-9-23-9:30"        # 用户命名格式
+
+
+def test_doc_rows_layout():
+    its = [_mk("kol", {"美股"}, 12000, "u1", role="kol", zh="译好",
+               age_h=2.0), _mk("m", {"美股"}, 6000, "u2", role="media", age_h=2.0)]
+    ordered = feishu._doc_order_all(its, {"美股": 100})
+    rows = feishu._doc_rows({"name": "Owenwin888", "owner": "黄正汉"},
+                            {"美股": 100}, ordered, "09-23 07:30~09:30", 2)
+    assert rows[0][0].startswith("账号: Owenwin888") and rows[0][1] == "所属人: 黄正汉"
+    assert rows[1] == feishu._DOC_COLS
+    assert rows[2][0] == "美股" and rows[2][1] == "观点" and rows[2][3] == 12000
+    assert abs(rows[2][4] - 6000) < 100                          # 增速=12000/2h±分钟粒度
+    assert rows[2][5] == "译好" and rows[2][7] == "u1"
+    assert rows[3][1] == "资讯"                                    # 观点行在资讯行前
+
+
+def test_doc_order_all_no_quota():
+    items = [_mk(f"h{i}", {"美股"}, 100 - i, f"u{i}") for i in range(20)]
+    ordered = feishu._doc_order_all(items, {"美股": 60, "加密": 40})
+    assert len(ordered[0][1]) == 20                                # 全量命中, 不限额
+    assert ordered[0][0] == "美股"                                 # mix 降序
+    assert all(not ordered[1][1] for _ in [0]) or ordered[1][1] == []  # 加密无命中为空
+
+
+def test_ensure_doc_creates_once(monkeypatch):
+    calls = []
+
+    def fake_post(url, payload, token="", timeout=20):
+        calls.append(url)
+        if "sheets/v3/spreadsheets" in url:
+            return {"code": 0, "data": {"spreadsheet": {
+                "spreadsheet_token": "stkn", "url": "https://x.feishu.cn/sheets/stkn"}}}
+        if "permissions" in url:
+            return {"code": 0}
+        return {"code": 0}
+
+    monkeypatch.setattr(feishu, "_post", fake_post)
+    monkeypatch.setattr(feishu, "_token", lambda c: "tk")
+    st = {}
+    t1, u1 = feishu._ensure_doc({"app_id": "a"}, {"name": "N"},
+                                {"chat_id": "oc_g"}, st)
+    assert t1 == "stkn" and "stkn" in u1 and len(calls) == 2       # 建表+群授权
+    t2, _ = feishu._ensure_doc({"app_id": "a"}, {"name": "N"}, {"chat_id": "oc_g"}, st)
+    assert t2 == "stkn" and len(calls) == 2                        # 二次走缓存零调用
+
+
 # ── 7. run_account_push 集成(dry-run 全链 mock) ──────────────────────────────
 class _FakeConn:
     def execute(self, sql, params):
