@@ -721,6 +721,26 @@ _SYS_TR = """你是财经翻译。输入是编号的X帖子原文JSON数组, 逐
 保留数字/代码/符号, 语气忠实。只输出JSON数组(同序), 每元素为对应中文译文字符串。"""
 
 
+_TR_TEXT_MAX = 10000     # 单条翻译输入上限(实测真实7693字符帖完整译; X长推留余量)
+_TR_BATCH_N = 12          # 每批条数上限(短文吞吐)
+
+
+def _tr_batches(todo: list, max_chars: int = 6000) -> list:
+    """按输入字符预算切批: ≤12条且累计≤max_chars——短文依旧12条/批, 长文自动
+    小批(12条×3000字译文会撑爆输出max_tokens致JSON撕裂, 0923长文实测后定)。"""
+    out, buf, cur = [], [], 0
+    for it in todo:
+        sz = min(len(str(it.get("text") or "")), _TR_TEXT_MAX)
+        if buf and (len(buf) >= _TR_BATCH_N or cur + sz > max_chars):
+            out.append(buf)
+            buf, cur = [], 0
+        buf.append(it)
+        cur += sz
+    if buf:
+        out.append(buf)
+    return out
+
+
 def _save_zh(batch: list):
     """兜底译文回写 items(只补空不覆盖, 防与全站翻译打架; 容错不抛)。"""
     try:
@@ -751,9 +771,8 @@ def _translate_missing(conf: dict, items: list, cap: int = 12) -> int:
         todo = [it for it in todo if not (it.get("text_zh") or "").strip()]
         if not todo:
             break
-        for batch_start in range(0, len(todo), 12):
-            batch = todo[batch_start:batch_start + 12]
-            payload = json.dumps([str(it.get("text") or "")[:1500] for it in batch],
+        for batch in _tr_batches(todo):
+            payload = json.dumps([str(it.get("text") or "")[:_TR_TEXT_MAX] for it in batch],
                                  ensure_ascii=False)
             for m in models:
                 base = str(m.get("base_url") or "").strip().rstrip("/")
@@ -785,7 +804,7 @@ def _translate_missing(conf: dict, items: list, cap: int = 12) -> int:
         # 终极兜底: 批量两轮后仍缺的逐条单翻——批量JSON输出偶发漏项, 单条成功率≈100%,
         # 保证披露里不再出现[未译](0923 用户裁决: 未译必须消灭而非降概率)
         for it in [x for x in todo if not (x.get("text_zh") or "").strip()]:
-            payload = json.dumps([str(it.get("text") or "")[:1500]], ensure_ascii=False)
+            payload = json.dumps([str(it.get("text") or "")[:_TR_TEXT_MAX]], ensure_ascii=False)
             for m in models:
                 base = str(m.get("base_url") or "").strip().rstrip("/")
                 model = str(m.get("model") or "").strip()

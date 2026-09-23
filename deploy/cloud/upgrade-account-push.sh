@@ -66,7 +66,7 @@ has_mm = any("minimaxi" in str(m.get("base_url") or "") for m in lst)
 if mm_key and not has_mm:
     lst.insert(0, {"base_url": "https://api.minimaxi.com/v1", "api_key": mm_key,
                    "model": "MiniMax-M3",
-                   "extra": {"thinking": {"type": "disabled"}, "max_tokens": 8192}})
+                   "extra": {"thinking": {"type": "disabled"}, "max_tokens": 16384}})
     fs["digest_models"] = lst
     print("翻译链: MiniMax-M3 已注链头(思考关闭)")
 elif has_mm:
