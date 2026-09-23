@@ -513,8 +513,8 @@ def _split_quota(mix: dict, total: int) -> dict:
 # 每账号一个电子表格(首次推送时创建+授权给群), 每次推送新增子表"年-月-日-时:分",
 # 全量命中候选逐行写入(不再受消息长度/条数限制), 群里只发一条短@+链接通知。
 # 表头: 第1行=账号/所属人/成分/窗口/命中; 第2行=列名; 第3行起每条一行。
-_DOC_COLS = ["主题", "类型", "作者", "浏览量", "浏览增速(次/时)",
-             "中文译文", "原文内容", "原文链接", "发布时间"]
+_DOC_COLS = ["主题", "类型", "作者", "浏览量", "浏览增速(次/时)", "金融价值",
+             "人设匹配", "中文译文", "原文内容", "原文链接", "发布时间"]
 _DOC_BATCH_ROWS = 200
 
 
@@ -599,6 +599,152 @@ def _doc_write_rows(conf: dict, token: str, sid: str, rows: list) -> str:
     return ""
 
 
+# ── C3. 金融价值分 FV + 人设正则匹配(0923 用户裁决: FV列用译文算/人设先正则版) ────
+# FV 六维与 workbench/server/x_surge.py calc_fv 一字同源(词典/阈值改动须双向同步);
+# 差异仅: text 输入=中文译文优先回退原文, 意外度恒缺省(原设计 M1 即如此)。
+_FV_EVENT = {"macro": 28, "policy": 26, "legal": 24,
+             "guidance": 20, "mna": 20, "earnings": 16,
+             "contract": 13, "product": 13, "fda": 12, "offering": 10,
+             "dividend": 6, "rating": 6, "personnel": 5}
+_FV_MACRO_RE = re.compile(
+    r"FOMC|美联储|联邦储备|ECB|日本央行|央行|非农|关税|出口管制|实体清单|制裁|地缘|空袭|停火", re.I)
+_FV_REVISION_RE = re.compile(r"修订|修正|终值|revised|revision", re.I)
+_FV_T1_TICKERS = {"NVDA", "AAPL", "MSFT", "GOOGL", "GOOG", "AMZN", "META", "TSLA",
+                  "TSM", "ASML", "AVGO", "AMD", "MU", "000660"}
+_FV_T1_TEXT_RE = re.compile(
+    r"美联储|FOMC|ECB|日本央行|央行|财政部|白宫|台积电|TSMC|ASML|阿斯麦|英伟达|海力士|"
+    r"美光|博通|CoWoS|HBM|EUV|CPO|硅光|光模块", re.I)
+_FV_HOT_L2 = ("HBM", "CPO", "EUV", "CoWoS", "光模块", "硅光", "先进制程")
+_FV_SOURCE = {"官方": 15, "机构": 12, "快讯源": 8, "新闻源": 6, "大V": 5}
+_FV_TIERS = ((75, "P0"), (60, "P1"), (40, "P2"))
+
+
+def _fv_item_score(it: dict, now=None) -> str:
+    """条目金融价值分 → "78·P1"。纯规则毫秒级, 缺字段走中性/保守档(同 x_surge)。"""
+    import datetime as _dt
+    now = now or _dt.datetime.now()
+    text = (it.get("text_zh") or "").strip() or str(it.get("text") or "")
+    try:
+        secs = json.loads(it.get("tickers") or "[]")
+    except ValueError:
+        secs = []
+    tickers = [s for s in secs if isinstance(s, str)]
+    try:
+        mkts = json.loads(it.get("markets") or "[]")
+    except ValueError:
+        mkts = []
+    try:
+        sectors = json.loads(it.get("sectors") or "[]")
+    except ValueError:
+        sectors = []
+    ev = _FV_EVENT.get(it.get("event_type") or "", 2)
+    if _FV_MACRO_RE.search(text):
+        ev = max(ev, 24)
+    if _FV_REVISION_RE.search(text):
+        ev = max(ev - 6, 2)
+    if set(tickers) & _FV_T1_TICKERS or _FV_T1_TEXT_RE.search(text):
+        ent = 22
+    elif any(k in str(s) for s in sectors for k in _FV_HOT_L2):
+        ent = 12
+    elif tickers:
+        ent = 8
+    else:
+        ent = 2
+    src = _FV_SOURCE.get(it.get("positioning") or "", 3)
+    if len(mkts) >= 3 or "全球" in mkts:
+        imp = 12
+    elif len(mkts) == 2:
+        imp = 8
+    elif len(mkts) == 1:
+        imp = 5
+    elif sectors:
+        imp = 3
+    else:
+        imp = 0
+    t0 = _parse_time(str(it.get("time") or ""))
+    age_h = max((now - t0).total_seconds() / 3600, 0.0) if t0 else 24
+    dup = int(it.get("dup_count") or 1)
+    proof = 7 if dup >= 5 else 5 if dup >= 3 else 3 if dup >= 2 else 1
+    fresh = (6 if age_h <= 2 else 5 if age_h <= 6 else 3 if age_h <= 24
+             else 1 if age_h <= 72 else 0)
+    score = min(ev + ent + src + imp + 5 + proof + fresh, 100)
+    if ev >= 24 and src >= 15:
+        score = max(score, 80)
+    if ev <= 6 and ent <= 2:
+        score = min(score, 40)
+    tier = next((t for th, t in _FV_TIERS if score >= th), "P3")
+    return f"{score}·{tier}"
+
+
+# 人设正则匹配: 九类词典(中文为主+英文高频词兜底, 译文计算)。命中词数×mix权重 → 0-10。
+# 词典养的=高频显性词; 语义贴合("实战风格")测不到——那是 LLM 版能力, 正则版管杀零命中噪声。
+# 英文词全小写(匹配走 lower 文本), 中文词原样。
+_PERSONA_DICT = {
+    "美股": ("美股", "标普", "纳指", "纳斯达克", "道琼", "道指", "美联储", "FOMC", "非农",
+             "财报", "华尔街", "美债", "美元指数", "波动率", "美股市场", "纽约联储",
+             "特斯拉", "苹果", "微软", "谷歌", "亚马逊", "Meta", "期权", "做空", "多头",
+             "空头", "龙头股", "科技七巨头", "标普500",
+             "s&p", "nasdaq", "dow jones", "fed", "fomc", "earnings", "tesla",
+             "apple", "wall street", "u.s. stocks", "us stocks"),
+    "A股": ("A股", "沪指", "上证", "深证", "创业板", "科创板", "北交所", "证监会", "沪深",
+            "涨停", "跌停", "北向资金", "两融", "中证", "券商股", "A股市场", "人民币中间价",
+            "shanghai composite", "shenzhen", "china stocks"),
+    "亚太股市": ("港股", "恒生", "恒指", "日经", "东证", "台股", "加权指数", "韩股", "KOSPI",
+                "亚太股市", "港交所", "恒生科技", "港股通", "日股", "富士康", "台积电",
+                "日圆", "日元汇率",
+                "hang seng", "nikkei", "kospi", "taiwan stocks", "tsmc"),
+    "加密": ("比特币", "BTC", "以太坊", "ETH", "加密货币", "数字货币", "区块链", "稳定币",
+             "USDT", "USDC", "币安", "Coinbase", "山寨币", "减半", "链上", "矿机",
+             "Solana", "狗狗币", "比特币ETF",
+             "bitcoin", "ethereum", "crypto", "blockchain", "stablecoin", "binance"),
+    "AI与科技": ("AI", "人工智能", "OpenAI", "GPT", "大模型", "芯片", "GPU", "算力",
+                "英伟达", "台积电", "半导体", "自动驾驶", "机器人", "ChatGPT", "Claude",
+                "DeepSeek", "智能体", "Agent", "训练", "推理芯片", "科技股",
+                "nvidia", "chatgpt", "openai", "semiconductor", "gpu", "ai agent"),
+    "产业链与制造": ("供应链", "产能", "出货量", "工厂", "制造", "封装", "光刻", "上游",
+                   "下游", "订单", "库存", "零部件", "原材料", "涨价", "元器件",
+                   "生产线", "代工", "组装", "交付",
+                   "supply chain", "capacity", "shipment", "inventory", "foundry"),
+    "宏观与政策": ("CPI", "通胀", "利率", "GDP", "衰退", "关税", "央行", "财政部", "白宫",
+                 "国会", "货币政策", "制裁", "地缘", "国债", "收益率", "汇率", "宽松",
+                 "紧缩", "宏观", "就业数据",
+                 "inflation", "interest rate", "recession", "tariff", "treasury",
+                 "white house", "sanctions", "yield"),
+    "大宗与周期": ("黄金", "金价", "原油", "油价", "铜价", "大宗商品", "OPEC", "天然气",
+                 "白银", "铁矿石", "煤炭", "农产品", "周期股", "金属", "油轮",
+                 "gold", "silver", "crude", "oil price", "copper", "opec"),
+    "投教科普": ("教学", "入门", "科普", "教程", "一文读懂", "方法论", "估值", "止损",
+               "仓位", "风险管理", "新手", "图解", "复盘", "技术分析", "基本面分析",
+               "beginner", "tutorial", "guide to"),
+}
+
+
+# 预编译: ASCII词→小写+首尾非字母数字边界(防 said 命中 ai / feed 命中 fed,
+# 且中文相邻算边界 "AI部队" 可命中); 中文词→子串(None)。
+_PERSONA_RE = {
+    t: [((w, re.compile(rf"(?<![a-z0-9]){re.escape(w.lower())}(?![a-z0-9])"))
+         if w.isascii() else (w, None)) for w in ws]
+    for t, ws in _PERSONA_DICT.items()}
+
+
+def _persona_score(text: str, mix: dict) -> int:
+    """译文×九类词典命中数, 按 mix 权重加权 → 0-10。零成本毫秒级。
+    ASCII 词走小写+边界正则(未译回退英文原文时兜底), 中文词子串。"""
+    if not text:
+        return 0
+    low = text.lower()
+    total = 0.0
+    for t, pct in mix.items():
+        words = _PERSONA_RE.get(t)
+        if not words or not pct:
+            continue
+        hits = sum(1 for w, pat in words if (pat.search(low) if pat else w in text))
+        if hits:
+            total += float(pct) / 100.0 * (0.5 if hits == 1
+                                           else 0.8 if hits == 2 else 1.0)
+    return round(min(total, 1.0) * 10)
+
+
 def _doc_rows(acc: dict, mix: dict, ordered: list, bj: str, cand_n: int,
               now=None) -> list:
     """账号卡 → 二维行数组: 第1行档案 + 第2行列名 + 全量条目行(主题按mix降序,
@@ -610,11 +756,14 @@ def _doc_rows(acc: dict, mix: dict, ordered: list, bj: str, cand_n: int,
              f"成分: {mix_s}", f"窗口: {bj}", f"命中: {cand_n} 条"], list(_DOC_COLS)]
     for t, its in ordered:
         for it in its:
+            txt_zh = (it.get("text_zh") or "").strip()
             rows.append([
                 t, "观点" if _is_opinion(it) else "资讯",
                 str(it.get("author_handle") or ""), int(it.get("views") or 0),
                 int(_rate(it, now)),
-                (it.get("text_zh") or "").strip() or "[未译]",
+                _fv_item_score(it, now),
+                _persona_score(txt_zh or str(it.get("text") or ""), mix),
+                txt_zh or "[未译]",
                 str(it.get("text") or ""), str(it.get("url") or ""),
                 str(it.get("time") or "")])
     return rows
@@ -862,7 +1011,7 @@ def run_account_push(dry_run: bool = False, force: bool = False,
     try:
         rows = conn.execute(
             "SELECT source_id, time, text, text_zh, url, author_handle, sectors, markets, "
-            "item_type, author_role FROM items "
+            "item_type, author_role, tickers, event_type, dup_count, positioning FROM items "
             "WHERE fetched_at>=? AND source_id LIKE '%twitter%' "
             "ORDER BY time DESC LIMIT 400", (since,)).fetchall()
     finally:
@@ -878,6 +1027,8 @@ def run_account_push(dry_run: bool = False, force: bool = False,
         items.append({"text": raw_txt, "text_zh": r[3], "url": u, "time": r[1],
                       "author_handle": r[5], "sectors": r[6], "markets": r[7],
                       "item_type": r[8], "author_role": r[9],
+                      "tickers": r[10], "event_type": r[11],
+                      "dup_count": r[12], "positioning": r[13],
                       "views": None, "likes": None})
     rep["items"] = len(items)
     if not items:

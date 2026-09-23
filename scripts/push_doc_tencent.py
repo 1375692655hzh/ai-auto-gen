@@ -150,24 +150,25 @@ def _write_rows(file_id: str, sheet_id: str, rows: list) -> tuple:
     return written, dropped
 
 
-# ── 板式(0923 学习自用户手调的 11.22 子表) ─────────────────────────────────
-# 列宽px: 译文列(5)超宽=主阅读区, 原文列(6)窄=辅助; 行高: 前两行40; 全表细边框;
-# 首行档案合并 A1:I1(写入前先拼单格, 合并不丢 B1:E1 内容)。
-_LAYOUT_COLS = [40, 40, 96, 56, 68, 1285, 42, 35, 138]
+# ── 板式(0923 学习自用户手调的 11.22 子表; 0923 二轮加金融价值/人设匹配两列) ──────
+# 列宽px: 译文列超宽=主阅读区, 原文列窄=辅助; 行高: 前两行40; 全表细边框;
+# 首行档案合并首行全列(写入前先拼单格, 合并不丢内容)。
+_LAYOUT_COLS = [40, 40, 96, 56, 68, 60, 60, 1285, 42, 35, 138]
 
 
 def _apply_layout(file_id: str, sid: str, n_rows: int):
     """数据写入后套用户板式: 合并/列宽行高/边框。样式是体验项, 逐项失败不阻断。"""
+    last_col = len(_LAYOUT_COLS) - 1
     steps = [
         ("merge_cell", {"merge_type": "all", "start_row": 0, "start_col": 0,
-                        "end_row": 0, "end_col": 8}),
+                        "end_row": 0, "end_col": last_col}),
         ("set_dimension_size", {"dimensions":
             [{"dimension_type": "col", "index": i, "size": w}
              for i, w in enumerate(_LAYOUT_COLS)] +
             [{"dimension_type": "row", "index": 0, "size": 40},
              {"dimension_type": "row", "index": 1, "size": 40}]}),
         ("set_border", {"start_row": 0, "start_col": 0,
-                        "end_row": max(n_rows - 1, 1), "end_col": 8,
+                        "end_row": max(n_rows - 1, 1), "end_col": last_col,
                         "border_positions": [0, 1, 2, 3, 4, 5], "border_style": 1}),
     ]
     for tool, extra in steps:
@@ -221,7 +222,7 @@ def main() -> int:
     try:
         rows = conn.execute(
             "SELECT source_id, time, text, text_zh, url, author_handle, sectors, markets, "
-            "item_type, author_role FROM items "
+            "item_type, author_role, tickers, event_type, dup_count, positioning FROM items "
             "WHERE fetched_at>=? AND source_id LIKE '%twitter%' "
             "ORDER BY time DESC LIMIT 400", (since,)).fetchall()
     finally:
@@ -237,6 +238,8 @@ def main() -> int:
                       "text_zh": r[3], "url": u, "time": r[1],
                       "author_handle": r[5], "sectors": r[6], "markets": r[7],
                       "item_type": r[8], "author_role": r[9],
+                      "tickers": r[10], "event_type": r[11],
+                      "dup_count": r[12], "positioning": r[13],
                       "views": None, "likes": None})
     rep["items"] = len(items)
     if not items:

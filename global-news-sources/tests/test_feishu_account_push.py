@@ -239,7 +239,9 @@ def test_doc_rows_layout():
     assert rows[1] == feishu._DOC_COLS
     assert rows[2][0] == "美股" and rows[2][1] == "观点" and rows[2][3] == 12000
     assert abs(rows[2][4] - 6000) < 100                          # 增速=12000/2h±分钟粒度
-    assert rows[2][5] == "译好" and rows[2][7] == "u1"
+    assert rows[2][5].endswith("P0") or "·P" in rows[2][5]      # 金融价值 "xx·Pn"
+    assert isinstance(rows[2][6], int) and 0 <= rows[2][6] <= 10   # 人设匹配 0-10
+    assert rows[2][7] == "译好" and rows[2][9] == "u1"
     assert rows[3][1] == "资讯"                                    # 观点行在资讯行前
 
 
@@ -280,11 +282,14 @@ class _FakeConn:
             def fetchall(inner):
                 return [
                     ("src_twitter_a", "2026-09-22 10:00", "NVDA earnings beat", "",
-                     "u1", "UW", '["半导体>代工"]', '["美国"]', "快讯", "analyst"),
+                     "u1", "UW", '["半导体>代工"]', '["美国"]', "快讯", "analyst",
+                     '["NVDA"]', "earnings", 2, "机构"),
                     ("src_twitter_b", "2026-09-22 10:30", "BTC breakout", "",
-                     "u2", "crypto_kol", '[]', '["全球"]', "快讯", "media"),
+                     "u2", "crypto_kol", '[]', '["全球"]', "快讯", "media",
+                     '[]', "", 1, "大V"),
                     ("src_twitter_a", "2026-09-22 11:00", "dup of u1", "",
-                     "u1", "UW", '["半导体>代工"]', '["美国"]', "快讯", "analyst"),
+                     "u1", "UW", '["半导体>代工"]', '["美国"]', "快讯", "analyst",
+                     '["NVDA"]', "earnings", 2, "机构"),
                 ]
         return _R()
 
@@ -351,3 +356,23 @@ def test_send_text_receive_routing(monkeypatch):
                         lambda u, p, token="", timeout=20: {"code": 230002, "msg": "not visible"})
     ok, err = feishu.send_text(conf, "hi", {"type": "open_id", "id": "ou_x"})
     assert not ok and "可用范围" in err
+
+
+def test_fv_and_persona_score():
+    import datetime as _dt
+    now = _dt.datetime(2026, 9, 23, 15, 0)
+    # FV: 官方源宏观事件 + T1词典 → 保底 P0 (硬规则 ev>=24 & src>=15)
+    it = {"text_zh": "美联储FOMC决议维持利率不变, 台积电CoWoS产能吃紧", "text": "",
+          "tickers": '["NVDA"]', "event_type": "macro", "dup_count": 5,
+          "positioning": "官方", "markets": '["美国", "全球"]', "sectors": "[]",
+          "time": "2026-09-23 14:00"}
+    assert "P0" in feishu._fv_item_score(it, now)
+    # FV: 无名低值 → 硬规则封顶 40 (P2 下)
+    it2 = {"text_zh": "今天天气不错", "tickers": "[]", "event_type": "",
+           "dup_count": 1, "positioning": "", "markets": "[]", "sectors": "[]",
+           "time": "2026-09-23 14:00"}
+    assert int(feishu._fv_item_score(it2, now).split("·")[0]) <= 40
+    mix = {"美股": 60, "AI与科技": 30, "亚太股市": 10}
+    assert feishu._persona_score("美股标普500大涨, 英伟达财报超预期", mix) >= 5
+    assert feishu._persona_score("日本牙科激光疗法新潮流", mix) == 0
+    assert feishu._persona_score("Nasdaq falls as Fed officials speak", mix) >= 4  # 英文小写兜底
