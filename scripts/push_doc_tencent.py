@@ -150,6 +150,33 @@ def _write_rows(file_id: str, sheet_id: str, rows: list) -> tuple:
     return written, dropped
 
 
+# ── 板式(0923 学习自用户手调的 11.22 子表) ─────────────────────────────────
+# 列宽px: 译文列(5)超宽=主阅读区, 原文列(6)窄=辅助; 行高: 前两行40; 全表细边框;
+# 首行档案合并 A1:I1(写入前先拼单格, 合并不丢 B1:E1 内容)。
+_LAYOUT_COLS = [40, 40, 96, 56, 68, 1285, 42, 35, 138]
+
+
+def _apply_layout(file_id: str, sid: str, n_rows: int):
+    """数据写入后套用户板式: 合并/列宽行高/边框。样式是体验项, 逐项失败不阻断。"""
+    steps = [
+        ("merge_cell", {"merge_type": "all", "start_row": 0, "start_col": 0,
+                        "end_row": 0, "end_col": 8}),
+        ("set_dimension_size", {"dimensions":
+            [{"dimension_type": "col", "index": i, "size": w}
+             for i, w in enumerate(_LAYOUT_COLS)] +
+            [{"dimension_type": "row", "index": 0, "size": 40},
+             {"dimension_type": "row", "index": 1, "size": 40}]}),
+        ("set_border", {"start_row": 0, "start_col": 0,
+                        "end_row": max(n_rows - 1, 1), "end_col": 8,
+                        "border_positions": [0, 1, 2, 3, 4, 5], "border_style": 1}),
+    ]
+    for tool, extra in steps:
+        try:
+            _mc("sheet-mcp", tool, {"file_id": file_id, "sheet_id": sid, **extra})
+        except RuntimeError:
+            pass
+
+
 def _ensure_doc_tencent(st: dict, acc: dict) -> tuple:
     """账号 → (file_id, url, is_new)。首次建「选题推送-{账号名}」(≤36字)并开所有人可编辑。"""
     docs = st.setdefault("tencent_docs", {})
@@ -243,8 +270,9 @@ def main() -> int:
             rep["errors"].append(f"{name}: 窗口内无命中素材")
             continue
         title = _safe_sheet_title(feishu._doc_sheet_title())
-        rep["translated"] += feishu._translate_missing(conf, rows_items, cap=24)
+        rep["translated"] += feishu._translate_missing(conf, rows_items, cap=200)
         drows = feishu._doc_rows(acc, mix, ordered, bj, len(cand))
+        drows[0] = ["\t".join(str(c) for c in drows[0])]   # 首行档案拼单格(合并A1:I1前提)
         if args.dry_run:
             print(f"[dry] {name} 子表 {title}: {len(drows)} 行, 首行: {drows[0]}")
             continue
@@ -260,6 +288,7 @@ def main() -> int:
                     {"file_id": file_id, "sheet_id": sid, "row_count": 2, "col_count": 1})
             except RuntimeError:
                 pass
+            _apply_layout(file_id, sid, len(drows))
             if not is_new:                        # 已有表格幂等再确认开放权限
                 _mc("tencent-docs", "manage.set_privilege",
                     {"file_id": file_id, "policy": 3})

@@ -721,9 +721,25 @@ _SYS_TR = """你是财经翻译。输入是编号的X帖子原文JSON数组, 逐
 保留数字/代码/符号, 语气忠实。只输出JSON数组(同序), 每元素为对应中文译文字符串。"""
 
 
+def _save_zh(batch: list):
+    """兜底译文回写 items(只补空不覆盖, 防与全站翻译打架; 容错不抛)。"""
+    try:
+        conn = _store._connect()
+        with conn:
+            for it in batch:
+                zh = (it.get("text_zh") or "").strip()
+                u = str(it.get("url") or "")
+                if zh and u:
+                    conn.execute("UPDATE items SET text_zh=? WHERE url=? "
+                                 "AND (text_zh IS NULL OR text_zh='')", (zh, u))
+    except Exception:
+        pass
+
+
 def _translate_missing(conf: dict, items: list, cap: int = 12) -> int:
     """推送前兜底翻译: 对缺 text_zh 的条目批量过一遍 LLM(链=digest_models
     缺省复用 translate.models, 云端zen_bridge/本地均可), 12条/批循环到 cap,
+    LLM 批次偶发漏翻 → 共两轮(第二轮只补仍缺); 成功即回写库(下轮同条目免重翻)。
     失败静默保[未译]。返回补译成功数。"""
     import requests
     todo = [it for it in items if not (it.get("text_zh") or "").strip()][:cap]
@@ -731,35 +747,40 @@ def _translate_missing(conf: dict, items: list, cap: int = 12) -> int:
         return 0
     models = conf.get("digest_models") or (_cfg_section().get("translate") or {}).get("models") or []
     done = 0
-    for batch_start in range(0, len(todo), 12):
-        batch = todo[batch_start:batch_start + 12]
-        payload = json.dumps([str(it.get("text") or "")[:600] for it in batch],
-                             ensure_ascii=False)
-        for m in models:
-            base = str(m.get("base_url") or "").strip().rstrip("/")
-            model = str(m.get("model") or "").strip()
-            if not (base and model):
-                continue
-            try:
-                r = requests.post(f"{base}/chat/completions",
-                                  headers={"Authorization": f"Bearer {str(m.get('api_key') or 'x')}",
-                                           "Content-Type": "application/json"},
-                                  json={"model": model,
-                                        "messages": [{"role": "system", "content": _SYS_TR},
-                                                     {"role": "user", "content": payload}]},
-                                  timeout=90)
-                r.raise_for_status()
-                out = (r.json().get("choices") or [{}])[0].get("message", {}).get("content") or ""
-                out = re.sub(r"^```(json)?|```$", "", out.strip(), flags=re.M).strip()
-                arr = json.loads(out)
-                if isinstance(arr, list):
-                    for it, zh in zip(batch, arr):
-                        if isinstance(zh, str) and zh.strip():
-                            it["text_zh"] = zh.strip()
-                            done += 1
-                    break                       # 本批成功, 下一批
-            except Exception:
-                continue
+    for _round in range(2):
+        todo = [it for it in todo if not (it.get("text_zh") or "").strip()]
+        if not todo:
+            break
+        for batch_start in range(0, len(todo), 12):
+            batch = todo[batch_start:batch_start + 12]
+            payload = json.dumps([str(it.get("text") or "")[:1500] for it in batch],
+                                 ensure_ascii=False)
+            for m in models:
+                base = str(m.get("base_url") or "").strip().rstrip("/")
+                model = str(m.get("model") or "").strip()
+                if not (base and model):
+                    continue
+                try:
+                    r = requests.post(f"{base}/chat/completions",
+                                      headers={"Authorization": f"Bearer {str(m.get('api_key') or 'x')}",
+                                               "Content-Type": "application/json"},
+                                      json={"model": model,
+                                            "messages": [{"role": "system", "content": _SYS_TR},
+                                                         {"role": "user", "content": payload}]},
+                                      timeout=90)
+                    r.raise_for_status()
+                    out = (r.json().get("choices") or [{}])[0].get("message", {}).get("content") or ""
+                    out = re.sub(r"^```(json)?|```$", "", out.strip(), flags=re.M).strip()
+                    arr = json.loads(out)
+                    if isinstance(arr, list):
+                        for it, zh in zip(batch, arr):
+                            if isinstance(zh, str) and zh.strip():
+                                it["text_zh"] = zh.strip()
+                                done += 1
+                        _save_zh(batch)         # 回写库, 下轮窗口重叠条目免重翻
+                        break                   # 本批成功, 下一批
+                except Exception:
+                    continue
     return done
 
 
@@ -846,7 +867,7 @@ def run_account_push(dry_run: bool = False, force: bool = False,
                 rep["errors"].append(f"{acc.get('name') or '?'}: 窗口内无命中素材")
                 continue
             title = _doc_sheet_title()
-            rep["translated"] += _translate_missing(conf, rows_items, cap=24)
+            rep["translated"] += _translate_missing(conf, rows_items, cap=200)
             rows = _doc_rows(acc, mix, ordered, bj, len(cand))
             if dry_run:
                 preview.append(f"[doc] {acc.get('name')} {title} 子表 {len(rows)} 行"
