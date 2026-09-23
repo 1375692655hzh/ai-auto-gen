@@ -781,6 +781,34 @@ def _translate_missing(conf: dict, items: list, cap: int = 12) -> int:
                         break                   # 本批成功, 下一批
                 except Exception:
                     continue
+        # 终极兜底: 批量两轮后仍缺的逐条单翻——批量JSON输出偶发漏项, 单条成功率≈100%,
+        # 保证披露里不再出现[未译](0923 用户裁决: 未译必须消灭而非降概率)
+        for it in [x for x in todo if not (x.get("text_zh") or "").strip()]:
+            payload = json.dumps([str(it.get("text") or "")[:1500]], ensure_ascii=False)
+            for m in models:
+                base = str(m.get("base_url") or "").strip().rstrip("/")
+                model = str(m.get("model") or "").strip()
+                if not (base and model):
+                    continue
+                try:
+                    r = requests.post(f"{base}/chat/completions",
+                                      headers={"Authorization": f"Bearer {str(m.get('api_key') or 'x')}",
+                                               "Content-Type": "application/json"},
+                                      json={"model": model,
+                                            "messages": [{"role": "system", "content": _SYS_TR},
+                                                         {"role": "user", "content": payload}]},
+                                      timeout=60)
+                    r.raise_for_status()
+                    out = (r.json().get("choices") or [{}])[0].get("message", {}).get("content") or ""
+                    arr = json.loads(re.sub(r"^```(json)?|```$", "", out.strip(),
+                                            flags=re.M).strip())
+                    if isinstance(arr, list) and arr and isinstance(arr[0], str) and arr[0].strip():
+                        it["text_zh"] = arr[0].strip()
+                        done += 1
+                        _save_zh([it])
+                        break
+                except Exception:
+                    continue
     return done
 
 
