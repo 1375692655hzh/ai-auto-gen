@@ -1122,7 +1122,8 @@ def run_account_push(dry_run: bool = False, force: bool = False,
                       "views": None, "likes": None})
     rep["items"] = len(items)
     if not items:
-        rep["skipped"] = f"窗口 {win_h}h 内无 X 新帖, 静默"
+        rep["skipped"] = (f"窗口 {since} 以来无 X 新帖, 静默" if win_h is None
+                          else f"窗口 {win_h}h 内无 X 新帖, 静默")
         if not dry_run:
             st = _load_state(_PUSH_STATE)
             st["last_ts"] = time.time()
@@ -1135,8 +1136,12 @@ def run_account_push(dry_run: bool = False, force: bool = False,
     cand = [it for it in items if it["topics"]]
     rep["classified"] = len(cand)
     _enrich_stats(cand, max_handles=40)              # 热度: FxTwitter 现拉浏览量
-    bj = time.strftime("%m-%d %H:%M", time.localtime(time.time() - win_h * 3600)) \
-        + "~" + time.strftime("%H:%M")
+    if win_h is None:                                   # schedule 模式: 窗口起点=上次推送时刻
+        bj = time.strftime("%m-%d %H:%M", time.strptime(since, "%Y-%m-%d %H:%M:%S")) \
+            + "~" + time.strftime("%H:%M")
+    else:
+        bj = time.strftime("%m-%d %H:%M", time.localtime(time.time() - win_h * 3600)) \
+            + "~" + time.strftime("%H:%M")
     send_conf = dict(conf)
     send_conf["chat_id"] = ap["chat_id"]
     preview = []

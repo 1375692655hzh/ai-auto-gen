@@ -337,6 +337,36 @@ def test_run_account_push_throttle_gate(monkeypatch):
     assert "skipped" in rep and "不足" in rep["skipped"]
 
 
+def test_run_account_push_schedule_window_label(monkeypatch):
+    """0924 回归(云端 16:21 后 5h 静默事故): schedule 模式 win_h=None, bj 窗口标签
+    曾算 None*3600 → TypeError, 每个锚点轮必崩且被 refresh 包装成一行 ⚠ 吞掉。
+    修复后窗口标签=上次推送时刻, dry_run 全链不炸。"""
+    monkeypatch.setattr(feishu, "_conf", lambda: {
+        "enabled": True, "app_id": "x", "app_secret": "y", "chat_id": "oc_old",
+        "digest_models": [], "min_items": 2, "watch": {},
+        "account_push": {"enabled": True, "interval_h": 2, "window_h": 2,
+                         "schedule": [9, 13, 17, 21, 24], "chat_id": "oc_new",
+                         "top_total": 4,
+                         "accounts": [{"name": "Owen聊投资", "owner": "Owen",
+                                       "mix": {"美股": 60, "加密": 20,
+                                               "AI与科技": 20}}]}})
+    monkeypatch.setattr(feishu, "_store",
+                        type("S", (), {"_connect": staticmethod(_FakeConn)})())
+    monkeypatch.setattr(feishu, "_author_topics",
+                        lambda: {"crypto_kol": {"加密"}, "uw": {"美股"}})
+    monkeypatch.setattr(feishu, "_enrich_stats",
+                        lambda items, max_handles=40: [it.update(views=1000) for it in items])
+    monkeypatch.setattr(feishu, "_translate_missing", lambda conf, items, cap=12: 0)
+    monkeypatch.setattr(feishu, "_load_state",
+                        lambda name: ({"last_ts": time.time() - 7200,
+                                       "last_push_at": "2026-09-24 16:21:26"}
+                                      if name == feishu._PUSH_STATE else {}))
+    rep = feishu.run_account_push(dry_run=True)
+    assert rep.get("items") == 2 and rep.get("classified") == 2
+    card = "\n".join(rep["preview"])
+    assert "16:21" in card              # schedule 模式窗口标签=上次推送时刻起
+
+
 # ── 8. send_text 接收路由(群/私发) ───────────────────────────────────────────
 def test_send_text_receive_routing(monkeypatch):
     calls = []
