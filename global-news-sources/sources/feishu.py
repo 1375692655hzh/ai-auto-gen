@@ -39,6 +39,7 @@ except ImportError:                             # pragma: no cover
     msvcrt = None
 
 from . import _cfg_section, data_dir, store as _store
+from . import chain_guard as _guard
 
 _STATE = "feishu.json"
 _PUSH_LOCK_FH = None
@@ -1005,18 +1006,38 @@ def _save_zh(batch: list):
         pass
 
 
+def _tr_record(base: str, model: str, ok: bool, ecls: str, t0: float,
+               usage: dict | None = None) -> None:
+    """非桥调用(MiniMax 等)调用侧记录; Zen 流量由 zen_bridge 记, 不重复计(0924 额度统计)。"""
+    if _guard.is_bridge(base):
+        return
+    try:
+        u = usage or {}
+        _guard.record(logger="caller", node=_guard.node_of(base), model=model, ok=ok,
+                      ecls=ecls, latency_ms=int((time.time() - t0) * 1000),
+                      tokens={"prompt": u.get("prompt_tokens") or 0,
+                              "completion": u.get("completion_tokens") or 0,
+                              "total": u.get("total_tokens") or 0})
+    except Exception:
+        pass
+
+
 def _translate_missing(conf: dict, items: list, cap: int = 12,
                        deadline: float | None = None) -> int:
     """推送前兜底翻译: 对缺 text_zh 的条目批量过一遍 LLM(链=digest_models
     缺省复用 translate.models, 云端zen_bridge/本地均可), 12条/批循环到 cap,
     LLM 批次偶发漏翻 → 共两轮(第二轮只补仍缺); 成功即回写库(下轮同条目免重翻)。
     deadline(epoch) 过线即停(M3: refresh轮末尾预算防挤占后续llm_tag)。
-    失败静默保[未译]。返回补译成功数。"""
+    失败静默保[未译]。返回补译成功数。链序过 guard.order_chain(额度统计/熔断)。"""
     import requests
     todo = [it for it in items if not (it.get("text_zh") or "").strip()][:cap]
     if not todo:
         return 0
     models = conf.get("digest_models") or (_cfg_section().get("translate") or {}).get("models") or []
+    try:
+        models = _guard.order_chain(models)
+    except Exception:
+        pass
     done = 0
     for _round in range(2):
         if deadline and time.time() > deadline:
@@ -1034,6 +1055,7 @@ def _translate_missing(conf: dict, items: list, cap: int = 12,
                 model = str(m.get("model") or "").strip()
                 if not (base and model):
                     continue
+                t0 = time.time()
                 try:
                     extra = _llm_extra(m)                    # low-5: 白名单透传
                     r = requests.post(f"{base}/chat/completions",
@@ -1044,7 +1066,8 @@ def _translate_missing(conf: dict, items: list, cap: int = 12,
                                                          {"role": "user", "content": payload}], **extra},
                                       timeout=90)
                     r.raise_for_status()
-                    out = (r.json().get("choices") or [{}])[0].get("message", {}).get("content") or ""
+                    rj = r.json()
+                    out = (rj.get("choices") or [{}])[0].get("message", {}).get("content") or ""
                     out = re.sub(r"<think>.*?</think>", "", out, flags=re.S)  # M2.x 思考混 content
                     arr = json.loads(re.sub(r"^```(json)?|```$", "", out.strip(), flags=re.M).strip())
                     if isinstance(arr, list):
@@ -1053,8 +1076,10 @@ def _translate_missing(conf: dict, items: list, cap: int = 12,
                                 it["text_zh"] = zh.strip()
                                 done += 1
                         _save_zh(batch)         # 回写库, 下轮窗口重叠条目免重翻
+                        _tr_record(base, model, True, "ok", t0, rj.get("usage"))
                         break                   # 本批成功, 下一批
-                except Exception:
+                except Exception as ex:
+                    _tr_record(base, model, False, _guard.classify(exc=ex), t0)
                     continue
         # 终极兜底: 批量两轮后仍缺的逐条单翻——批量JSON输出偶发漏项, 单条成功率≈100%,
         # 保证披露里不再出现[未译](0923 用户裁决: 未译必须消灭而非降概率)
@@ -1067,6 +1092,7 @@ def _translate_missing(conf: dict, items: list, cap: int = 12,
                 model = str(m.get("model") or "").strip()
                 if not (base and model):
                     continue
+                t0 = time.time()
                 try:
                     extra = _llm_extra(m)                    # low-5: 白名单透传
                     r = requests.post(f"{base}/chat/completions",
@@ -1077,7 +1103,8 @@ def _translate_missing(conf: dict, items: list, cap: int = 12,
                                                          {"role": "user", "content": payload}], **extra},
                                       timeout=60)
                     r.raise_for_status()
-                    out = (r.json().get("choices") or [{}])[0].get("message", {}).get("content") or ""
+                    rj = r.json()
+                    out = (rj.get("choices") or [{}])[0].get("message", {}).get("content") or ""
                     out = re.sub(r"<think>.*?</think>", "", out, flags=re.S)
                     arr = json.loads(re.sub(r"^```(json)?|```$", "", out.strip(),
                                             flags=re.M).strip())
@@ -1085,8 +1112,10 @@ def _translate_missing(conf: dict, items: list, cap: int = 12,
                         it["text_zh"] = arr[0].strip()
                         done += 1
                         _save_zh([it])
+                        _tr_record(base, model, True, "ok", t0, rj.get("usage"))
                         break
-                except Exception:
+                except Exception as ex:
+                    _tr_record(base, model, False, _guard.classify(exc=ex), t0)
                     continue
     return done
 

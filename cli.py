@@ -359,6 +359,11 @@ def sources_cmd(args) -> int:
         return run(host=args.bind or args.host, port=args.port)
     if args.sub == "enable":
         return sources_enable_cmd(args.sid, args.state, args.json)
+    if args.sub == "translate-usage":
+        from sources import chain_guard
+        print(chain_guard.usage_report(days=args.days))
+        return EXIT_OK
+
     if args.sub == "feishu":
         from sources import feishu as feishu_mod
         if args.action == "test":
@@ -746,6 +751,9 @@ def main() -> int:
     ps_fs.add_argument("--force", action="store_true", help="push: 忽略2h节流立即推")
     ps_fs.add_argument("--window", type=float, dest="window", default=None,
                        help="push: 自定义收集窗口小时数(缺省用配置window_h)")
+    ps_tu = ssub.add_parser("translate-usage",
+                            help="翻译链额度用量(防封主表=节点日请求; 明细在 data/zen-usage/)")
+    ps_tu.add_argument("--days", type=int, default=1, help="聚合天数(默认1=今天)")
 
     p_fl = sub.add_parser("flows", help="生成工作流(板块二)")
     fsub = p_fl.add_subparsers(dest="sub", required=True)

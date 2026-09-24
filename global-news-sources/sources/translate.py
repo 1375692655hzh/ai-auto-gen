@@ -19,6 +19,7 @@ import re
 import time
 
 from sources import store as _store
+from sources import chain_guard as guard
 
 DEFAULT_MODEL = "deepseek-v4-flash"
 BATCH = 10
@@ -127,7 +128,7 @@ def _text_hash(text: str) -> str:
                        .encode("utf-8")).hexdigest()
 
 
-def _chat(base: str, key: str, model: str, prompt: str, extra: dict | None = None) -> str:
+def _chat(base: str, key: str, model: str, prompt: str, extra: dict | None = None) -> tuple:
     import requests
     r = requests.post(f"{base.rstrip('/')}/chat/completions",
                       headers={"Authorization": f"Bearer {key}",
@@ -138,8 +139,26 @@ def _chat(base: str, key: str, model: str, prompt: str, extra: dict | None = Non
                             "temperature": 0, **(extra or {})},
                       timeout=90)
     r.raise_for_status()
-    content = r.json()["choices"][0]["message"]["content"]
-    return re.sub(r"<think>.*?</think>", "", content, flags=re.S)   # M2.x 思考混 content 防线
+    j = r.json()
+    content = j["choices"][0]["message"]["content"]
+    text = re.sub(r"<think>.*?</think>", "", content, flags=re.S)   # M2.x 思考混 content 防线
+    return text, (j.get("usage") or {})
+
+
+def _safe_record(base: str, model: str, ok: bool, ecls: str, t0: float,
+                 usage: dict | None = None) -> None:
+    """非桥调用(MiniMax 等)调用侧记录; Zen 流量由 zen_bridge 记, 不重复计。"""
+    if guard.is_bridge(base):
+        return
+    try:
+        u = usage or {}
+        guard.record(logger="caller", node=guard.node_of(base), model=model, ok=ok,
+                     ecls=ecls, latency_ms=int((time.time() - t0) * 1000),
+                     tokens={"prompt": u.get("prompt_tokens") or 0,
+                             "completion": u.get("completion_tokens") or 0,
+                             "total": u.get("total_tokens") or 0})
+    except Exception:
+        pass
 
 
 def run(since_fetched_at: str) -> dict:
@@ -157,6 +176,9 @@ def run(since_fetched_at: str) -> dict:
     if not chain:
         rep["errors"].append("无 LLM key(翻译跳过)")
         return rep
+    chain = guard.order_chain(                        # 预算排序: 熔断/超软顶摘除+剩余预算优先
+        [{"base_url": b, "api_key": k, "model": m, "tag": t, "extra": ex}
+         for b, k, m, t, ex in chain])
 
     conn = _store._connect()
     try:
@@ -235,18 +257,25 @@ def run(since_fetched_at: str) -> dict:
                 head = f"标题: {t[2]}\n" if t[2] else ""
                 parts.append(f"[{n}] {head}{(t[1] or '')[:limit]}")
             prompt = "\n\n".join(parts)
-            out, used = None, None
+            out, used, usage = None, None, None
             chain_errs = []
             for step in range(len(chain)):              # 从粘性位起逐链位尝试
                 pos = (chain_pos + step) % len(chain)
-                b, k, m, tag, ex = chain[pos]
+                c = chain[pos]
+                b, k, m, tag, ex = (c["base_url"], c["api_key"], c["model"],
+                                    c.get("tag") or f"#{pos + 1}:{c['model']}",
+                                    c.get("extra") or {})
+                t0 = time.time()
                 try:
-                    out = _chat(b, k, m, prompt, ex)
+                    out, usage = _chat(b, k, m, prompt, ex)
                     used = tag
                     chain_pos = pos
                     break
                 except Exception as ex:
                     chain_errs.append(f"{tag}: {type(ex).__name__}: {str(ex)[:60]}")
+                    _safe_record(b, m, False, guard.classify(exc=ex), t0)
+            if out is not None:
+                _safe_record(b, m, True, "ok", t0, usage)
             if out is None:
                 rep["errors"].append(f"{label}{off} 全链失败(共{len(chain)}模型): "
                                      + " | ".join(chain_errs))

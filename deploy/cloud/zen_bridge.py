@@ -13,6 +13,7 @@ HTTPS_PROXY=<住宅代理>, ExecStart=<repo>/.venv/bin/python deploy/cloud/zen_b
 """
 import json
 import os
+import re
 import subprocess
 import sys
 import threading
@@ -20,12 +21,47 @@ import time
 import urllib.request
 import urllib.error
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
 
 BRIDGE_PORT = int(os.environ.get("ZEN_BRIDGE_PORT", "20133"))
 SERVE_PORT = int(os.environ.get("ZEN_SERVE_PORT", "4096"))
 SERVE_BASE = f"http://127.0.0.1:{SERVE_PORT}"
 UPSTREAM_TIMEOUT = int(os.environ.get("ZEN_BRIDGE_UPSTREAM_TIMEOUT", "75"))  # 快于调用方90s: 桶抽风→快速502→链落下一桶
+NODE = {20133: "jp", 20134: "hk", 20135: "hk2"}.get(BRIDGE_PORT, "zen")
+_pm = re.search(r"@([^:/]+):", os.environ.get("HTTPS_PROXY") or os.environ.get("https_proxy") or "")
+EGRESS_IP = _pm.group(1) if _pm else ""
 _serve_proc = None
+
+# 额度统计(2026-09-24 用户裁决): 软依赖, guard 挂桥照跑
+_GNS = Path(__file__).resolve().parents[2] / "global-news-sources"
+if _GNS.is_dir() and str(_GNS) not in sys.path:
+    sys.path.insert(0, str(_GNS))
+try:
+    from sources import chain_guard as _guard
+except Exception:
+    _guard = None
+
+
+def _tokens_of(info: dict) -> dict:
+    """opencode info.tokens → 统一口径; total 不含 cache(免费层 cache 读近似免费)。"""
+    tk = (info or {}).get("tokens") or {}
+    ca = tk.get("cache") or {}
+    inp = int(tk.get("input") or 0)
+    out = int(tk.get("output") or 0)
+    rea = int(tk.get("reasoning") or 0)
+    return {"prompt": inp, "completion": out + rea, "total": inp + out + rea,
+            "cache_read": int(ca.get("read") or 0)}
+
+
+def _rec(ok: bool, ecls: str, t0: float, model: str, tokens: dict | None = None) -> None:
+    if _guard is None:
+        return
+    try:
+        _guard.record(logger="bridge", node=NODE, model=model, ok=ok, ecls=ecls,
+                      latency_ms=int((time.time() - t0) * 1000), egress_ip=EGRESS_IP,
+                      tokens=tokens or {})
+    except Exception:
+        pass
 
 
 def _http_json(path: str, payload: dict | None, timeout: int = UPSTREAM_TIMEOUT) -> dict:
@@ -56,7 +92,7 @@ def _spawn_serve() -> None:
     print("[zen_bridge] opencode serve 未就绪(40s)", flush=True)
 
 
-def _chat_via_serve(model: str, sys_msg: str, user_msg: str) -> str:
+def _chat_via_serve(model: str, sys_msg: str, user_msg: str) -> tuple:
     mid = model[3:] if model.startswith("oc/") else model      # oc/ 前缀是 omniroute 时代路由残留
     sess = _http_json("/session", {})
     sid = sess.get("id")
@@ -72,7 +108,7 @@ def _chat_via_serve(model: str, sys_msg: str, user_msg: str) -> str:
                       if p.get("type") == "text").strip()
         if not out:
             raise RuntimeError(f"空响应: {str(resp.get('info'))[:120]}")
-        return out
+        return out, (resp.get("info") or {})
     finally:
         try:    # 会话即弃(单次任务型), 防上下文膨胀
             urllib.request.urlopen(urllib.request.Request(
@@ -103,19 +139,28 @@ class H(BaseHTTPRequestHandler):
         if not self.path.rstrip("/").endswith("chat/completions"):
             self._reply(404, {"error": "not_found"})
             return
+        t0, model = time.time(), ""
         try:
             body = json.loads(self.rfile.read(int(self.headers.get("Content-Length") or 0)))
+            model = body.get("model") or "oc/big-pickle"
             msgs = body.get("messages") or []
             sys_msg = "\n".join(m.get("content") or "" for m in msgs if m.get("role") == "system")
             user_msg = "\n\n".join(m.get("content") or "" for m in msgs if m.get("role") == "user")
-            out = _chat_via_serve(body.get("model") or "oc/big-pickle", sys_msg, user_msg)
+            out, info = _chat_via_serve(model, sys_msg, user_msg)
             self._reply(200, {"id": "zen-bridge", "object": "chat.completion",
                               "choices": [{"index": 0, "finish_reason": "stop",
                                            "message": {"role": "assistant", "content": out}}]})
+            _rec(True, "ok", t0, model, _tokens_of(info))
         except urllib.error.HTTPError as e:
-            self._reply(502, {"error": f"upstream_http_{e.code}: {e.read()[:200]!r}"})
+            eb = e.read()[:200]
+            self._reply(502, {"error": f"upstream_http_{e.code}: {eb!r}"})
+            ecls = _guard.classify(status=e.code, body=str(eb)) if _guard else "other"
+            _rec(False, ecls, t0, model)
         except Exception as e:
-            self._reply(502, {"error": f"{type(e).__name__}: {str(e)[:200]}"})
+            eb = f"{type(e).__name__}: {str(e)[:200]}"
+            self._reply(502, {"error": eb})
+            ecls = _guard.classify(exc=e, body=eb) if _guard else "other"
+            _rec(False, ecls, t0, model)
 
 
 def main() -> None:
