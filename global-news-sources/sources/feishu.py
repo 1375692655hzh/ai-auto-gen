@@ -577,13 +577,18 @@ def _doc_sheet_title(now=None) -> str:
 
 
 def _doc_add_sheet(conf: dict, token: str, title: str) -> tuple:
-    """新建子表 → (sheet_id, err)。同名(同分钟重推)自动加 -2 后缀重试一次。"""
+    """新建子表 → (sheet_id, err)。同名(同分钟重推)自动加 -2 后缀重试一次。
+    端点=sheets_batch_update/addSheet(旧 sheets_post 已 404 下线, 0923 实测)。"""
     for t in (title, f"{title}-2"):
         try:
             d = _post(f"https://open.feishu.cn/open-apis/sheets/v2/spreadsheets/{token}"
-                      "/sheets_post/", {"title": t}, token=_token(conf))
+                      "/sheets_batch_update",
+                      {"requests": [{"addSheet": {"properties": {"title": t}}}]},
+                      token=_token(conf))
             if d.get("code") == 0:
-                sid = str(((d.get("data") or {}).get("sheet") or {}).get("id") or "")
+                replies = ((d.get("data") or {}).get("replies") or [])
+                sid = str((((replies[0] if replies else {}).get("addSheet") or {})
+                           .get("properties") or {}).get("sheetId") or "")
                 if sid:
                     return sid, ""
         except Exception as e:
