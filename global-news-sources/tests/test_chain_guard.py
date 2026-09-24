@@ -41,9 +41,19 @@ def test_classify_500_and_timeout():
     assert g.classify(exc=FakeTimeout("timed out")) == "timeout"
 
 
-def test_classify_freetier_keyword_first():
-    # FreeTier 关键字优先于状态码
-    assert g.classify(status=429, body="FreeTier daily limit") == "ua_freetier"
+def test_classify_freetier_keyword():
+    # 无状态码时 free-tier 文案归 ua_freetier; 包着 429 的必须归 429(冷却依据)
+    assert g.classify(status=429, body="FreeTier daily limit") == "429_free"
+    assert g.classify(status=400, body="FreeTier daily limit") == "ua_freetier"
+
+
+def test_classify_requests_http_error():
+    # requests.HTTPError 的状态码挂在 response.status_code 上
+    class FakeResp:
+        status_code = 429
+    class FakeHTTPError(Exception):
+        response = FakeResp()
+    assert g.classify(exc=FakeHTTPError("boom")) == "429_free"
 
 
 def test_classify_other():
@@ -211,7 +221,7 @@ def test_usage_report_aggregates(_isolate):
     assert "节点×模型" in rep and "节点日请求" in rep and "熔断现状" in rep
     assert "hk" in rep and "big-pickle" in rep and "minimax" in rep
     assert "429_free×1" in rep          # 错误分布
-    assert "池熔断" in rep and "hk/bi" in rep   # 429 → 单池冷却
+    assert "池熔断" in rep and "hk/bi" in rep   # 429 → 冷到 UTC 翻篇
 
 
 def test_usage_report_pool_break_shown(_isolate):
@@ -219,3 +229,57 @@ def test_usage_report_pool_break_shown(_isolate):
              ecls="429_free")
     rep = g.usage_report(days=1)
     assert "池熔断" in rep and "hk/bi" in rep
+
+
+def test_429_cools_to_utc_flip(_isolate):
+    """429 冷却到下一个 UTC 翻篇点(不是滑动窗续期), 省每小时空转探测。"""
+    now = time.time()
+    g.record(logger="caller", node="hk", model="oc/big-pickle", ok=False,
+             ecls="429_free")
+    st = json.loads((_isolate / "state.json").read_text(encoding="utf-8"))
+    info = st["pool_break"]["hk|bi"]
+    assert "翻篇" in info["reason"]
+    assert info["until"] > now + 3600    # 至少比旧的 1h 冷却长
+
+
+def test_cross_node_model_death_syncs_all_nodes(_isolate):
+    """同前缀在 ≥2 节点硬失败 = 模型级死亡: 全部 zen 节点同步冷该前缀,
+    不烧"每个节点各探测 3 次"的冤枉钱, 也不误伤还活着的 bi。"""
+    g.record(logger="caller", node="hk", model="oc/mimo-v2.5-free", ok=False,
+             ecls="500_upstream")
+    g.record(logger="caller", node="hk", model="oc/mimo-v2.5-free", ok=False,
+             ecls="500_upstream")
+    g.record(logger="caller", node="hk2", model="oc/mimo-v2.5-free", ok=False,
+             ecls="500_upstream")
+    g.record(logger="caller", node="hk", model="oc/big-pickle", ok=True)
+    st = json.loads((_isolate / "state.json").read_text(encoding="utf-8"))
+    for node in ("jp", "hk", "hk2"):     # 同步冷却, 含尚无人探测的 jp
+        assert f"{node}|mi" in st["pool_break"]
+    assert "hk" not in st["ip_break"]    # bi 活着, 不误冷节点
+    assert "hk2" not in st["ip_break"]
+
+
+def test_order_chain_hysteresis(_isolate):
+    """可用集合不变时沿用上轮链序: 防"每轮重排→逐节点倾泻到软顶"抖动。"""
+    chain = [_m(20134, "oc/big-pickle"), _m(20135, "oc/big-pickle"),
+             _m(20133, "oc/big-pickle"),
+             {"base_url": "https://api.minimax.chat/v1", "model": "MiniMax-Text-01"}]
+    first = g.order_chain(chain)
+    assert [g.node_of(m["base_url"]) for m in first][:3] == ["hk", "hk2", "jp"]
+    # hk 用量涨到 2, 若无滞回重排会把 hk2/jp(n=0)排到 hk 前面
+    for _ in range(2):
+        g.record(logger="caller", node="hk", model="oc/big-pickle", ok=True)
+    second = g.order_chain(chain)
+    assert [g.node_of(m["base_url"]) for m in second][:3] == ["hk", "hk2", "jp"]
+
+
+def test_order_chain_hysteresis_drops_on_set_change(_isolate):
+    """可用集合变了(熔断)必须重排, 滞回不能让死节点赖在链里。"""
+    chain = [_m(20134, "oc/big-pickle"), _m(20135, "oc/big-pickle"),
+             _m(20133, "oc/big-pickle")]
+    g.order_chain(chain)
+    for _ in range(3):
+        g.record(logger="caller", node="hk2", model="oc/big-pickle", ok=False,
+                 ecls="500_upstream")
+    out = g.order_chain(chain)
+    assert [g.node_of(m["base_url"]) for m in out] == ["hk", "jp"]

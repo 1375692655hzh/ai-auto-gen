@@ -1078,6 +1078,7 @@ def _translate_missing(conf: dict, items: list, cap: int = 12,
                         _save_zh(batch)         # 回写库, 下轮窗口重叠条目免重翻
                         _tr_record(base, model, True, "ok", t0, rj.get("usage"))
                         break                   # 本批成功, 下一批
+                    _tr_record(base, model, False, "badjson", t0)   # 200但输出不可解析
                 except Exception as ex:
                     _tr_record(base, model, False, _guard.classify(exc=ex), t0)
                     continue
@@ -1114,6 +1115,7 @@ def _translate_missing(conf: dict, items: list, cap: int = 12,
                         _save_zh([it])
                         _tr_record(base, model, True, "ok", t0, rj.get("usage"))
                         break
+                    _tr_record(base, model, False, "badjson", t0)   # 200但输出不可解析
                 except Exception as ex:
                     _tr_record(base, model, False, _guard.classify(exc=ex), t0)
                     continue
