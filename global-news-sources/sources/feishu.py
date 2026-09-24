@@ -424,6 +424,7 @@ def _push_conf(conf: dict) -> dict:
     return {"enabled": bool(ap.get("enabled", False)),
             "interval_h": float(ap.get("interval_h") or 2),
             "window_h": float(ap.get("window_h") or 2),
+            "schedule": [int(h) for h in (ap.get("schedule") or []) if isinstance(h, (int, float))],
             "chat_id": str(ap.get("chat_id") or conf.get("chat_id") or ""),
             "top_total": int(ap.get("top_total") or 10),
             "doc": dict(ap.get("doc") or {}),
@@ -574,6 +575,24 @@ def _doc_sheet_title(now=None) -> str:
     import datetime as _dt
     t = now or _dt.datetime.now()
     return f"{t.year}-{t.month}-{t.day}-{t.hour}:{t.minute:02d}"
+
+
+# 列宽布局(0924 用户裁决, 1-based 含端): A,B,D,E,F,G,I,J,K=50; C=100; H=700(译文主读区)
+_DOC_COL_W = ((1, 2, 50), (3, 3, 100), (4, 7, 50), (8, 8, 700), (9, 11, 50))
+
+
+def _doc_set_col_widths(conf: dict, token: str, sid: str):
+    """v2 dimension_range + dimensionProperties.fixedSize(camelCase, 0924 实测破解;
+    开放API唯一列宽入口)。样式体验项: 逐段失败不阻断数据。"""
+    for start, end, w in _DOC_COL_W:
+        try:
+            _put(f"https://open.feishu.cn/open-apis/sheets/v2/spreadsheets/{token}"
+                 "/dimension_range",
+                 {"dimension": {"sheetId": sid, "majorDimension": "COLUMNS",
+                                "startIndex": start, "endIndex": end},
+                  "dimensionProperties": {"fixedSize": w}}, token=_token(conf))
+        except Exception:
+            pass
 
 
 def _doc_add_sheet(conf: dict, token: str, title: str) -> tuple:
@@ -767,6 +786,18 @@ def _persona_score(text: str, mix: dict) -> int:
     return round(min(total, 1.0) * 10)
 
 
+_CJK_RE = re.compile(r"[一-鿿]")
+
+
+def _looks_zh(t: str) -> bool:
+    """原文是否中文(CJK占比)——全站翻译对中文条目 skip, text_zh 恒空。"""
+    smp = (t or "")[:200]
+    if not smp:
+        return False
+    cjk = len(_CJK_RE.findall(smp))
+    return cjk >= 4 and cjk / max(len(smp), 1) >= 0.3
+
+
 def _doc_rows(acc: dict, mix: dict, ordered: list, bj: str, cand_n: int,
               now=None) -> list:
     """账号卡 → 二维行数组: 第1行档案 + 第2行列名 + 全量条目行(主题按mix降序,
@@ -778,15 +809,18 @@ def _doc_rows(acc: dict, mix: dict, ordered: list, bj: str, cand_n: int,
              f"成分: {mix_s}", f"窗口: {bj}", f"命中: {cand_n} 条"], list(_DOC_COLS)]
     for t, its in ordered:
         for it in its:
-            txt_zh = (it.get("text_zh") or "").strip()
+            txt = str(it.get("text") or "").strip()
+            zh = (it.get("text_zh") or "").strip()
+            native = (not zh) and _looks_zh(txt)   # 原文即中文(全站翻译skip类, 无译文)
             rows.append([
                 t, "观点" if _is_opinion(it) else "资讯",
                 str(it.get("author_handle") or ""), int(it.get("views") or 0),
                 int(_rate(it, now)),
                 _fv_item_score(it, now),
-                _persona_score(txt_zh or str(it.get("text") or ""), mix),
-                txt_zh or "[未译]",
-                str(it.get("text") or ""), str(it.get("url") or ""),
+                _persona_score(zh or txt, mix),
+                zh or txt,                            # 0924用户裁决: 不允许[未译]——无译文显示原文
+                "" if native else txt,                # 中文帖原文列留空(译文列已是同内容)
+                str(it.get("url") or ""),
                 str(it.get("time") or "")])
     return rows
 
@@ -1024,20 +1058,39 @@ def run_account_push(dry_run: bool = False, force: bool = False,
     if not ap["accounts"]:
         rep["skipped"] = "无账号成分配置(account_push.accounts)"
         return rep
+    st = _load_state(_PUSH_STATE)                   # dry_run 也 load: 窗口段读 last_push_at
     if not dry_run:
         if not ap["enabled"]:
             rep["skipped"] = "未启用(account_push.enabled)"
             return rep
-        st = _load_state(_PUSH_STATE)
+        slot = ""
+        if ap["schedule"] and not force:
+            lt = time.localtime()                    # 0924 五锚点制: 9/13/17/21/24 点档,
+            slot = f"{time.strftime('%Y-%m-%d')}-{lt.tm_hour}"
+            if lt.tm_hour not in ap["schedule"]:     # 窗口=上次推送完成时刻起(自然覆盖 0~9 等)
+                rep["skipped"] = f"非锚点时段(schedule={ap['schedule']})"
+                return rep
+            if st.get("last_slot") == slot:
+                rep["skipped"] = f"本档已推({slot})"
+                return rep
         last = float(st.get("last_ts") or 0)
         due = force or (time.time() - last) >= ap["interval_h"] * 3600
         if not due:
             rep["skipped"] = f"距上次推送不足 {ap['interval_h']}h"
             return rep
     import datetime as _dt
-    win_h = float(window_h if window_h is not None else ap["window_h"])
-    since = (_dt.datetime.now() - _dt.timedelta(hours=win_h)
-             ).strftime("%Y-%m-%d %H:%M:%S")
+    if window_h is not None:
+        win_h = float(window_h)
+    elif ap["schedule"] and (st.get("last_push_at") or ""):
+        win_h = None                                  # 窗口=上次推送完成时刻(锚点档距自然成立)
+    else:
+        win_h = float(ap["window_h"])
+    since = ((st.get("last_push_at") or "").replace("T", " ") if win_h is None else
+             (_dt.datetime.now() - _dt.timedelta(hours=win_h)).strftime("%Y-%m-%d %H:%M:%S"))
+    if not since:
+        win_h = float(ap["window_h"])
+        since = (_dt.datetime.now() - _dt.timedelta(hours=win_h)
+                 ).strftime("%Y-%m-%d %H:%M:%S")
     conn = _store._connect()
     try:
         rows = conn.execute(
@@ -1115,6 +1168,7 @@ def run_account_push(dry_run: bool = False, force: bool = False,
                 sid, aerr = _doc_add_sheet(conf, token, title)
                 werr = _doc_write_rows(conf, token, sid, rows) if sid else aerr
                 if sid and not werr:
+                    _doc_set_col_widths(conf, token, sid)   # 0924 用户列宽布局
                     rep["docs"] += 1
                     ok_any = True
                     oid = str(acc.get("owner_open_id") or "").strip()
@@ -1165,5 +1219,8 @@ def run_account_push(dry_run: bool = False, force: bool = False,
             _save_state(_PUSH_STATE, st)
         if ok_any:
             st["last_ts"] = time.time()
+            st["last_push_at"] = time.strftime("%Y-%m-%d %H:%M:%S")
+            if slot:
+                st["last_slot"] = slot
             _save_state(_PUSH_STATE, st)
     return rep

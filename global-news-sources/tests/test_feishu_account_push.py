@@ -387,3 +387,28 @@ def test_split_quota_no_overrun():
         qq = feishu._split_quota(mix, total)
         assert sum(qq.values()) <= max(total, len(mix))
         assert all(v >= 1 for v in qq.values())
+
+
+def test_doc_rows_no_untranslated():
+    # 0924 用户裁决: 不允许[未译]——无译文显示原文; 原文即中文时原文列留空
+    import datetime as _dt
+    now = _dt.datetime(2026, 9, 24, 9, 0)
+    acc = {"name": "T", "owner": "O"}
+    items_zh = [{"topics": ("美股",), "text": "美股标普大涨中文长帖内容",
+                 "text_zh": "", "url": "u1", "views": 100, "likes": 0,
+                 "author_handle": "h", "time": "2026-09-24 08:00"}]
+    items_en = [{"topics": ("美股",), "text": "Fed cuts rates by 25bp",
+                 "text_zh": "", "url": "u2", "views": 100, "likes": 0,
+                 "author_handle": "h", "time": "2026-09-24 08:30"}]
+    rows = feishu._doc_rows(acc, {"美股": 100}, feishu._doc_order_all(
+        items_zh + items_en, {"美股": 100}, now=now), "w", 2, now=now)
+    assert rows[2][7] == "美股标普大涨中文长帖内容" and rows[2][8] == ""   # 中文帖: 译文列=原文, 原文列空
+    assert rows[3][7] == "Fed cuts rates by 25bp" and rows[3][8]           # 外文未译: 译文列=原文兜底
+    assert "[未译]" not in json.dumps(rows, ensure_ascii=False)
+
+
+def test_push_conf_schedule_passthrough():
+    conf = {"account_push": {"enabled": True, "schedule": [9, 13, 17, 21, 24]}}
+    ap = feishu._push_conf(conf)
+    assert ap["schedule"] == [9, 13, 17, 21, 24]
+    assert feishu._push_conf({"account_push": {}})["schedule"] == []        # 缺省回落 interval_h 制
