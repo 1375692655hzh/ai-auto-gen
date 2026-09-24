@@ -1053,6 +1053,11 @@ def _translate_missing(conf: dict, items: list, cap: int = 12,
     return done
 
 
+def _anchor_hour(lt) -> int:
+    """锚点小时: 午夜 tm_hour=0 → 24(用户 schedule 写 24 点档)。"""
+    return lt.tm_hour if lt.tm_hour else 24
+
+
 def run_account_push(dry_run: bool = False, force: bool = False,
                      window_h: float | None = None,
                      deadline: float | None = None) -> dict:
@@ -1072,8 +1077,9 @@ def run_account_push(dry_run: bool = False, force: bool = False,
         slot = ""
         if ap["schedule"] and not force:
             lt = time.localtime()                    # 0924 五锚点制: 9/13/17/21/24 点档,
-            slot = f"{time.strftime('%Y-%m-%d')}-{lt.tm_hour}"
-            if lt.tm_hour not in ap["schedule"]:     # 窗口=上次推送完成时刻起(自然覆盖 0~9 等)
+            hour = _anchor_hour(lt)                  # 午夜 tm_hour=0 必须映射 24, 否则 24 档永不触发
+            slot = f"{time.strftime('%Y-%m-%d')}-{hour}"
+            if hour not in ap["schedule"]:           # 窗口=上次推送完成时刻起(自然覆盖 0~9 等)
                 rep["skipped"] = f"非锚点时段(schedule={ap['schedule']})"
                 return rep
             if st.get("last_slot") == slot:

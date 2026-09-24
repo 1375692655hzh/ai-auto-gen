@@ -367,6 +367,15 @@ def test_run_account_push_schedule_window_label(monkeypatch):
     assert "16:21" in card              # schedule 模式窗口标签=上次推送时刻起
 
 
+def test_anchor_hour_midnight_maps_to_24():
+    """0924 回归: 用户 schedule 写 24 点档, 但 Python tm_hour 午夜=0——不映射则
+    24 档永不触发(0 not in [9,13,17,21,24])。"""
+    import time as _t
+    assert feishu._anchor_hour(_t.struct_time((2026, 9, 25, 0, 15, 0, 0, 0, -1))) == 24
+    assert feishu._anchor_hour(_t.struct_time((2026, 9, 24, 21, 5, 0, 0, 0, -1))) == 21
+    assert feishu._anchor_hour(_t.struct_time((2026, 9, 24, 9, 0, 0, 0, 0, -1))) == 9
+
+
 # ── 8. send_text 接收路由(群/私发) ───────────────────────────────────────────
 def test_send_text_receive_routing(monkeypatch):
     calls = []
