@@ -298,6 +298,7 @@ class _FakeConn:
 
 
 def test_run_account_push_dry_run(monkeypatch):
+    monkeypatch.setattr(feishu, "_acquire_push_lock", lambda: True)   # 锁侧效隔离
     monkeypatch.setattr(feishu, "_conf", lambda: {
         "enabled": True, "app_id": "x", "app_secret": "y", "chat_id": "oc_old",
         "digest_models": [], "min_items": 2, "watch": {},
@@ -325,6 +326,7 @@ def test_run_account_push_dry_run(monkeypatch):
 
 
 def test_run_account_push_throttle_gate(monkeypatch):
+    monkeypatch.setattr(feishu, "_acquire_push_lock", lambda: True)   # 锁侧效隔离
     conf = {"enabled": True, "app_id": "x", "app_secret": "y", "chat_id": "oc",
             "account_push": {"enabled": True, "interval_h": 2,
                              "accounts": [{"name": "N", "owner": "O",
@@ -341,6 +343,7 @@ def test_run_account_push_schedule_window_label(monkeypatch):
     """0924 回归(云端 16:21 后 5h 静默事故): schedule 模式 win_h=None, bj 窗口标签
     曾算 None*3600 → TypeError, 每个锚点轮必崩且被 refresh 包装成一行 ⚠ 吞掉。
     修复后窗口标签=上次推送时刻, dry_run 全链不炸。"""
+    monkeypatch.setattr(feishu, "_acquire_push_lock", lambda: True)   # 锁侧效隔离
     monkeypatch.setattr(feishu, "_conf", lambda: {
         "enabled": True, "app_id": "x", "app_secret": "y", "chat_id": "oc_old",
         "digest_models": [], "min_items": 2, "watch": {},
@@ -374,6 +377,19 @@ def test_anchor_hour_midnight_maps_to_24():
     assert feishu._anchor_hour(_t.struct_time((2026, 9, 25, 0, 15, 0, 0, 0, -1))) == 24
     assert feishu._anchor_hour(_t.struct_time((2026, 9, 24, 21, 5, 0, 0, 0, -1))) == 21
     assert feishu._anchor_hour(_t.struct_time((2026, 9, 24, 9, 0, 0, 0, 0, -1))) == 9
+
+
+def test_run_account_push_lockout(monkeypatch):
+    """0924 双推事故防复发: 单实例锁拿不到 → 静默跳过(手跑push与refresh轮末push
+    并发竞态, 曾致 13 账号同窗口双页双消息)。"""
+    monkeypatch.setattr(feishu, "_acquire_push_lock", lambda: False)
+    monkeypatch.setattr(feishu, "_conf", lambda: {
+        "enabled": True, "app_id": "x", "app_secret": "y", "chat_id": "oc",
+        "account_push": {"enabled": True, "interval_h": 2,
+                         "accounts": [{"name": "N", "owner": "O",
+                                       "mix": {"美股": 100}}]}})
+    rep = feishu.run_account_push()
+    assert "skipped" in rep and "单实例锁" in rep["skipped"]
 
 
 # ── 8. send_text 接收路由(群/私发) ───────────────────────────────────────────

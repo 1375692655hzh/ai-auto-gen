@@ -21,15 +21,53 @@ C. 账号成分推送(run_account_push, 2026-09-21): 每2h 收集近2h X帖 → 
 纪律: 发送失败只记不炸(抛给 refresh 记 failures); 机器人不在群(230002)时报告一次原因。
 """
 import json
+import os
 import re
 import time
 import urllib.request
 import urllib.error
+from datetime import datetime
 from pathlib import Path
+
+try:
+    import fcntl                                # Linux(云端)
+except ImportError:                             # pragma: no cover
+    fcntl = None
+try:
+    import msvcrt                               # Windows(本机)
+except ImportError:                             # pragma: no cover
+    msvcrt = None
 
 from . import _cfg_section, data_dir, store as _store
 
 _STATE = "feishu.json"
+_PUSH_LOCK_FH = None
+
+
+def _acquire_push_lock() -> bool:
+    """推送单实例锁(0924 双推事故: 手跑push与refresh轮末push并发, 闸口check-then-act
+    竞态致 13 账号双页双消息)。同 refresh.lock 模式: fcntl/msvcrt 非阻塞锁, 进程死
+    内核自动释放; 锁不上=另一实例在跑, 本轮静默跳过。"""
+    global _PUSH_LOCK_FH
+    if msvcrt is None and fcntl is None:
+        return True
+    p = _store._serve_dir() / "account-push.lock"
+    p.parent.mkdir(parents=True, exist_ok=True)
+    fh = open(p, "a+b")
+    try:
+        if msvcrt is not None:
+            msvcrt.locking(fh.fileno(), msvcrt.LK_NBLCK, 1)
+        else:
+            fcntl.lockf(fh.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        fh.close()
+        return False
+    fh.seek(0)
+    fh.truncate()
+    fh.write(f"pid={os.getpid()} started={datetime.now():%F %T}".encode())
+    fh.flush()
+    _PUSH_LOCK_FH = fh
+    return True
 _WATCH_STATE = "feishu-watch.json"
 MAX_TEXT = 3400          # 飞书单条文本安全长度(留裕量)
 
@@ -1068,6 +1106,9 @@ def run_account_push(dry_run: bool = False, force: bool = False,
            "sent": 0, "errors": []}
     if not ap["accounts"]:
         rep["skipped"] = "无账号成分配置(account_push.accounts)"
+        return rep
+    if not _acquire_push_lock():                    # 0924 双推事故防复发: 闸口+长翻译非原子
+        rep["skipped"] = "另一推送实例在跑(单实例锁), 本轮跳过"
         return rep
     st = _load_state(_PUSH_STATE)                   # dry_run 也 load: 窗口段读 last_push_at
     if not dry_run:
