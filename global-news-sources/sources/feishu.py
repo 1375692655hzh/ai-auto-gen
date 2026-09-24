@@ -227,9 +227,11 @@ _LLM_EXTRA_OK = {"thinking", "max_tokens", "max_completion_tokens", "top_p",
 
 
 def _llm_extra(m: dict) -> dict:
-    """链项 extra 请求体透传(白名单过滤, low-5: 防 **extra 静默覆盖 model/messages)。"""
+    """链项 extra 请求体透传(白名单过滤, low-5: 防 **extra 静默覆盖 model/messages)。
+    None 值必须剥掉: settings 里 thinking:null=关思考, 原样透传 MiniMax 会整体 400
+    (0925 实证: 兜底位 11/11 全 other 失败, 根因就是 'thinking': null 请求体)。"""
     ex = m.get("extra") if isinstance(m.get("extra"), dict) else {}
-    return {k: v for k, v in ex.items() if k in _LLM_EXTRA_OK}
+    return {k: v for k, v in ex.items() if k in _LLM_EXTRA_OK and v is not None}
 
 
 def _llm_digest(conf: dict, prompt: str) -> str:

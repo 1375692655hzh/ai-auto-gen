@@ -71,7 +71,7 @@ def _model_chain(conf: dict) -> list:
         mk = str(m.get("api_key") or "").strip() or key
         mm = str(m.get("model") or "").strip() or DEFAULT_MODEL
         ex = {k: v for k, v in (m.get("extra") or {}).items()
-              if k in _EXTRA_OK} if isinstance(m.get("extra"), dict) else {}
+              if k in _EXTRA_OK and v is not None} if isinstance(m.get("extra"), dict) else {}
         if mk:
             chain.append((mb, mk, mm, f"#{n+1}:{mm}", ex))
     if not chain:
