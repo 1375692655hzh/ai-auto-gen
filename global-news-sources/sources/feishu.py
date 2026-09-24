@@ -577,22 +577,28 @@ def _doc_sheet_title(now=None) -> str:
     return f"{t.year}-{t.month}-{t.day}-{t.hour}:{t.minute:02d}"
 
 
-# 列宽布局(0924 用户裁决, 1-based 含端): A,B,D,E,F,G,I,J,K=50; C=100; H=700(译文主读区)
-_DOC_COL_W = ((1, 2, 50), (3, 3, 100), (4, 7, 50), (8, 8, 700), (9, 11, 50))
+# 列宽布局(0924 用户裁决; 端点 0-based 左闭右开): A,B,D,E,F,G,I,J,K=50; C=100; H=700(译文主读区)
+_DOC_COL_W = ((0, 2, 50), (2, 3, 100), (3, 7, 50), (7, 8, 700), (8, 11, 50))
 
 
-def _doc_set_col_widths(conf: dict, token: str, sid: str):
-    """v2 dimension_range + dimensionProperties.fixedSize(camelCase, 0924 实测破解;
-    开放API唯一列宽入口)。样式体验项: 逐段失败不阻断数据。"""
+def _doc_set_col_widths(conf: dict, token: str, sid: str) -> list:
+    """v3 update_dimension + properties.pixel_size(0924 二次实测定案: 端点三重校验
+    活着=1310251 枚举/9499 类型/范围≤1000, 假成功疑虑排除; 首轮 v2 dimension_range
+    +camelCase 是错端点错字段全被吞)。样式体验项: 逐段失败不阻断数据, 错误清单
+    返回给调用方披露——绝不再静默吞。"""
+    errs = []
     for start, end, w in _DOC_COL_W:
         try:
-            _put(f"https://open.feishu.cn/open-apis/sheets/v2/spreadsheets/{token}"
-                 "/dimension_range",
-                 {"dimension": {"sheetId": sid, "majorDimension": "COLUMNS",
-                                "startIndex": start, "endIndex": end},
-                  "dimensionProperties": {"fixedSize": w}}, token=_token(conf))
-        except Exception:
-            pass
+            d = _post(f"https://open.feishu.cn/open-apis/sheets/v3/spreadsheets/{token}"
+                      f"/sheets/{sid}/update_dimension",
+                      {"dimension_range": {"major_dimension": "COLUMNS",
+                                           "start_index": start, "end_index": end},
+                       "properties": {"pixel_size": w}}, token=_token(conf))
+            if d.get("code") != 0:
+                errs.append(f"列宽[{start + 1}-{end}列] {str(d.get('msg'))[:60]}")
+        except Exception as e:
+            errs.append(f"列宽[{start + 1}-{end}列] {e}")
+    return errs
 
 
 def _doc_add_sheet(conf: dict, token: str, title: str) -> tuple:
@@ -1168,7 +1174,10 @@ def run_account_push(dry_run: bool = False, force: bool = False,
                 sid, aerr = _doc_add_sheet(conf, token, title)
                 werr = _doc_write_rows(conf, token, sid, rows) if sid else aerr
                 if sid and not werr:
-                    _doc_set_col_widths(conf, token, sid)   # 0924 用户列宽布局
+                    werrs = _doc_set_col_widths(conf, token, sid)  # 0924 用户列宽布局
+                    if werrs:
+                        rep["errors"].append(f"{acc.get('name') or '?'} doc列宽未全成: "
+                                             f"{'; '.join(werrs)}")
                     rep["docs"] += 1
                     ok_any = True
                     oid = str(acc.get("owner_open_id") or "").strip()
