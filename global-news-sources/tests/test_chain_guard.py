@@ -109,7 +109,7 @@ def test_429_only_cools_single_pool(_isolate, monkeypatch):
 
 
 def test_500_cools_whole_ip(_isolate, monkeypatch):
-    """连续 3 次 500/timeout → 整 IP(节点)熔断, 两免费模型一起停。"""
+    """连续 3 次 500/timeout 且无成功前缀 → 整 IP(节点)熔断, 两免费模型一起停。"""
     now = time.time()
     for _ in range(3):
         g.record(logger="bridge", node="jp", model="oc/mimo-v2.5-free", ok=False,
@@ -119,15 +119,37 @@ def test_500_cools_whole_ip(_isolate, monkeypatch):
     assert st["ip_break"]["jp"]["until"] > now
 
 
+def test_model_level_500_only_cools_pool(_isolate):
+    """09-24 实测回归: mimo 在 hk 连死 3 次但 big-pickle 同节点仍活
+    → 只冷 mi 单池, 绝不能 IP 熔断(否则白白扔掉还能用的 bi)。"""
+    g.record(logger="caller", node="hk", model="oc/big-pickle", ok=True)
+    for _ in range(3):
+        g.record(logger="caller", node="hk", model="oc/mimo-v2.5-free", ok=False,
+                 ecls="500_upstream")
+    st = json.loads((_isolate / "state.json").read_text(encoding="utf-8"))
+    assert "hk" not in st["ip_break"]
+    assert "hk|mi" in st["pool_break"]
+
+
 def test_failrate_window_trips_ip_break(_isolate, monkeypatch):
-    """15min 窗内 failrate≥30% 且≥5 次 → IP 熔断。"""
+    """15min 窗内 failrate≥30% 且≥5 次且无任何成功前缀 → IP 熔断(全灭才冷节点)。"""
     monkeypatch.setitem(g.DEFAULTS, "win_min_calls", 5)
     monkeypatch.setitem(g.DEFAULTS, "win_fail_rate", 0.3)
     for i in range(6):
         g.record(logger="caller", node="hk2", model="oc/big-pickle",
-                 ok=(i < 3), ecls="other" if i >= 3 else "ok")
+                 ok=False, ecls="other")
     st = json.loads((_isolate / "state.json").read_text(encoding="utf-8"))
     assert "hk2" in st["ip_break"]
+
+
+def test_soft_fails_with_successes_no_break(_isolate):
+    """有成功前缀时软错误再高也不熔断——降级交给 order_chain 预算排序(failrate 降权)。"""
+    for i in range(6):
+        g.record(logger="caller", node="hk", model="oc/big-pickle",
+                 ok=(i % 2 == 0), ecls="other" if i % 2 else "ok")
+    st = json.loads((_isolate / "state.json").read_text(encoding="utf-8"))
+    assert "hk" not in st["ip_break"]
+    assert not st["pool_break"]
 
 
 # ---------- order_chain ----------

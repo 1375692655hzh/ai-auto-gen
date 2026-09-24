@@ -6,7 +6,9 @@ Zen 免费档机制(实测+社区逆向, 细节按假设对待用本账本校准
   big-pickle(bi) 与 mimo-v2.5-free(mi) 各算各的日桶; 无独立 rateLimit 的默认免费
   模型共用一个 default 日桶。重置按 UTC 日(国内早 8 点翻篇)。
 - 两类死法要分开: 429 = 单池日限打满(只冷却该池, 同 IP 别的模型还能用);
-  500/超时 = 整 IP 信誉死(两个免费模型一起停)。jp 2026-09-24 之死是后者。
+  500/超时 = 上游拒——若该节点上其他模型仍成功 = 模型级死亡(只冷该前缀池,
+  如 2026-09-24 mimo 三桶齐灭但 big-pickle 仍活); 若全部在用前缀齐灭 = 整 IP
+  信誉死(两个免费模型一起停)。jp 2026-09-24 之死是后者, mimo 是前者。
 - MiniMax = 另一体系(付费按 token), 无 IP 配额, 恒链尾兜底。
 - Zen 不回真实 Remaining —— 本模块是影子账本, 数字用 429 出现点校准, 不是官方真值。
 
@@ -178,17 +180,40 @@ def _eval_breakers(st: dict, now: float) -> None:
     for r in win:
         by_node.setdefault(r["node"], []).append(r)
     ip_break = st.setdefault("ip_break", {})          # node 级(=IP 级)熔断
-    pool_break = st.setdefault("pool_break", {})      # node|prefix 级(429 单池)
+    pool_break = st.setdefault("pool_break", {})      # node|prefix 级(429/模型级 500)
     for node, rs in by_node.items():
         fails = [r for r in rs if not r["ok"]]
-        hard = [r for r in rs if not r["ok"] and r["ecls"] in ("500_upstream", "timeout")]
         rate = len(fails) / len(rs)
-        if (len(rs) >= cfg["win_min_calls"] and rate >= cfg["win_fail_rate"]) \
-                or len(hard) >= cfg["consec_fail"]:
+        # 逐前缀统计: 时间序尾部连续硬失败 + 是否有成功前缀
+        run: dict[str, int] = {}
+        ok_prefixes: set[str] = set()
+        hard_prefixes: set[str] = set()
+        for r in rs:                      # recent 保持时间序
+            p = r.get("prefix") or "??"
+            if r["ok"]:
+                run[p] = 0
+                ok_prefixes.add(p)
+            elif r["ecls"] in ("500_upstream", "timeout"):
+                run[p] = run.get(p, 0) + 1
+                if run[p] >= cfg["consec_fail"]:
+                    hard_prefixes.add(p)
+            else:
+                run[p] = 0
+        if not ok_prefixes and (
+                (len(rs) >= cfg["win_min_calls"] and rate >= cfg["win_fail_rate"])
+                or hard_prefixes):
+            # 整 IP 信誉死(如 jp): 该节点所有在用前缀全灭 → 冷节点
             ip_break[node] = {"until": now + cfg["cooldown_sec"],
-                              "reason": f"15min failrate {rate:.0%} | hard {len(hard)}"}
+                              "reason": f"15min failrate {rate:.0%} | hard前缀 {sorted(hard_prefixes)}"}
+            continue
+        # 模型级死亡(同前缀跨 IP 全死, 如 09-24 mimo 三桶齐灭): 只冷单池,
+        # 保住同 IP 上还活着的模型(big-pickle 在 hk/hk2 仍活)
+        for p in hard_prefixes:
+            pool_break[f"{node}|{p}"] = {
+                "until": now + cfg["pool_cd_sec"],
+                "reason": f"500×{cfg['consec_fail']}+ 但同节点 {sorted(ok_prefixes)} 仍活(模型级死亡)"}
         for r in fails:
-            if r["ecls"] == "429_free":               # 429 只冷却该 node|prefix 单池
+            if r["ecls"] == "429_free":   # 429 只冷却该 node|prefix 单池
                 pool_break[f"{node}|{r.get('prefix') or '??'}"] = {
                     "until": now + cfg["pool_cd_sec"], "reason": "429_free"}
     st["recent"] = win[-cfg["recent_cap"]:]
