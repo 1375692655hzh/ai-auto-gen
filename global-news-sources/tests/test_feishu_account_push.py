@@ -402,8 +402,9 @@ def test_doc_rows_no_untranslated():
                  "author_handle": "h", "time": "2026-09-24 08:30"}]
     rows = feishu._doc_rows(acc, {"美股": 100}, feishu._doc_order_all(
         items_zh + items_en, {"美股": 100}, now=now), "w", 2, now=now)
-    assert rows[2][7] == "美股标普大涨中文长帖内容" and rows[2][8] == ""   # 中文帖: 译文列=原文, 原文列空
-    assert rows[3][7] == "Fed cuts rates by 25bp" and rows[3][8]           # 外文未译: 译文列=原文兜底
+    # 增速排序: 英文帖(0.5h/100views)先于中文帖(1h/100views)
+    assert rows[2][7] == "Fed cuts rates by 25bp" and rows[2][8]           # 外文未译: 译文列=原文兜底
+    assert rows[3][7] == "美股标普大涨中文长帖内容" and rows[3][8] == ""   # 中文帖: 译文列=原文, 原文列空
     assert "[未译]" not in json.dumps(rows, ensure_ascii=False)
 
 
