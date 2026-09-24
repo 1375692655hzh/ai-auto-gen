@@ -148,17 +148,31 @@ def _chat(base: str, key: str, model: str, prompt: str, extra: dict | None = Non
 def _safe_record(base: str, model: str, ok: bool, ecls: str, t0: float,
                  usage: dict | None = None) -> None:
     """非桥调用(MiniMax 等)调用侧记录; Zen 流量由 zen_bridge 记, 不重复计。
-    例外: unreachable(桥进程死/连不上)——请求没到桥, 桥无从记, 必须调用侧补,
-    否则死桥让节点计数永远最低、order_chain 永远把它排链首而账本无声。"""
-    if guard.is_bridge(base) and ecls != "unreachable":
-        return
+    例外1: unreachable(桥进程死/连不上)——请求没到桥, 桥无从记, 必须调用侧补,
+    否则死桥让节点计数永远最低、order_chain 永远把它排链首而账本无声。
+    例外2: badjson 质量记录走 count_n=False(只加 fail 不加 n)——桥记了 ok 但正文
+    不可解析=废输出, 不入账则该节点账本全成功被滞回钉在链首(grok#4)。"""
+    if guard.is_bridge(base):
+        if ecls == "unreachable":
+            pass                       # 正常计 n 的硬失败补记
+        elif ecls == "badjson":
+            try:
+                guard.record(logger="caller", node=guard.node_of(base), model=model,
+                             ok=False, ecls="badjson",
+                             latency_ms=int((time.time() - t0) * 1000), ts=t0,
+                             count_n=False)
+            except Exception:
+                pass
+            return
+        else:
+            return                     # 其余桥流量跳过防双计
     try:
         u = usage or {}
         guard.record(logger="caller", node=guard.node_of(base), model=model, ok=ok,
                      ecls=ecls, latency_ms=int((time.time() - t0) * 1000),
                      tokens={"prompt": u.get("prompt_tokens") or 0,
                              "completion": u.get("completion_tokens") or 0,
-                             "total": u.get("total_tokens") or 0})
+                             "total": u.get("total_tokens") or 0}, ts=t0)
     except Exception:
         pass
 
@@ -267,6 +281,9 @@ def run(since_fetched_at: str) -> dict:
                 b, k, m, tag, ex = (c["base_url"], c["api_key"], c["model"],
                                     c.get("tag") or f"#{pos + 1}:{c['model']}",
                                     c.get("extra") or {})
+                if not guard.admit(b, m):               # 轮内准入: 重查熔断/软顶(astra#1)
+                    chain_errs.append(f"{tag}: 熔断/超顶跳过")
+                    continue
                 t0 = time.time()
                 try:
                     out, usage = _chat(b, k, m, prompt, ex)
@@ -276,8 +293,6 @@ def run(since_fetched_at: str) -> dict:
                 except Exception as ex:
                     chain_errs.append(f"{tag}: {type(ex).__name__}: {str(ex)[:60]}")
                     _safe_record(b, m, False, guard.classify(exc=ex), t0)
-            if out is not None:
-                _safe_record(b, m, True, "ok", t0, usage)
             if out is None:
                 rep["errors"].append(f"{label}{off} 全链失败(共{len(chain)}模型): "
                                      + " | ".join(chain_errs))
@@ -295,7 +310,11 @@ def run(since_fetched_at: str) -> dict:
             try:
                 m2 = re.search(r"\[.*\]", out, re.S)
                 arr = json.loads(m2.group(0)) if m2 else []
+                if not arr and (out or "").strip():
+                    raise ValueError("空译文数组")      # 有输出但废输出=badjson
+                _safe_record(b, m, True, "ok", t0, usage)   # 解析成功才记 ok
             except Exception as ex:
+                _safe_record(b, m, False, "badjson", t0)     # 质量修正(count_n=False)
                 rep["errors"].append(f"{label}{off}: JSON解析失败: "
                                      f"{type(ex).__name__}: {str(ex)[:80]}")
                 conn = _store._connect()

@@ -1009,16 +1009,30 @@ def _save_zh(batch: list):
 def _tr_record(base: str, model: str, ok: bool, ecls: str, t0: float,
                usage: dict | None = None) -> None:
     """非桥调用(MiniMax 等)调用侧记录; Zen 流量由 zen_bridge 记, 不重复计(0924 额度统计)。
-    例外: unreachable(桥进程死/连不上)——桥无从记, 调用侧必须补, 否则死桥永排链首。"""
-    if _guard.is_bridge(base) and ecls != "unreachable":
-        return
+    例外1: unreachable(桥进程死/连不上)——桥无从记, 调用侧必须补, 否则死桥永排链首。
+    例外2: badjson 走 count_n=False 质量入账——桥记了 ok 但输出不可解析=废输出,
+    只加 fail 不加 n, 与桥的 ok 合成 failrate≈1.0 把废输出节点拉下链首(grok#4)。"""
+    if _guard.is_bridge(base):
+        if ecls == "unreachable":
+            pass                       # 正常计 n 的硬失败补记
+        elif ecls == "badjson":
+            try:
+                _guard.record(logger="caller", node=_guard.node_of(base), model=model,
+                              ok=False, ecls="badjson",
+                              latency_ms=int((time.time() - t0) * 1000), ts=t0,
+                              count_n=False)
+            except Exception:
+                pass
+            return
+        else:
+            return                     # 其余桥流量跳过防双计
     try:
         u = usage or {}
         _guard.record(logger="caller", node=_guard.node_of(base), model=model, ok=ok,
                       ecls=ecls, latency_ms=int((time.time() - t0) * 1000),
                       tokens={"prompt": u.get("prompt_tokens") or 0,
                               "completion": u.get("completion_tokens") or 0,
-                              "total": u.get("total_tokens") or 0})
+                              "total": u.get("total_tokens") or 0}, ts=t0)
     except Exception:
         pass
 
@@ -1055,6 +1069,8 @@ def _translate_missing(conf: dict, items: list, cap: int = 12,
                 base = str(m.get("base_url") or "").strip().rstrip("/")
                 model = str(m.get("model") or "").strip()
                 if not (base and model):
+                    continue
+                if not _guard.admit(base, model):       # 轮内准入: 重查熔断/软顶
                     continue
                 t0 = time.time()
                 try:
@@ -1093,6 +1109,8 @@ def _translate_missing(conf: dict, items: list, cap: int = 12,
                 base = str(m.get("base_url") or "").strip().rstrip("/")
                 model = str(m.get("model") or "").strip()
                 if not (base and model):
+                    continue
+                if not _guard.admit(base, model):       # 轮内准入: 重查熔断/软顶
                     continue
                 t0 = time.time()
                 try:

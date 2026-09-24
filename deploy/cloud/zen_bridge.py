@@ -59,7 +59,7 @@ def _rec(ok: bool, ecls: str, t0: float, model: str, tokens: dict | None = None)
     try:
         _guard.record(logger="bridge", node=NODE, model=model, ok=ok, ecls=ecls,
                       latency_ms=int((time.time() - t0) * 1000), egress_ip=EGRESS_IP,
-                      tokens=tokens or {})
+                      tokens=tokens or {}, ts=t0)   # ts=请求发起: 跨UTC按发送时间计费
     except Exception:
         pass
 
@@ -129,15 +129,22 @@ class H(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def _safe_reply(self, code: int, obj: dict) -> None:
+        # 客户端可能已断连(BrokenPipeError 双抛): 记账必须先于回复, 回复失败只吞掉
+        try:
+            self._reply(code, obj)
+        except (BrokenPipeError, ConnectionResetError, OSError):
+            pass
+
     def do_GET(self):
         if self.path == "/healthz":
-            self._reply(200, {"ok": True})
+            self._safe_reply(200, {"ok": True})
         else:
-            self._reply(404, {"error": "not_found"})
+            self._safe_reply(404, {"error": "not_found"})
 
     def do_POST(self):
         if not self.path.rstrip("/").endswith("chat/completions"):
-            self._reply(404, {"error": "not_found"})
+            self._safe_reply(404, {"error": "not_found"})
             return
         t0, model = time.time(), ""
         try:
@@ -147,20 +154,20 @@ class H(BaseHTTPRequestHandler):
             sys_msg = "\n".join(m.get("content") or "" for m in msgs if m.get("role") == "system")
             user_msg = "\n\n".join(m.get("content") or "" for m in msgs if m.get("role") == "user")
             out, info = _chat_via_serve(model, sys_msg, user_msg)
-            self._reply(200, {"id": "zen-bridge", "object": "chat.completion",
-                              "choices": [{"index": 0, "finish_reason": "stop",
-                                           "message": {"role": "assistant", "content": out}}]})
             _rec(True, "ok", t0, model, _tokens_of(info))
+            self._safe_reply(200, {"id": "zen-bridge", "object": "chat.completion",
+                                   "choices": [{"index": 0, "finish_reason": "stop",
+                                                "message": {"role": "assistant", "content": out}}]})
         except urllib.error.HTTPError as e:
             eb = e.read()[:200]
-            self._reply(502, {"error": f"upstream_http_{e.code}: {eb!r}"})
             ecls = _guard.classify(status=e.code, body=str(eb)) if _guard else "other"
             _rec(False, ecls, t0, model)
+            self._safe_reply(502, {"error": f"upstream_http_{e.code}: {eb!r}"})
         except Exception as e:
             eb = f"{type(e).__name__}: {str(e)[:200]}"
-            self._reply(502, {"error": eb})
             ecls = _guard.classify(exc=e, body=eb) if _guard else "other"
             _rec(False, ecls, t0, model)
+            self._safe_reply(502, {"error": eb})
 
 
 def main() -> None:
