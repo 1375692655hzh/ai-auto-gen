@@ -56,6 +56,16 @@ def test_classify_requests_http_error():
     assert g.classify(exc=FakeHTTPError("boom")) == "429_free"
 
 
+def test_classify_unreachable_and_429_body_masking():
+    # 桥/连接不可达单独归类(算硬失败, 防死桥永排链首)
+    class ConnError(Exception):
+        pass
+    ConnError.__name__ = "ConnectionError"
+    assert g.classify(exc=ConnError("refused")) == "unreachable"
+    # 500 正文里出现 "429" 字样不能误归配额类(如 retry after 429s)
+    assert g.classify(status=502, body="bad gateway, retry after 429s") == "500_upstream"
+
+
 def test_classify_other():
     assert g.classify(status=403) == "other"
 
@@ -71,6 +81,15 @@ def test_is_bridge_and_node_of():
     assert g.node_of("http://127.0.0.1:20135/v1") == "hk2"
     assert g.node_of("https://api.minimax.chat/v1") == "minimax"
     assert g.node_of("https://example.com/v1") == "direct"
+
+
+def test_is_bridge_normalizes_localhost(_isolate):
+    """urlparse 归一: localhost/::1/尾斜杠/大小写都不能漏判(漏判=双计+池键分裂)。"""
+    assert g.is_bridge("http://localhost:20133/v1")
+    assert g.is_bridge("http://LOCALHOST:20134/v1/")
+    assert g.node_of("http://localhost:20135/v1") == "hk2"
+    assert not g.is_bridge("http://127.0.0.1:201333/v1")   # 端口必须精确命中
+    assert not g.is_bridge("http://example.com:20133/v1")  # 非本机host不命中
 
 
 def test_model_prefix():
@@ -142,12 +161,12 @@ def test_model_level_500_only_cools_pool(_isolate):
 
 
 def test_failrate_window_trips_ip_break(_isolate, monkeypatch):
-    """15min 窗内 failrate≥30% 且≥5 次且无任何成功前缀 → IP 熔断(全灭才冷节点)。"""
+    """窗内 ≥5 次、零成功、硬失败率≥30% → IP 熔断(全灭才冷节点)。"""
     monkeypatch.setitem(g.DEFAULTS, "win_min_calls", 5)
     monkeypatch.setitem(g.DEFAULTS, "win_fail_rate", 0.3)
     for i in range(6):
         g.record(logger="caller", node="hk2", model="oc/big-pickle",
-                 ok=False, ecls="other")
+                 ok=False, ecls="500_upstream")
     st = json.loads((_isolate / "state.json").read_text(encoding="utf-8"))
     assert "hk2" in st["ip_break"]
 
@@ -239,24 +258,71 @@ def test_429_cools_to_utc_flip(_isolate):
     st = json.loads((_isolate / "state.json").read_text(encoding="utf-8"))
     info = st["pool_break"]["hk|bi"]
     assert "翻篇" in info["reason"]
-    assert info["until"] > now + 3600    # 至少比旧的 1h 冷却长
+    assert info["until"] > now          # 未来时刻即可(近翻篇点可能 <1h, 不锁死下界)
 
 
 def test_cross_node_model_death_syncs_all_nodes(_isolate):
-    """同前缀在 ≥2 节点硬失败 = 模型级死亡: 全部 zen 节点同步冷该前缀,
+    """同前缀在 ≥2 zen 节点各自连击≥2 = 模型级死亡: 全部 zen 节点同步冷该前缀,
     不烧"每个节点各探测 3 次"的冤枉钱, 也不误伤还活着的 bi。"""
-    g.record(logger="caller", node="hk", model="oc/mimo-v2.5-free", ok=False,
-             ecls="500_upstream")
-    g.record(logger="caller", node="hk", model="oc/mimo-v2.5-free", ok=False,
-             ecls="500_upstream")
-    g.record(logger="caller", node="hk2", model="oc/mimo-v2.5-free", ok=False,
-             ecls="500_upstream")
+    for _ in range(2):
+        g.record(logger="caller", node="hk", model="oc/mimo-v2.5-free", ok=False,
+                 ecls="500_upstream")
+    for _ in range(2):
+        g.record(logger="caller", node="hk2", model="oc/mimo-v2.5-free", ok=False,
+                 ecls="500_upstream")
     g.record(logger="caller", node="hk", model="oc/big-pickle", ok=True)
     st = json.loads((_isolate / "state.json").read_text(encoding="utf-8"))
     for node in ("jp", "hk", "hk2"):     # 同步冷却, 含尚无人探测的 jp
         assert f"{node}|mi" in st["pool_break"]
     assert "hk" not in st["ip_break"]    # bi 活着, 不误冷节点
     assert "hk2" not in st["ip_break"]
+
+
+def test_minimax_does_not_cross_contaminate(_isolate):
+    """高危回归: MiniMax-M3 剥前缀也是 'mi', 它的失败绝不连坐 zen mi 池。"""
+    for _ in range(3):
+        g.record(logger="caller", node="minimax", model="MiniMax-M3", ok=False,
+                 ecls="timeout")
+    for _ in range(2):
+        g.record(logger="caller", node="hk", model="oc/mimo-v2.5-free", ok=False,
+                 ecls="500_upstream")
+    st = json.loads((_isolate / "state.json").read_text(encoding="utf-8"))
+    assert "mi" not in st["ip_break"]
+    assert not any(k.endswith("|mi") for k in st["pool_break"])  # hk 连击2<3 不冷; 更无连坐
+
+
+def test_single_1plus1_not_model_dead(_isolate):
+    """两节点各 1 次硬失败(可能仅两 IP 同时抖)不够判模型级, 也不冷池(连击<3)。"""
+    g.record(logger="caller", node="hk", model="oc/mimo-v2.5-free", ok=False,
+             ecls="500_upstream")
+    g.record(logger="caller", node="hk2", model="oc/mimo-v2.5-free", ok=False,
+             ecls="500_upstream")
+    st = json.loads((_isolate / "state.json").read_text(encoding="utf-8"))
+    assert not st["pool_break"]
+    assert not st["ip_break"]
+
+
+def test_pending_replay_on_lock_miss(_isolate, monkeypatch):
+    """抢不到文件锁: 明细进 pending 队列, 下轮抢到锁补聚合, 零丢失。"""
+    import contextlib
+    seq = [False, True]
+    state = {"i": 0}
+
+    @contextlib.contextmanager
+    def fake_lock(wait: float = 2.0):
+        yield seq[state["i"]] if state["i"] < len(seq) else True
+        state["i"] += 1
+
+    monkeypatch.setattr(g, "_state_file_lock", fake_lock)
+    g.record(logger="caller", node="hk", model="oc/big-pickle", ok=True)
+    st = g._load_state()
+    assert not st.get("pools")                    # 首轮被跳过(state.json 可能尚不存在)
+    assert (_isolate / "pending.jsonl").exists()  # 进待补队列
+    g.record(logger="caller", node="hk", model="oc/big-pickle", ok=True)
+    st = g._load_state()
+    day = g._utc_day()
+    assert st["pools"][f"hk|bi|{day}"]["n"] == 2    # 两条都补上(含pending重放)
+    assert not (_isolate / "pending.jsonl").exists()
 
 
 def test_order_chain_hysteresis(_isolate):

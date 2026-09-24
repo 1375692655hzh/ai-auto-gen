@@ -147,8 +147,10 @@ def _chat(base: str, key: str, model: str, prompt: str, extra: dict | None = Non
 
 def _safe_record(base: str, model: str, ok: bool, ecls: str, t0: float,
                  usage: dict | None = None) -> None:
-    """非桥调用(MiniMax 等)调用侧记录; Zen 流量由 zen_bridge 记, 不重复计。"""
-    if guard.is_bridge(base):
+    """非桥调用(MiniMax 等)调用侧记录; Zen 流量由 zen_bridge 记, 不重复计。
+    例外: unreachable(桥进程死/连不上)——请求没到桥, 桥无从记, 必须调用侧补,
+    否则死桥让节点计数永远最低、order_chain 永远把它排链首而账本无声。"""
+    if guard.is_bridge(base) and ecls != "unreachable":
         return
     try:
         u = usage or {}

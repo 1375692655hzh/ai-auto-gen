@@ -10,6 +10,11 @@ Zen 免费档机制(实测+社区逆向, 细节按假设对待用本账本校准
   如 2026-09-24 mimo 三桶齐灭但 big-pickle 仍活); 若全部在用前缀齐灭 = 整 IP
   信誉死(两个免费模型一起停)。jp 2026-09-24 之死是后者, mimo 是前者。
 - MiniMax = 另一体系(付费按 token), 无 IP 配额, 恒链尾兜底。
+  注意 MiniMax 模型名剥前缀后可能与 zen 前缀撞名(如 MiniMax-M3→mi), 死亡判定
+  必须按 _ZEN_NODES 隔离, 否则 MiniMax 失败会连坐冷却 zen 池(二轮评审实证)。
+- 部署假设: 每桥节点=静态住宅出口 IP(池键=日|IP|前缀 成立的前提);
+  代理若 per-request 轮换出口, 池容量标定不可信。慢速渗漏(15min窗凑不够5次)
+  的慢性死亡不触发熔断, 靠 order_chain failrate 降权兜底, 属已知限制。
 - Zen 不回真实 Remaining —— 本模块是影子账本, 数字用 429 出现点校准, 不是官方真值。
 - 软顶/计数按池(node|prefix|UTC日)——真配额键就是这粒度; 日软顶 150 是保守初值,
   429 出现点反推各池真容量后再分别收紧(软顶设低了会永远撞不到 429, 标定失去数据源)。
@@ -130,6 +135,8 @@ def guard_conf() -> dict:
             cfg[k] = int(cfg[k])
         except Exception:
             cfg[k] = DEFAULTS[k]
+        if k == "win_min_calls" and cfg[k] < 1:
+            cfg[k] = 1                      # 分母, 配 0 会除零且吞掉整条聚合
     try:
         cfg["win_fail_rate"] = float(cfg["win_fail_rate"])
     except Exception:
@@ -137,18 +144,30 @@ def guard_conf() -> dict:
     return cfg
 
 
+def _norm_host_port(base_url: str) -> tuple[str, str]:
+    """规范化出 (host, port): urlparse + localhost 归一, 防 'localhost:20133'
+    漏判桥导致调用侧/桥双计、池键分裂。识别不了给 ('', '')。"""
+    from urllib.parse import urlparse
+    try:
+        u = urlparse(str(base_url or "").strip())
+        host = (u.hostname or "").lower()
+        if host in ("localhost", "::1", "0.0.0.0"):
+            host = "127.0.0.1"
+        return host, str(u.port or "")
+    except Exception:
+        return "", ""
+
+
 def is_bridge(base_url: str) -> bool:
-    b = str(base_url or "")
-    return "127.0.0.1:2013" in b        # 20133/20134/20135 zen 桥
+    host, port = _norm_host_port(base_url)
+    return host == "127.0.0.1" and port in _ZEN_PORT_NODE
 
 
 def node_of(base_url: str) -> str:
-    if is_bridge(base_url):
-        for port, node in _ZEN_PORT_NODE.items():
-            if f"127.0.0.1:{port}" in str(base_url):
-                return node
-        return "zen"
-    if "minimax" in str(base_url):
+    host, port = _norm_host_port(base_url)
+    if host == "127.0.0.1" and port in _ZEN_PORT_NODE:
+        return _ZEN_PORT_NODE[port]
+    if "minimax" in str(base_url).lower():
         return "minimax"
     return "direct"
 
@@ -160,9 +179,10 @@ def model_prefix(model: str) -> str:
 
 
 def classify(status=None, exc=None, body: str = "") -> str:
-    """错误分类: ok / 429_free / ua_freetier / 500_upstream / timeout / other。
+    """错误分类: ok / 429_free / ua_freetier / 500_upstream / timeout / unreachable / other。
     状态码优先(含 requests 异常的 response.status_code), free-tier 文案降一级:
-    包着 429 的拒绝必须归 429 才会被冷却, 只看文案会让池永远硬戳。"""
+    包着 429 的拒绝必须归 429 才会被冷却, 只看文案会让池永远硬戳。
+    unreachable=桥/连接不可达(请求没到上游, 桥无从记账, 只有调用侧能记)。"""
     if exc is None and not status and not body:
         return "ok"
     b = str(body or "")
@@ -175,10 +195,12 @@ def classify(status=None, exc=None, body: str = "") -> str:
         code = 0
     name = type(exc).__name__ if exc is not None else ""
     msg = f"{name} {getattr(exc, 'args', '')} {b}"
-    if code == 429 or "429" in b[:80]:
-        return "429_free"
+    if code == 429 or (code in (0, 429) and "429" in b[:80]):
+        return "429_free"          # 正文兜底只在无码/429时生效, 防500文案里的"429"误归类
     if "FreeTier" in b or "free tier" in b.lower():
         return "ua_freetier"
+    if "Connection" in name or "ConnectTimeout" in name:
+        return "unreachable"       # 桥进程死/端口不通: 节点失明, 必须入账(算硬失败)
     if "Timeout" in name or "timed out" in msg:
         return "timeout"
     if code >= 500 or "upstream_http_5" in b or "UnknownError" in b:
@@ -204,10 +226,43 @@ def _save_state(st: dict) -> None:
     tmp.replace(p)
 
 
+def _pending_path() -> Path:
+    return usage_dir() / "pending.jsonl"
+
+
+def _aggregate(st: dict, rec: dict, cfg: dict) -> None:
+    """单条记录聚合进 state(计数/recent)。调用方持文件锁。"""
+    day = rec["utc_date"]
+    node = rec["node"]
+    prefix = rec["prefix"]
+    ok = bool(rec["ok"])
+    lat = int(rec.get("lat") or 0)
+    nodes = st.setdefault("nodes", {})
+    nd = nodes.setdefault(f"{node}|{day}", {"n": 0, "ok": 0, "fail": 0,
+                                            "lat_sum": 0, "tok": 0})
+    nd["n"] += 1
+    nd["ok" if ok else "fail"] += 1
+    nd["lat_sum"] += lat
+    nd["tok"] += int(rec.get("total") or 0)
+    pools = st.setdefault("pools", {})     # 池级日计数(真配额键=日|IP|前缀)
+    pd = pools.setdefault(f"{node}|{prefix}|{day}", {"n": 0, "ok": 0,
+                                                     "fail": 0, "lat_sum": 0})
+    pd["n"] += 1
+    pd["ok" if ok else "fail"] += 1
+    pd["lat_sum"] += lat
+    recent = st.setdefault("recent", [])
+    recent.append({"ts": rec["ts"], "node": node, "ok": ok,
+                   "ecls": rec.get("ecls") or "ok", "prefix": prefix})
+    if len(recent) > cfg["recent_cap"]:
+        del recent[:len(recent) - cfg["recent_cap"]]
+
+
 def record(logger: str, node: str, model: str, ok: bool, ecls: str = "ok",
            latency_ms: int = 0, egress_ip: str = "", tokens: dict | None = None,
            failover_from: str = "", base_url: str = "") -> None:
-    """记一次调用: JSONL 明细 + 影子账本轮询聚合 + 熔断评估。绝不抛。"""
+    """记一次调用: JSONL 明细(无条件落) + 影子账本轮询聚合(文件锁内)。
+    抢不到锁: 明细先进 pending.jsonl, 下一轮抢到锁的记录顺带补聚合(绝不丢)。
+    绝不抛。"""
     try:
         now = time.time()
         day = _utc_day(now)
@@ -226,27 +281,24 @@ def record(logger: str, node: str, model: str, ok: bool, ecls: str = "ok",
             f.write(line + "\n")
         with _LOCK, _state_file_lock() as got:     # 线程锁+跨进程文件锁双保险
             if not got:
-                return                             # 抢不到: 明细已落, 聚合下轮补
+                # 抢不到: 进待补队列(append 单行原子), 下轮重放, 明细零丢失
+                with open(_pending_path(), "a", encoding="utf-8") as f:
+                    f.write(line + "\n")
+                return
             st = _load_state()
-            nodes = st.setdefault("nodes", {})
-            nd = nodes.setdefault(f"{node}|{day}", {"n": 0, "ok": 0, "fail": 0,
-                                                    "lat_sum": 0, "tok": 0})
-            nd["n"] += 1
-            nd["ok" if ok else "fail"] += 1
-            nd["lat_sum"] += int(latency_ms)
-            nd["tok"] += int((tokens or {}).get("total") or 0)
-            pools = st.setdefault("pools", {})     # 池级日计数(真配额键=日|IP|前缀)
-            pd = pools.setdefault(f"{node}|{prefix}|{day}", {"n": 0, "ok": 0,
-                                                             "fail": 0, "lat_sum": 0})
-            pd["n"] += 1
-            pd["ok" if ok else "fail"] += 1
-            pd["lat_sum"] += int(latency_ms)
-            recent = st.setdefault("recent", [])
-            recent.append({"ts": now, "node": node, "ok": bool(ok), "ecls": ecls,
-                           "prefix": prefix})
             cfg = guard_conf()
-            if len(recent) > cfg["recent_cap"]:
-                del recent[:len(recent) - cfg["recent_cap"]]
+            _aggregate(st, rec, cfg)
+            pend = _pending_path()
+            if pend.exists():
+                try:
+                    for pline in pend.read_text(encoding="utf-8").splitlines():
+                        try:
+                            _aggregate(st, json.loads(pline), cfg)
+                        except Exception:
+                            continue
+                    pend.unlink()
+                except Exception:
+                    pass
             _gc_state(st, day)
             _eval_breakers(st, now)
             _save_state(st)
@@ -266,7 +318,7 @@ def _gc_state(st: dict, today: str) -> None:
 
 
 _QUOTA_ECLS = ("429_free", "ua_freetier")     # 配额类: 只冷池, 不计入 IP 熔断 failrate
-_HARD_ECLS = ("500_upstream", "timeout")
+_HARD_ECLS = ("500_upstream", "timeout", "unreachable")
 
 
 def _eval_breakers(st: dict, now: float) -> None:
@@ -306,10 +358,12 @@ def _eval_breakers(st: dict, now: float) -> None:
                 run[p] = run.get(p, 0) + 1     # 仅 ok 清零; other/429 不打断连击
             hard_run[(node, p)] = run.get(p, 0)
         ok_by_node[node] = ok
-    # 模型级死亡: 同前缀在 ≥2 节点有硬失败
+    # 模型级死亡: 同前缀在 ≥2 个 zen 节点**各自连击≥2**(单节点1次+别节点1次
+    # 只是两 IP 同时抖一下, 不够判死; 且 MiniMax 等外体系前缀撞名必须排除——
+    # 否则 MiniMax-M3(前缀也是mi)超时连坐冷却全部 zen mi 池)。
     hard_nodes_by_p: dict[str, set] = {}
     for (node, p), n in hard_run.items():
-        if n:
+        if node in _ZEN_NODES and n >= 2:
             hard_nodes_by_p.setdefault(p, set()).add(node)
     model_dead = {p for p, ns in hard_nodes_by_p.items() if len(ns) >= 2}
     for p in model_dead:
@@ -317,24 +371,27 @@ def _eval_breakers(st: dict, now: float) -> None:
             pool_break[f"{node}|{p}"] = {
                 "until": now + cfg["pool_cd_sec"],
                 "reason": f"模型级死亡: {p} 在 {len(hard_nodes_by_p[p])} 节点齐灭"}
-    # 第二遍: 逐节点定级
+    # 第二遍: 逐节点定级(仅 zen 节点: MiniMax/direct 无 IP 配额, 熔断它们只会
+    # 把链掏空——MiniMax 是付费兜底, 失败再多也必须留在链尾)
     for node, rs in by_node.items():
+        if node not in _ZEN_NODES:
+            continue
         fails = [r for r in rs if not r["ok"]]
         ok = ok_by_node.get(node) or set()
         consec = {p for (n_, p), c in hard_run.items()
                   if n_ == node and c >= cfg["consec_fail"]}
         unexplained = consec - model_dead
+        n_hard = len([r for r in fails if r["ecls"] in _HARD_ECLS])
         if not ok and (
                 (len(rs) >= cfg["win_min_calls"]
-                 and len([r for r in fails if r["ecls"] not in _QUOTA_ECLS]) / len(rs)
-                 >= cfg["win_fail_rate"])
+                 and n_hard / len(rs) >= cfg["win_fail_rate"])
                 or unexplained):
             # 整 IP 信誉死(如 jp): 该节点所有在用前缀全灭 → 冷节点
-            # (failrate 剔除配额类: 全 429 是池满不是 IP 死, 只该冷池)
+            # (failrate 只数硬失败: badjson/other 是模型输出质量/参数问题,
+            #  不是 IP 信誉问题, 不该冷节点; 429 类本就剔除)
             ip_break[node] = {"until": now + cfg["cooldown_sec"],
                               "reason": f"零成功 | 未解释硬前缀 {sorted(unexplained)}"
-                              f" | 非配额failrate "
-                              f"{len([r for r in fails if r['ecls'] not in _QUOTA_ECLS]) / len(rs):.0%}"}
+                              f" | 硬failrate {n_hard / len(rs):.0%}"}
             continue
         for p in consec - model_dead:
             # 连击未达模型级: 单池冷。同节点有活前缀=疑似模型级死亡;
@@ -406,19 +463,23 @@ def order_chain(models: list) -> list:
     scored.sort(key=lambda t: (t[0], t[1], t[2]))
     fresh = [m for *_, m in scored]
     fresh_ids = [_mid(m) for m in fresh]
-    # 滞回: 集合不变沿用上次序
+    # 滞回: 可用集合不变沿用上轮序。按链指纹分键——translate/feishu 两条链
+    # 集合不同, 共用单槽会互相覆写导致滞回退化(二轮评审 P2)。
+    import hashlib
+    fp = hashlib.md5("\n".join(sorted(fresh_ids)).encode("utf-8")).hexdigest()[:10]
+    slot = f"chain_order:{fp}"
     with _LOCK, _state_file_lock() as got:
         if not got:
             return fresh + other
         st = _load_state()
-        prev = st.get("chain_order") or []
+        prev = st.get(slot) or []
         if set(prev) == set(fresh_ids) and len(prev) == len(fresh_ids):
             by_id = {_mid(m): m for m in fresh}
             ordered = [by_id[i] for i in prev if i in by_id]
-            st["chain_order"] = [_mid(m) for m in ordered]
+            st[slot] = [_mid(m) for m in ordered]
             _save_state(st)
             return ordered + other
-        st["chain_order"] = fresh_ids
+        st[slot] = fresh_ids
         _save_state(st)
     return fresh + other
 
@@ -428,6 +489,7 @@ def usage_report(days: int = 1) -> str:
     out = []
     agg: dict[tuple, dict] = {}
     node_day: dict[tuple, dict] = {}
+    pool_day: dict[tuple, dict] = {}
     for i in range(days):
         day = _utc_day(time.time() - i * 86400)
         p = usage_dir() / f"{day}.jsonl"
@@ -456,6 +518,8 @@ def usage_report(days: int = 1) -> str:
                 nd_ = node_day.setdefault(nk, {"n": 0, "fail": 0})
                 nd_["n"] += 1
                 nd_["fail"] += 0 if r.get("ok") else 1
+                pk_ = (k[0], k[1], r.get("prefix") or "??")
+                pool_day.setdefault(pk_, {"n": 0})["n"] += 1
         except Exception:
             continue
     cfg = guard_conf()
@@ -472,13 +536,20 @@ def usage_report(days: int = 1) -> str:
         out.append(f"{day:<11}{node:<9}{model:<18}{a['n']:>4}{a['fail']:>4}"
                    f"{a['prompt']:>11}{a['completion']:>10}{a['cache']:>10}"
                    f"{lat:>9.0f}  {errs}")
-    out.append("-- 节点日请求(防封主表: Zen 免费档按请求数限) --")
-    out.append(f"{'日期':<11}{'节点':<9}{'日请求':>6}{'失败':>5}{'/软顶':>7}")
+    out.append("-- 节点日请求(防 IP 级总量闸, 若存在) --")
+    out.append(f"{'日期':<11}{'节点':<9}{'日请求':>6}{'失败':>5}")
     for (day, node) in sorted(node_day, reverse=True):
         d = node_day[(day, node)]
-        cap = cfg["daily_soft_cap"] if node in ("jp", "hk", "hk2") else "-"
-        mark = " ⚠超顶" if isinstance(cap, int) and d["n"] >= cap else ""
-        out.append(f"{day:<11}{node:<9}{d['n']:>6}{d['fail']:>5}{str(cap):>7}{mark}")
+        out.append(f"{day:<11}{node:<9}{d['n']:>6}{d['fail']:>5}")
+    out.append("-- 池日用量(软顶余量: 配额键=池; 到顶即摘除至翻篇) --")
+    out.append(f"{'日期':<11}{'池':<14}{'请求':>6}{'/软顶':>7}{'余量':>7}")
+    for (day, node, pre) in sorted(pool_day, reverse=True):
+        if node not in _ZEN_NODES:
+            continue
+        cap = cfg["daily_soft_cap"]
+        n = pool_day[(day, node, pre)]["n"]
+        mark = " ⚠到顶" if n >= cap else ""
+        out.append(f"{day:<11}{node + '|' + pre:<14}{n:>6}{cap:>7}{cap - n:>7}{mark}")
     st = _load_state()
     now = time.time()
     out.append("-- 熔断现状 --")

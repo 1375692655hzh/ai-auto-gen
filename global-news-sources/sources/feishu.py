@@ -1008,8 +1008,9 @@ def _save_zh(batch: list):
 
 def _tr_record(base: str, model: str, ok: bool, ecls: str, t0: float,
                usage: dict | None = None) -> None:
-    """非桥调用(MiniMax 等)调用侧记录; Zen 流量由 zen_bridge 记, 不重复计(0924 额度统计)。"""
-    if _guard.is_bridge(base):
+    """非桥调用(MiniMax 等)调用侧记录; Zen 流量由 zen_bridge 记, 不重复计(0924 额度统计)。
+    例外: unreachable(桥进程死/连不上)——桥无从记, 调用侧必须补, 否则死桥永排链首。"""
+    if _guard.is_bridge(base) and ecls != "unreachable":
         return
     try:
         u = usage or {}
