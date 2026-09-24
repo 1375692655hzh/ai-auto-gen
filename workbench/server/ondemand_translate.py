@@ -17,6 +17,11 @@ from pathlib import Path
 
 from . import x_surge
 
+try:
+    from sources import chain_guard as _guard   # cli.py 挂载 sys.path 后可用
+except Exception:
+    _guard = None       # 裸起 server 的非 cli.py 环境: 无账本, 保持配置原链序
+
 CACHE_FILE = x_surge.DATA_DIR / "translate_ondemand.json"   # {md5: {zh, ts}}
 
 SEG_CHARS = 1500        # 单段上限(与 _call_translate 的 max_tokens=600 译文匹配)
@@ -80,6 +85,8 @@ def _translate_one(chain: list, text: str) -> str | None:
             time.sleep(SLEEP)
         zh = None
         for cb, ck, cm in chain:
+            if _guard is not None and not _guard.admit(cb, cm):
+                continue            # 熔断/超顶池轮内跳过(0925: 死 jp 被白戳实证)
             # max_tokens=1600: 1500 字符英文段的完整译文(~1000 token), 防 600 截断
             zh = x_surge._call_translate(cb, ck, cm, seg, max_tokens=1600)
             if zh:
@@ -103,6 +110,13 @@ def translate_batch(items: list) -> dict:
     from . import config as wb_config
     cfg = wb_config.load().get("translate") or {}
     chain = x_surge.translate_chain(cfg)
+    if _guard is not None and chain:
+        try:                # 接额度守卫: 死池摘除+余量排序, 防配置序死池在头被白戳
+            d = _guard.order_chain([{"base_url": b, "api_key": k, "model": m}
+                                    for b, k, m in chain])
+            chain = [(x["base_url"], x["api_key"], x["model"]) for x in d]
+        except Exception:
+            pass
     cache = _load()
     now_s = time.strftime("%Y-%m-%d %H:%M:%S")
     results, todo = [], []
