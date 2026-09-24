@@ -28,11 +28,14 @@ Zen 免费档机制(实测+社区逆向, 细节按假设对待用本账本校准
 import contextlib
 import itertools
 import json
+import logging
 import os
 import threading
 import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+
+_log = logging.getLogger(__name__)   # 锁/账本事故必须有声, 沉默=停摆数小时无人知
 
 _LOCK = threading.Lock()                # 进程内线程锁(还有一道文件锁兜底)
 _ZEN_PORT_NODE = {"20133": "jp", "20134": "hk", "20135": "hk2"}
@@ -69,7 +72,13 @@ def _state_file_lock(wait: float = 2.0):
     fh = None
     try:
         fh = open(usage_dir() / "state.lock", "a+b")
-    except Exception:
+    except Exception as ex:
+        # 0925 实机事故: root 手跑 record() 建出 root 属主 state.lock, ubuntu 服务
+        # 全部静默拿不到锁, 账本停摆数小时只剩 pending 堆积。必须出声。
+        hint = ("(属主/权限问题——若 root 手跑过翻译/账本命令, "
+                "state.lock 可能已变 root 属主: chown ubuntu:ubuntu 恢复)"
+                if isinstance(ex, PermissionError) else "")
+        _log.warning("chain_guard: state.lock 打开失败%s: %s", hint, ex)
         yield False
         return
     got = False
@@ -564,6 +573,8 @@ def order_chain(models: list) -> list:
             return fresh + other
         st = _load_state()
         prev = st.get(slot) or {}
+        if isinstance(prev, list):      # 旧格式兼容(0925 实机炸点): 老代码存纯 id 列表
+            prev = {"ids": prev, "ts": 0}   # ts=0=视为过期, 本轮重排后重写新格式
         prev_ids = prev.get("ids") or []
         head_fr = 0.0
         if prev_ids:
@@ -676,6 +687,19 @@ def usage_report(days: int = 1) -> str:
         out.append(f"{day:<11}{node + '|' + pre:<14}{n:>6}{cap:>7}{cap - n:>7}{mark}")
     st = _load_state()
     now = time.time()
+    # 待补账积压: 持续 >0 = 锁拿不到的事故信号(0925 root 属主锁致停摆实证),
+    # 正常锁竞争 drained 后应为 0。
+    backlog = 0
+    d = usage_dir()
+    pend = d / "pending.jsonl"
+    if pend.exists():
+        try:
+            backlog += sum(1 for _ in pend.open(encoding="utf-8"))
+        except Exception:
+            backlog += 1
+    backlog += len(list(d.glob("replay.*.jsonl")))
+    if backlog:
+        out.append(f"⚠ 待补账积压 {backlog} 条——锁持续拿不到, 查 state.lock 属主/权限")
     out.append("-- 熔断现状 --")
     ib = st.get("ip_break") or {}
     any_br = False

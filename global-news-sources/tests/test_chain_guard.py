@@ -401,6 +401,24 @@ def test_order_chain_empty_state_keeps_config_order(_isolate):
     assert not any(k.startswith("chain_order:") for k in st)
 
 
+def test_order_chain_legacy_list_slot(_isolate):
+    """0925 实机炸点回归: 旧代码滞回槽=纯 id 列表, 新代码读到必须兼容不炸
+    AttributeError（云端 01:45 轮 translate 全灭根因）；ts=0 视过期→本轮重排
+    并重写新格式。"""
+    chain = [_m(20134, "oc/big-pickle"), _m(20135, "oc/big-pickle"),
+             _m(20133, "oc/big-pickle")]
+    g.record(logger="caller", node="hk", model="oc/big-pickle", ok=True)
+    g.order_chain(chain)                            # 写出新格式槽
+    st = json.loads((_isolate / "state.json").read_text(encoding="utf-8"))
+    slot = next(k for k in st if k.startswith("chain_order:"))
+    st[slot] = st[slot]["ids"]                      # 模拟老代码遗产: 纯列表
+    (_isolate / "state.json").write_text(json.dumps(st), encoding="utf-8")
+    out = g.order_chain(chain)                      # 不炸即过
+    assert [g.node_of(m["base_url"]) for m in out] == ["hk2", "jp", "hk"]
+    st = json.loads((_isolate / "state.json").read_text(encoding="utf-8"))
+    assert isinstance(st[slot], dict) and st[slot]["ids"]   # 已重写新格式
+
+
 # ---------- admit(轮内准入) ----------
 
 def test_admit_blocks_cooled_pool_and_ip(_isolate):
