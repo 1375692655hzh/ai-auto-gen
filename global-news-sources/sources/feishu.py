@@ -606,17 +606,16 @@ def _ensure_doc(conf: dict, acc: dict, ap: dict, st: dict) -> tuple:
                       token=_token(conf))
             if p.get("code") != 0:                # 授权失败不阻断, 链接仍可访问性受影响
                 note = f" (群授权失败 code={p.get('code')}, 机器人分享链接可达)"
-        # 放开权限(0925 用户裁决, 当日晚间升级为对公网开放): 持链接任何人可编辑
-        # (anyone_editable), 外部访问/邀请外部开启。字段是 bool 型 external_access/
-        # invite_external(回读同名); _entity 后缀枚举会被 1063001 拒——飞书该端点
-        # PATCH 与 GET 字段名一致, 已实测; 且 code=0 会静默部分生效, 改权限靠回读核对。
+        # 放开权限(0925 用户裁决; 当日晚间公网开放 anyone_editable 实测触发飞书内容
+        # 风控"检测到风险内容已停止分享"且 API 无法解除——回落组织内 tenant_editable,
+        # 组织成员持链接可编辑, 公网关闭不再被风控扫):
         try:
             import requests as _rq
             r = _rq.patch(
                 f"https://open.feishu.cn/open-apis/drive/v1/permissions/{token}/public"
                 "?type=sheet",
-                json={"link_share_entity": "anyone_editable",
-                      "external_access": True, "invite_external": True},
+                json={"link_share_entity": "tenant_editable",
+                      "external_access": False, "invite_external": False},
                 headers={"Authorization": f"Bearer {_token(conf)}"}, timeout=20)
             pd = r.json()
             if pd.get("code") != 0 and not note:
