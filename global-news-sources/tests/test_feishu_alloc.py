@@ -45,17 +45,25 @@ def test_event_merge_by_ticker_and_url_fallback():
     assert "earnings|NVDA" in keys and len(evs) == 3   # a,b 合并; c 独立; d=url键
 
 
+def _alloc_main(plan, name):
+    """分配层主推(限量分配/直通/持续跟进/大事件/加印), 排除兜底行(grok 裁决:
+    兜底行=绝不空表的例外, 不登记不占 K, 不计入独占性断言)。"""
+    return [m for m in plan["per_account"][name]["main"]
+            if "兜底" not in (m.get("note") or "")]
+
+
 def test_l0_pass_when_hits_le_2_and_cluster_k_when_more():
     e = _mk_item("u1", ["美股"], fv=80, ev="earnings", tickers=["NVDA"])
     accs = [_acc(f"n{i}", f"o{i}", dict(US)) for i in range(6)]
     plan = A.allocate([e], accs, "s1")
-    # 6 个同类号命中 > 2 → 竞争层, P0 K = min(5, ceil(0.2*6)) = 2
-    got = [n for n, v in plan["per_account"].items() if v["main"]]
+    # 6 个同类号命中 > 2 → 竞争层, P0 K = min(5, ceil(0.2*6)) = 2(兜底行不算分配)
+    got = [n for n, v in plan["per_account"].items() if _alloc_main(plan, n)]
     assert len(got) == 2
-    # 两个号时直通
+    # 两个号时直通(换新事件隔离——同事件会被跨档登记接续, v2 正确行为)
+    e_b = _mk_item("u9", ["美股"], fv=80, ev="earnings", tickers=["AAPL"])
     accs2 = accs[:2]
-    plan2 = A.allocate([e], accs2, "s2")
-    got2 = [n for n, v in plan2["per_account"].items() if v["main"]]
+    plan2 = A.allocate([e_b], accs2, "s2")
+    got2 = [n for n, v in plan2["per_account"].items() if _alloc_main(plan2, n)]
     assert len(got2) == 2 and all("直通" in (m.get("note") or "") for n in got2
                                   for m in plan2["per_account"][n]["main"])
 
@@ -65,18 +73,17 @@ def test_cross_slot_k_accumulates_and_continuity():
     e1 = _mk_item("u1", ["美股"], fv=80, ev="earnings", tickers=["NVDA"])
     accs = [_acc(f"n{i}", f"o{i}", dict(US)) for i in range(6)]
     p1 = A.allocate([e1], accs, "2026-09-25-9")
-    first = sorted(n for n, v in p1["per_account"].items() if v["main"])
-    assert len(first) == 2                            # K=2 全天名额
+    first = sorted(n for n, v in p1["per_account"].items() if _alloc_main(p1, n))
+    assert len(first) == 2                            # K=2 全天名额(兜底行不算)
     # 次档: 同事件新帖(不同URL同键)
     e2 = _mk_item("u1b", ["美股"], fv=80, ev="earnings", tickers=["NVDA"])
     p2 = A.allocate([e2], accs, "2026-09-25-13")
     got2 = set()
     for n, v in p2["per_account"].items():
-        for m in v["main"]:
+        for m in _alloc_main(p2, n):
             got2.add(n)
-    # 已收的 2 个号接续; 新名额 0 → 仍只有这 2 个号
-    assert got2 == set(first)
-    notes = [m["note"] for v in p2["per_account"].values() for m in v["main"]]
+    assert got2 == set(first)                         # 分配层仍只有这 2 个号
+    notes = [m["note"] for n in p2["per_account"] for m in _alloc_main(p2, n)]
     assert any("持续跟进" in x for x in notes)
 
 
@@ -86,22 +93,40 @@ def test_owner_exclusive():
             _acc("other", "别人", dict(US))]
     plan = A.allocate([e], accs, "s-owner")
     boss_got = [n for n in ("boss1", "boss2")
-                if any(m["key"] == "earnings|NVDA" for m in plan["per_account"][n]["main"]
-                       or [])]
-    assert len(boss_got) <= 1                         # 同 owner 主推只进一个号
+                if any(m["key"] == "earnings|NVDA" for m in _alloc_main(plan, n))]
+    assert len(boss_got) <= 1                         # 同 owner 分配层只进一个号
+
+
+def test_owner_dedup_same_slot_two_picks():
+    """P1-1 回归(v2 贪心去重): 8 号 2 owner, K=ceil(0.2*8)=2 → 两挑必须异 owner。"""
+    e = _mk_item("u1", ["美股"], fv=80, ev="earnings", tickers=["NVDA"])
+    accs = ([_acc(f"bossA{i}", "老板A", dict(US)) for i in range(4)]
+            + [_acc(f"bossB{i}", "老板B", dict(US2)) for i in range(4)])
+    plan = A.allocate([e], accs, "s-ownslot")
+    picked = [n for n in plan["per_account"]
+              if any(m["note"] == "限量分配" for m in _alloc_main(plan, n))]
+    assert len(picked) == 2
+    owners = {("老板A" if n.startswith("bossA") else "老板B") for n in picked}
+    assert len(owners) == 2
 
 
 def test_bench_counts_into_k():
-    """grok 备选: 主推+备选 ≤ K_day; 满额后不出现在任何备选区。"""
+    """grok 备选+opus 预留: 15 号 K=3 预留1 → 主推2+备选1=3; 跨档 bench 不再增员。"""
     e = _mk_item("u1", ["美股"], fv=80, ev="earnings", tickers=["NVDA"])
-    accs = [_acc(f"n{i}", f"o{i}", dict(US)) for i in range(10)]
-    plan = A.allocate([e], accs, "s-bench")
-    main_n = sum(1 for v in plan["per_account"].values() if v["main"])
-    bench_n = sum(1 for v in plan["per_account"].values() if v["bench"])
-    k = min(5, A._k_day("P0", 10, A.DEFAULT_CFG))     # ceil(0.2*10)=2
-    assert main_n + bench_n <= k + main_n * 0 or True  # 占位防误删
-    # 10 号 P0 K=2: 主推 2, 备选补到 2 → 总接收(主推+备选) ≤ 2? grok语义=主推+备选≤K
-    assert main_n == 2 and main_n + bench_n <= 4      # K=2: 主推2+备选0(已满)
+    accs = [_acc(f"n{i}", f"o{i}", dict(US)) for i in range(15)]
+    p1 = A.allocate([e], accs, "sb-1")
+    st = A._load_state()
+    layers = list(st["events"]["earnings|NVDA"]["accounts"].values())
+    comp = sum(1 for v in layers if v["layer"] == "comp")
+    bench = sum(1 for v in layers if v["layer"] == "bench")
+    assert comp == 2 and bench == 1                   # K=3: 预留1给备选
+    # 次档: bench 不转正, 总接收不超 K=3
+    e2 = _mk_item("u1b", ["美股"], fv=80, ev="earnings", tickers=["NVDA"])
+    A.allocate([e2], accs, "sb-2")
+    st = A._load_state()
+    layers = list(st["events"]["earnings|NVDA"]["accounts"].values())
+    budget = sum(1 for v in layers if v["layer"] in ("comp", "bench", "tail"))
+    assert budget == 3                                # 主推+备选 ≤ K_day 闭合
 
 
 def test_quota_is_min_of_cap_and_supply():
@@ -171,5 +196,30 @@ def test_day_rollover_clears_registry():
     A._save_state(st)
     e2 = _mk_item("u1b", ["美股"], fv=80, ev="earnings", tickers=["NVDA"])
     p = A.allocate([e2], accs, "d2-9")
-    got = sum(1 for v in p["per_account"].values() if v["main"])
-    assert got == 2                                   # 翻篇后名额重置
+    got = sum(1 for n in p["per_account"] if _alloc_main(p, n))
+    assert got == 2                                   # 翻篇后名额重置(兜底行不算)
+
+
+def test_ghost_registry_name_no_crash_and_blocks_owner():
+    """P1-3 回归: 注册表残留已删号名不炸(StopIteration 已修), 其存量 owner 仍拦人。"""
+    e = _mk_item("u1", ["美股"], fv=80, ev="earnings", tickers=["NVDA"])
+    accs = [_acc(f"n{i}", "老板", dict(US)) for i in range(5)]
+    # 注入幽灵: 老板名下旧号 ghost 已拿 comp(模拟早上发过、中午删号)
+    st = A._load_state()
+    st["day"] = time.strftime("%Y-%m-%d")
+    st["events"] = {"earnings|NVDA": {"accounts": {
+        "ghost": {"layer": "comp", "owner": "老板"}}}}
+    A._save_state(st)
+    p = A.allocate([e], accs, "s-ghost")              # 不抛即过
+    # 老板(owner)已被幽灵占坑 → 当前 5 个同 owner 号全拿不到分配层(只有兜底)
+    allocd = [n for n in p["per_account"] if _alloc_main(p, n)]
+    assert allocd == []
+
+
+def test_state_corruption_isolates_and_raises():
+    """P2-4 回归: 状态损坏 → .bad 留证 + StateError 显式失败(禁静默当新一天)。"""
+    p = A._state_path()
+    p.write_text("{corrupted", encoding="utf-8")
+    with pytest.raises(A.StateError):
+        A.allocate([_mk_item("u1", ["美股"])], [_acc("n1", "o1", dict(US))], "s-bad")
+    assert A._state_path().with_suffix(".bad").exists()

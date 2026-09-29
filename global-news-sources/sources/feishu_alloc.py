@@ -1,38 +1,34 @@
-"""账号选题限量分配引擎(2026-09-25 MoA 五方定案, 用户拍板 A=opus行数 B=grok备选)。
+"""账号选题限量分配引擎 v2(2026-09-25 MoA 定案; v2=review 门禁 3×P1 + 五方 MoA 复核修订)。
 
-问题: doc 模式全量命中(_doc_order_all)使同类账号收到高度重叠清单 → 发布同质化。
-方案(五方共识骨架+终审修订): 事件归并(跨档登记) → 三层闸门(直通/竞争限量/保底)
-→ 竞争层按簇 K 限量 + 稳定哈希加权挑号(MVP 第一步, 无账本; 第二步换信贷账本)
-→ opus 行数 min(上限,供给) → grok 备选区(主推+备选 ≤ K) → 尾部加印保底。
+v1→v2 修订(全部有实证依据, 详见 data/tmp/moa_alloc_reviews.md):
+- 预算簇内化(P1-2+跨簇串用, opus/grok): 占用=当前簇成员中 layer∈{comp,bench,tail} 的人数,
+  不再数事件全局——后处理簇不再被先处理簇吃掉名额。pass/big 不占预算, 但接续时升级为
+  comp(glm: pass 先冷后热组合泄漏 K+2 的修复)。
+- 接续只给主展示层(pass/comp/big/tail), bench 永不转正(K3/grok/opus 共识)。
+- owner 闭环(P1-1, 贪心去重版 opus/glm): E-S 排序后逐个取、取中即剔除同 owner 其余候选;
+  覆盖挑号/L0 直通/备选三条路径; owner 身份=owner_open_id→owner→name 兜底(opus, 防
+  缺省"?"塌缩成同一人); 注册表逐事件存 owner, 改名后仍拦同一人(grok)。
+- 备选区结构性为空的修复(opus): K≥3 时预留 floor(K/3) 名额给备选(grok B 拍板的落实)。
+- 大事件不覆写已有层(P2-1, glm 实证危害=永久全员接续); 帖数<命中数时只豁免前
+  min(帖数,命中数) 个号, 其余走正常闸门(K3 M2/opus 截断)。
+- 尾部加印三改(glm E8 实证绕 K 是 0.29 主因): ①每号按 hash(name|key) 排序取各自子集
+  (打散); ②事件预算已满不得加印(grok); ③加印登记为 tail 层占预算。
+- 空表兜底三段(grok 裁决): 备选转主推→P2/P3 加印→极端兜底(主推空时从自己命中按 FV
+  取≤3 条, 可含 P0/P1, 不登记不占 K 但计入指标, note 标注)。绝不空表=绝不无反馈。
+- 状态完整性(P2-4/P1-3): 注册表 events={事件键:{accounts:{名:{layer,owner}}}} 兼容
+  v1 str 层值; 幽灵名(已删号)跳过查找不炸; 状态文件损坏改名 .bad 留证并显式失败——
+  绝不当新一天静默重置 K。
+- 指标三本账(grok/opus/glm): 竞争主推/大事件/尾部加印分开算 Jaccard, 验收只看竞争
+  主推本; 门=尺同读 cfg.cluster_cos; 补空转计数。
+- 渲染契约: 计划主推条目带 rep_url(大事件每号不同帖真正送达), 渲染层按它取帖不重建。
 
-终审修订落实:
-- L0 删"平均余弦"(astra/opus/grok 三家): 只留命中数≤2 直通; 其余按 mix 余弦>0.7
-  分簇, 簇内限量, 簇间互不占 K。
-- 事件键不带推送档位 + 24h(自然日)跨档登记(opus/astra): 同事件次日新帖不再重分,
-  K 按全天累计, 已收账号优先接续(报道连续性)。
-- 主推行数 = min(quota_max, 该号可用事件数), 不足在表头亮出来(opus); 不暗中凑数。
-- 备选区计入同一 K 预算、按人分列(grok): 主推人数+备选人数 ≤ K_day; 满额的帖
-  不出现在任何号的备选区。
-- 同 owner 多号独占(grok): 同事件主推只进一个号。
-- 确定性纪律: 全程稳定哈希(md5), 禁 random(), 同输入同结果(opus/glm);
-  分配计划按 slot 落快照, 同档重跑读快照不重算(opus)。
-- 大事件豁免: 每档最多 1 个, 全员覆盖但同簇不同帖 + 角度提示(opus/glm)。
-
-已知限制(MVP 第一步, 无信贷账本):
-- 挑号用稳定哈希加权抽样(Efraimidis-Spirakis), 跨档公平靠"已收优先接续"而非账本;
-  第二步按 grok 信贷方案替换挑号函数即可, 接口不变。
-- registry 在分配时即提交(先落盘再推送, astra 事务化); 推送失败不回滚(该号本档
-  漏收, 次档靠接续优先自然补)——无账本阶段无退款语义, 快照保证重跑不发散。
-- 角度模板只是提示列: 本方案保证选题集合互斥, 不保证成稿差异(grok 终审写死)。
-
-状态: data/health/feishu-alloc.json = {day, events:{key:{accounts:{name:layer}}},
-snapshots:{slot:{...}}, metrics:{slot:{...}}}; 自然日翻篇清 events。
+确定性纪律不变: 全程 md5 稳定哈希, 禁 random; slot 快照重跑不重算; 事件键不带档位。
+状态: data/health/feishu-alloc.json; 自然日翻篇清注册表(24h 近似)。
 """
 import hashlib
 import json
 import math
 import os
-import re
 import time
 from pathlib import Path
 
@@ -41,17 +37,22 @@ _STATE = "feishu-alloc.json"
 
 DEFAULT_CFG = {
     "mode": "off",            # off | shadow(只算指标不改推送) | draft(主推+备选替换全量)
-    "quota_max": 18,          # opus: 主推目标 = min(18, 供给), 不足亮缺口
+    "quota_max": 18,          # opus: 主推目标 = min(18, 供给), 不足亮 short
     "bench_max": 10,          # grok: 备选区行数上限
-    "pass_hits": 2,           # L0: 命中账号数 ≤2 直通(终审删平均余弦后的唯一直通道)
-    "cluster_cos": 0.7,       # 分簇阈值(mix 余弦), 与指标"同类号对"同口径(门=尺)
+    "pass_hits": 2,           # L0: 命中账号数 ≤2 直通
+    "cluster_cos": 0.7,       # 分簇阈值, 与指标同类号对同口径(门=尺)
     "k_frac": {"P0": 0.20, "P1": 0.12, "P2": 0.06, "P3": 0.0},
     "k_cap": {"P0": 5, "P1": 3, "P2": 2, "P3": 1},
-    "big_event_min_cluster": 3,   # 簇内帖数≥3 且 FV≥P97 → 公共大事件
+    "bench_reserve_div": 3,   # K≥3 时预留 floor(K/3) 名额给备选(opus 预留版)
+    "big_event_min_cluster": 3,
     "big_event_per_slot": 1,
-    "author_cap": 2,          # 同作者在单号主推最多行数, 填不满 80% 才放宽到 4
+    "author_cap": 2,
+    "fallback_rows": 3,       # 极端兜底行数上限(grok)
     "snap_keep": 50,
 }
+
+_BUDGET_LAYERS = ("comp", "bench", "tail")      # 占事件/簇预算的层
+_MAIN_LAYERS = ("pass", "comp", "big", "tail")  # 接续(持续跟进)可用的层
 
 
 def _state_path() -> Path:
@@ -59,28 +60,37 @@ def _state_path() -> Path:
     return _DATA_DIR / _STATE
 
 
+class StateError(RuntimeError):
+    """状态文件损坏/不可写——显式失败, 调用方必须中止本档(P2-4: 禁静默重置 K)。"""
+
+
 def _load_state() -> dict:
-    try:
-        return json.loads(_state_path().read_text(encoding="utf-8"))
-    except Exception:
+    p = _state_path()
+    if not p.exists():
         return {}
+    try:
+        st = json.loads(p.read_text(encoding="utf-8"))
+        if not isinstance(st, dict):
+            raise ValueError("state root not object")
+        return st
+    except Exception as ex:                          # 损坏: 留证 + 显式失败
+        try:
+            os.replace(p, p.with_suffix(".bad"))
+        except Exception:
+            pass
+        raise StateError(f"feishu-alloc state 损坏已隔离(.bad): {ex}") from ex
 
 
 def _save_state(st: dict) -> None:
-    try:
-        p = _state_path()
-        tmp = p.with_suffix(".tmp")
-        tmp.write_text(json.dumps(st, ensure_ascii=False), encoding="utf-8")
-        os.replace(tmp, p)
-    except Exception:
-        pass
+    p = _state_path()
+    tmp = p.with_suffix(".tmp")
+    tmp.write_text(json.dumps(st, ensure_ascii=False), encoding="utf-8")
+    os.replace(tmp, p)                               # 失败自然上抛(StateError 语义)
 
 
 def _hash01(s: str) -> float:
-    """稳定哈希 → [0,1)。md5 跨进程确定(禁 random(), opus/glm 纪律)。"""
     h = hashlib.md5(str(s).encode("utf-8")).hexdigest()
-    v = int(h[:16], 16) / float(1 << 64)
-    return max(v, 1e-12)                      # 防 0 的幂运算下溢
+    return max(int(h[:16], 16) / float(1 << 64), 1e-12)
 
 
 def _cos(a: dict, b: dict) -> float:
@@ -94,6 +104,13 @@ def _cos(a: dict, b: dict) -> float:
     return sum(a.get(k, 0) * b.get(k, 0) for k in ks) / (na * nb)
 
 
+def _owner_of(a: dict) -> str:
+    """owner 身份兜底链(opus): owner_open_id → owner → name。防缺省塌缩(P1-1 前置)。"""
+    return (str(a.get("owner_open_id") or "").strip()
+            or str(a.get("owner") or "").strip()
+            or str(a.get("name") or "").strip() or "??")
+
+
 def _tickers(it: dict) -> list:
     try:
         ts = json.loads(it.get("tickers") or "[]")
@@ -103,13 +120,14 @@ def _tickers(it: dict) -> list:
 
 
 def event_key(it: dict) -> str:
-    """事件归并键(保守): 有 event_type 且有主 ticker → (类型,主ticker);
-    其余退回 URL 不合并(误并成本高于漏并, 终审共识)。键不含推送档位(opus)。"""
+    """事件归并键(保守): event_type|主ticker(第一个, 不排序——排序会改事件主体,
+    opus/grok 双双否决 review 的排序建议); 无键退内容哈希(P2-5: 禁 id(it))。"""
     ev = str(it.get("event_type") or "").strip()
     ts = _tickers(it)
     if ev and ts:
         return f"{ev}|{ts[0]}"
-    return "u|" + str(it.get("url") or id(it))
+    blob = f"{it.get('text') or ''}|{it.get('author_handle') or ''}|{it.get('time') or ''}"
+    return "u|" + hashlib.md5(blob.encode("utf-8")).hexdigest()[:16]
 
 
 def _fv(it: dict) -> int:
@@ -125,35 +143,26 @@ def _tier(it: dict) -> str:
 
 
 def cluster_events(cand: list) -> list:
-    """候选帖 → 事件列表。代表帖=FV 最高(不以转述条数抬分, astra);
-    topics 取代表帖(保守, 防并集放大命中)。"""
     byk: dict[str, list] = {}
     for it in cand:
         byk.setdefault(event_key(it), []).append(it)
     events = []
     for k, its in byk.items():
-        rep = max(its, key=lambda x: (_fv(x), _rate_num(x)))
+        rep = max(its, key=lambda x: (_fv(x), float(x.get("_rate") or 0)))
         events.append({"key": k, "items": its, "rep": rep,
                        "topics": set(rep.get("topics") or ()),
                        "tier": _tier(rep), "fv": _fv(rep)})
-    events.sort(key=lambda e: (-e["fv"], -_rate_num(e["rep"])))
+    events.sort(key=lambda e: (-e["fv"], -float(e["rep"].get("_rate") or 0)))
     return events
 
 
-def _rate_num(it: dict) -> float:
-    return float(it.get("_rate") or 0.0)
-
-
 def _k_day(tier: str, n: int, cfg: dict) -> int:
-    """全天累计接收上限 = max(1, min(绝对帽, ⌈比例×簇内号数⌉))(grok 比例公式)。"""
     frac = float(cfg["k_frac"].get(tier) or 0.0)
     cap = int(cfg["k_cap"].get(tier) or 1)
     return max(1, min(cap, math.ceil(frac * n))) if frac > 0 else min(cap, 1)
 
 
-def _clusters(accs: list, cos_th: float = 0.7) -> list:
-    """命中账号按 mix 余弦>cos_th 并查集分簇(终审: 删全局平均余弦);
-    阈值与指标同类号对同口径(门=尺, K3 终审对齐要求)。"""
+def _clusters(accs: list, cos_th: float) -> list:
     parent = {i: i for i in range(len(accs))}
 
     def find(i):
@@ -172,17 +181,27 @@ def _clusters(accs: list, cos_th: float = 0.7) -> list:
     return list(out.values())
 
 
-def _pick_weighted(event_key_: str, slot: str, cands: list, k: int) -> list:
-    """稳定哈希加权抽样(E-S): key = hash01^(1/w), w=该号对事件主主题的 mix 权重。
-    同输入同结果; 无 random()。"""
-    def w(a):
-        m = a["_mix"]
-        hit = [m.get(t, 0) for t in a["_ev_topics_hit"]]
-        return max(sum(hit) / 100.0, 0.05)
-    scored = [(_hash01(f"{event_key_}|{slot}|{a['name']}") ** (1.0 / w(a)), a)
-              for a in cands]
-    scored.sort(key=lambda t: -t[0])
-    return [a for _, a in scored[:k]]
+def _w(a: dict) -> float:
+    hit = [a["_mix"].get(t, 0) for t in a["_ev_topics_hit"]]
+    return max(sum(hit) / 100.0, 0.05)
+
+
+def _pick_weighted(ev_key_: str, slot: str, cands: list, k: int) -> list:
+    """E-S 加权抽样 + 贪心 owner 去重(P1-1 修法, opus/glm): 按 E-S 分数降序逐个取,
+    取中即剔除同 owner 其余候选; 池尽即止。同输入同结果。"""
+    if k <= 0 or not cands:
+        return []
+    scored = sorted(cands, key=lambda a: -(_hash01(f"{ev_key_}|{slot}|{a['name']}")
+                                           ** (1.0 / _w(a))))
+    out, seen_owner = [], set()
+    for a in scored:
+        if a["_owner"] in seen_owner:
+            continue
+        out.append(a)
+        seen_owner.add(a["_owner"])
+        if len(out) >= k:
+            break
+    return out
 
 
 def _split_quota(mix: dict, total: int) -> dict:
@@ -209,18 +228,17 @@ _BIG_ANGLES = ("快讯首发", "数据拆解", "反方观点", "影响分析", "
 
 def allocate(cand: list, accounts: list, slot: str, cfg: dict | None = None,
              persist: bool = True, now: float | None = None) -> dict:
-    """主入口: cand(已带 topics/fv_s/fv_tier/_rate/views) + accounts(yaml 账号卡)
-    → {per_account:{name:{main,bench,ordered,quota,short,note}}, metrics, summary}。
-    slot 同名重跑读快照(opus 事务化); persist=False 供 dry_run 不落盘。"""
+    """主入口。v2 层语义: pass(直通)/comp(竞争主推)/bench(备选)/big(大事件)/tail(尾部加印);
+    预算=簇内 comp+bench+tail; 接续只给主展示层; 输出 main 条目带 rep_url。"""
     cfg = dict(DEFAULT_CFG, **(cfg or {}))
     now = now or time.time()
     day = time.strftime("%Y-%m-%d", time.localtime(now))
     st = _load_state()
-    if st.get("day") != day:                    # 自然日翻篇: 跨档登记清零(24h 近似)
+    if st.get("day") != day:
         st = {"day": day}
-    snap = (st.setdefault("snapshots", {}) or {}).get(slot)
-    if snap and snap.get("per_account"):
-        out = snap
+    snaps = st.setdefault("snapshots", {})
+    if slot in snaps and (snaps[slot] or {}).get("per_account"):
+        out = dict(snaps[slot])
         out["from_snapshot"] = True
         return out
 
@@ -230,76 +248,121 @@ def allocate(cand: list, accounts: list, slot: str, cfg: dict | None = None,
                if isinstance(v, (int, float)) and float(v) > 0}
         if mix:
             accs.append({"name": str(a.get("name") or "?"),
-                         "owner": str(a.get("owner") or "?"), "_mix": mix})
+                         "owner": str(a.get("owner") or ""), "_mix": mix,
+                         "_owner": _owner_of(a)})
+    by_name = {a["name"]: a for a in accs}
     events = cluster_events(cand)
-    reg: dict = st.setdefault("events", {})     # key → {accounts:{name:layer}}
+    ev_reg: dict = st.setdefault("events", {})   # 事件键 → {accounts: {名: {layer,owner}}}
 
-    main_ev: dict[str, list] = {a["name"]: [] for a in accs}   # name → [(ev, note)]
+    def entry(ev_key: str, name: str) -> dict:
+        """注册条目; v1 str 层值兼容(schema 升级必须兼容读旧格式)。"""
+        v = ((ev_reg.get(ev_key) or {}).get("accounts") or {}).get(name)
+        if isinstance(v, dict):
+            return v
+        return {"layer": v, "owner": None} if v else {}
+
+    def set_entry(ev_key: str, name: str, layer: str, owner) -> None:
+        ev_reg.setdefault(ev_key, {}).setdefault("accounts", {})[name] = \
+            {"layer": layer, "owner": owner}
+
+    main_ev: dict[str, list] = {a["name"]: [] for a in accs}
     bench_ev: dict[str, list] = {a["name"]: [] for a in accs}
     avail_n: dict[str, int] = {a["name"]: 0 for a in accs}
+    hits_n: dict[str, int] = {}                    # 事件键 → 本档命中号数(加印预算用)
     big_used = 0
     fv_sorted = sorted(e["fv"] for e in events)
-    p97 = fv_sorted[min(int(len(fv_sorted) * 0.97), max(len(fv_sorted) - 1, 0))] if fv_sorted else 101
+    p97 = fv_sorted[min(int(len(fv_sorted) * 0.97), max(len(fv_sorted) - 1, 0))] \
+        if fv_sorted else 101
 
     for ev in events:
         hits = [a for a in accs if a["_mix"] and (ev["topics"] & set(a["_mix"]))]
+        if not hits:
+            continue
+        hits_n[ev["key"]] = len(hits)
         for a in hits:
             a["_ev_topics_hit"] = sorted(ev["topics"] & set(a["_mix"]),
                                          key=lambda t: -a["_mix"][t])
-        for a in hits:
             avail_n[a["name"]] += 1
-        if not hits:
-            continue
-        got = reg.setdefault(ev["key"], {}).setdefault("accounts", {})
-        # 大事件豁免: 每档≤1, 全员覆盖但同簇不同帖+角度提示
+
+        # 大事件豁免: 不覆写已有层(P2-1); 只豁免未收号, 帖数<命中数时截断(K3 M2/opus)
         if (len(ev["items"]) >= int(cfg["big_event_min_cluster"]) and ev["fv"] >= p97
                 and big_used < int(cfg["big_event_per_slot"])):
+            fresh_hits = [a for a in hits if not entry(ev["key"], a["name"]).get("layer")]
+            order = sorted(fresh_hits,
+                           key=lambda a: _hash01(f"big|{ev['key']}|{a['name']}"))
+            n_big = min(len(ev["items"]), len(order))
             big_used += 1
-            order = sorted(hits, key=lambda a: _hash01(f"big|{ev['key']}|{a['name']}"))
-            for i, a in enumerate(order):
+            for i, a in enumerate(order[:n_big]):
                 it = ev["items"][i % len(ev["items"])]
-                ang = _BIG_ANGLES[i % len(_BIG_ANGLES)]
-                main_ev[a["name"]].append((ev, f"公共大事件·建议角度:{ang}", it))
-                got[a["name"]] = "big"
-            continue
-        # L0 直通: 命中数≤2 无竞争(终审删平均余弦, 只留这条)
-        if len(hits) <= int(cfg["pass_hits"]):
-            for a in hits:
+                main_ev[a["name"]].append((ev, f"公共大事件·建议角度:"
+                                         f"{_BIG_ANGLES[i % len(_BIG_ANGLES)]}", it))
+                set_entry(ev["key"], a["name"], "big", a["_owner"])
+            hits_rest = [a for a in hits if a not in order[:n_big]]
+        else:
+            hits_rest = hits
+
+        # L0 直通: 命中≤2; 同 owner 只直通一个(P1-1 覆盖直通路径); 已收号接续
+        fresh_rest = [a for a in hits_rest if not entry(ev["key"], a["name"]).get("layer")]
+        if len(hits_rest) <= int(cfg["pass_hits"]):
+            for a in hits_rest:
+                if entry(ev["key"], a["name"]).get("layer"):
+                    main_ev[a["name"]].append((ev, "持续跟进(已报道)", ev["rep"]))
+            for a in _pick_weighted(ev["key"], slot + "|pass", fresh_rest,
+                                    len(fresh_rest)):
                 main_ev[a["name"]].append((ev, "低竞争直通", ev["rep"]))
-                got[a["name"]] = "pass"
+                set_entry(ev["key"], a["name"], "pass", a["_owner"])
             continue
-        # 竞争层: 分簇, 簇内按 K_day 限量(全天累计), 簇间互不占 K
-        for cl in _clusters(hits, float(cfg["cluster_cos"])):
+
+        # 竞争层: 分簇, 簇内预算(comp+bench+tail), 簇间互不占 K(P1-2+跨簇修订)
+        for cl in _clusters(hits_rest, float(cfg["cluster_cos"])):
             if len(cl) <= 1:
                 a = cl[0]
-                main_ev[a["name"]].append((ev, "命中直通", ev["rep"]))
-                got[a["name"]] = "pass"
+                if entry(ev["key"], a["name"]).get("layer"):
+                    main_ev[a["name"]].append((ev, "持续跟进(已报道)", ev["rep"]))
+                else:
+                    main_ev[a["name"]].append((ev, "命中直通", ev["rep"]))
+                    set_entry(ev["key"], a["name"], "pass", a["_owner"])
                 continue
             k_day = _k_day(ev["tier"], len(cl), cfg)
-            comp_n = sum(1 for v in got.values() if v == "comp")
-            rem = k_day - comp_n
-            # 接续优先(opus): 已收账号(今日任意层收过)直接续新帖, 不耗新名额
-            for a in [x for x in cl if x["name"] in got]:
-                main_ev[a["name"]].append((ev, "持续跟进(已报道)", ev["rep"]))
-            owners_taken = {next(x["owner"] for x in accs if x["name"] == n)
-                            for n in got}
-            fresh = [a for a in cl if a["name"] not in got
-                     and a["owner"] not in owners_taken]      # owner 独占(grok)
-            if rem > 0 and fresh:
-                picks = _pick_weighted(ev["key"], slot, fresh, rem)
-                for a in picks:
-                    main_ev[a["name"]].append((ev, "限量分配", ev["rep"]))
-                    got[a["name"]] = "comp"
-            # 备选(grok): 主推+备选 ≤ K_day; 落选号看到的只有未满额的帖
-            comp_n2 = sum(1 for v in got.values() if v == "comp")
-            bench_rem = k_day - comp_n2
-            losers = [a for a in cl if a["name"] not in got]
-            if bench_rem > 0 and losers:
-                for a in _pick_weighted(ev["key"], slot + "|bench", losers, bench_rem):
-                    bench_ev[a["name"]].append((ev, f"备选(主推名额已满·K={k_day})"))
-                    got[a["name"]] = "bench"
 
-    # ── 组装: 主推(min(quota_max,供给), opus) + 尾部加印 + 备选截断 ──
+            def occupied_now():
+                return sum(1 for x in cl
+                           if entry(ev["key"], x["name"]).get("layer") in _BUDGET_LAYERS)
+
+            # 接续: 主展示层升主推; pass/big 升级 comp(glm 组合泄漏修复); bench 不转正
+            for x in cl:
+                e0 = entry(ev["key"], x["name"])
+                if e0.get("layer") in ("pass", "big"):
+                    main_ev[x["name"]].append((ev, "持续跟进(已报道)", ev["rep"]))
+                    set_entry(ev["key"], x["name"], "comp",
+                              e0.get("owner") or x["_owner"])
+                elif e0.get("layer") in ("comp", "tail"):
+                    main_ev[x["name"]].append((ev, "持续跟进(已报道)", ev["rep"]))
+            occupied = occupied_now()
+            owners_taken = set()
+            for n, e0 in ((ev_reg.get(ev["key"]) or {}).get("accounts") or {}).items():
+                o = (e0 or {}).get("owner") if isinstance(e0, dict) else None
+                if o is None and n in by_name:
+                    o = by_name[n]["_owner"]          # v1 旧条目回填当前 owner
+                if o:
+                    owners_taken.add(o)               # 幽灵名的存量 owner 照样拦人
+            fresh = [a for a in cl if not entry(ev["key"], a["name"]).get("layer")
+                     and a["_owner"] not in owners_taken]      # owner 独占(grok)
+            # 备选预留(opus): K≥3 预留 floor(K/div), 否则备选结构性为空
+            reserved = k_day // int(cfg["bench_reserve_div"]) if k_day >= 3 else 0
+            rem_main = max(0, k_day - reserved - occupied)
+            for a in _pick_weighted(ev["key"], slot, fresh, rem_main):
+                main_ev[a["name"]].append((ev, "限量分配", ev["rep"]))
+                set_entry(ev["key"], a["name"], "comp", a["_owner"])
+            bench_rem = max(0, k_day - occupied_now())
+            # 备选同样滤 owner(grok 终审: 备选落选名单不查 owner=兄弟号一主推一备选)
+            losers = [a for a in cl if not entry(ev["key"], a["name"]).get("layer")
+                      and a["_owner"] not in owners_taken]
+            for a in _pick_weighted(ev["key"], slot + "|bench", losers, bench_rem):
+                bench_ev[a["name"]].append((ev, f"备选(主推名额已满·K={k_day})"))
+                set_entry(ev["key"], a["name"], "bench", a["_owner"])
+
+    # ── 组装: 主推(min(quota_max,供给), opus) + 尾部加印(打散) + 兜底三段(grok) ──
     per = {}
     for a in accs:
         q = min(int(cfg["quota_max"]), max(avail_n[a["name"]], 1))
@@ -325,37 +388,62 @@ def allocate(cand: list, accounts: list, slot: str, cfg: dict | None = None,
                     author_n[an] = author_n.get(an, 0) + 1
                     break
         main_flat = [x for t in order for x in buckets[t]]
-        # 尾部加印(P2/P3, P0/P1 的 K 不放宽): 只补未满额, 不空表
+        bench_keys = {e["key"] for e, _ in bench_ev[a["name"]]}
+
+        # 尾部加印 v2: 每号按 hash(name|key) 取各自子集(glm 打散); 事件预算
+        # (comp+bench+tail ≥ K_day(tier,本档命中数)) 已满不得加印(grok); 排除备选键
+        # (P2-2); 加印登记 tail 占预算
         if len(main_flat) < q:
-            held = {e["key"] for e, _, _ in main_flat}
-            pool = [e for e in events
-                    if e["key"] not in held and e["topics"] & set(a["_mix"])
-                    and e["tier"] in ("P2", "P3")]
+            held = {e["key"] for e, _, _ in main_flat} | bench_keys
+            pool = []
+            for e in events:
+                if e["key"] in held or e["tier"] not in ("P2", "P3"):
+                    continue
+                if not (e["topics"] & set(a["_mix"])):
+                    continue
+                used = sum(1 for v in ((ev_reg.get(e["key"]) or {})
+                                       .get("accounts") or {}).values()
+                           if (v.get("layer") if isinstance(v, dict) else v)
+                           in _BUDGET_LAYERS)
+                if used < _k_day(e["tier"], hits_n.get(e["key"], 1), cfg):
+                    pool.append(e)
+            pool.sort(key=lambda e: _hash01(f"tail|{a['name']}|{e['key']}"))
             for e in pool:
                 if len(main_flat) >= q:
                     break
                 main_flat.append((e, "尾部加印·同类号也可能看到", e["rep"]))
-                held.add(e["key"])
-        bench = bench_ev[a["name"]][:int(cfg["bench_max"])]
+                set_entry(e["key"], a["name"], "tail", a["_owner"])
+        # 兜底三段(grok 裁决): ①备选转主推 ②加印(上) ③极端兜底(≤3行,不登记不占K)
+        if not main_flat and bench_ev[a["name"]]:
+            for e, note in bench_ev[a["name"]]:
+                main_flat.append((e, "备选转主推", e["rep"]))
+        if not main_flat and avail_n[a["name"]] > 0:
+            pool = [e for e in events if e["topics"] & set(a["_mix"])]
+            pool.sort(key=lambda e: -e["fv"])
+            for e in pool[:int(cfg["fallback_rows"])]:
+                main_flat.append((e, "极端兜底·同类号也会看到·本档竞争落选", e["rep"]))
+        bench = [(e, n) for e, n in bench_ev[a["name"]]
+                 if e["key"] not in {x[0]["key"] for x in main_flat}][:int(cfg["bench_max"])]
         per[a["name"]] = {
             "main": [{"key": e["key"], "note": n, "rep_url": r.get("url")}
                      for e, n, r in main_flat],
             "bench": [{"key": e["key"], "note": n} for e, n in bench],
             "quota": q, "short": len(main_flat) < q,
-            "owner": a["owner"]}
+            "owner": a["owner"] or a["_owner"]}
 
     metrics = _metrics(accs, per, events, cfg)
-    mj = metrics["mean_jaccard"]
+    mj = metrics["books"]["comp"]["mean_jaccard"]
+    short = [n for n, v in per.items() if v["short"]]
     out = {"per_account": per, "metrics": metrics, "day": day,
            "summary": {"accounts": len(accs), "events": len(events),
                        "big_events": big_used,
                        "mean_jaccard": round(mj, 3) if mj is not None else None,
-                       "short_accounts": metrics["short_accounts"]}}
-    st.setdefault("snapshots", {})[slot] = out
+                       "short_accounts": short,
+                       "starve_accounts": metrics["starve_accounts"]}}
+    snaps[slot] = out
     st.setdefault("metrics", {})[slot] = metrics
-    snaps = st["snapshots"]
-    if len(snaps) > int(cfg["snap_keep"]):
-        for k in sorted(snaps)[:-int(cfg["snap_keep"])]:
+    if len(snaps) > int(cfg["snap_keep"]):            # 按插入序淘汰(修字典序乱删 P3)
+        for k in list(snaps.keys())[:-int(cfg["snap_keep"])]:
             snaps.pop(k, None)
     if persist:
         _save_state(st)
@@ -363,18 +451,39 @@ def allocate(cand: list, accounts: list, slot: str, cfg: dict | None = None,
 
 
 def _metrics(accs: list, per: dict, events: list, cfg: dict) -> dict:
-    """同类对(余弦>0.7, 与分簇同口径=门尺一致)主推事件 Jaccard + 配额/空转。"""
+    """三本账 Jaccard(grok/opus/glm): 竞争主推/大事件/尾部加印+兜底, 门=尺同 cfg。"""
+
+    def book_of(note: str) -> str:
+        if "大事件" in note:
+            return "big"
+        if "加印" in note or "兜底" in note or "备选转主推" in note:
+            return "tail"
+        return "comp"
+
     pairs = []
+    th = float(cfg["cluster_cos"])
     for i in range(len(accs)):
         for j in range(i + 1, len(accs)):
-            if _cos(accs[i]["_mix"], accs[j]["_mix"]) > 0.7:
-                A = {x["key"] for x in per[accs[i]["name"]]["main"]}
-                B = {x["key"] for x in per[accs[j]["name"]]["main"]}
-                u = A | B
-                pairs.append(len(A & B) / len(u) if u else 0.0)
-    short = [n for n, v in per.items() if v["short"]]
-    return {"pairs": len(pairs),
-            "mean_jaccard": round(sum(pairs) / len(pairs), 4) if pairs else None,
-            "max_jaccard": round(max(pairs), 4) if pairs else None,
-            "short_accounts": short,
-            "events_total": len(events)}
+            if _cos(accs[i]["_mix"], accs[j]["_mix"]) > th:
+                pairs.append((accs[i]["name"], accs[j]["name"]))
+    books = {"comp": [], "big": [], "tail": []}
+    for name, v in per.items():
+        for m in v.get("main") or []:
+            books[book_of(m.get("note") or "")].append((name, m["key"]))
+    out_books = {}
+    for bk, rows in books.items():
+        keys_by_acc: dict[str, set] = {}
+        for name, k in rows:
+            keys_by_acc.setdefault(name, set()).add(k)
+        js = []
+        for n1, n2 in pairs:
+            A, B = keys_by_acc.get(n1, set()), keys_by_acc.get(n2, set())
+            u = A | B
+            if u:
+                js.append(len(A & B) / len(u))
+        out_books[bk] = {"rows": len(rows), "pairs": len(js),
+                         "mean_jaccard": round(sum(js) / len(js), 4) if js else None,
+                         "max_jaccard": round(max(js), 4) if js else None}
+    starve = [n for n, v in per.items() if not v["main"]]
+    return {"books": out_books, "pairs_total": len(pairs),
+            "starve_accounts": starve, "events_total": len(events)}
