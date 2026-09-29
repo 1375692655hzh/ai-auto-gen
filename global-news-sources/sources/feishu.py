@@ -1271,11 +1271,11 @@ def run_account_push(dry_run: bool = False, force: bool = False,
         rep["skipped"] = "另一推送实例在跑(单实例锁), 本轮跳过"
         return rep
     st = _load_state(_PUSH_STATE)                   # dry_run 也 load: 窗口段读 last_push_at
+    slot = ""                                       # dry_run 不走锚点档(alloc 用时间名兜底)
     if not dry_run:
         if not ap["enabled"]:
             rep["skipped"] = "未启用(account_push.enabled)"
             return rep
-        slot = ""
         if ap["schedule"] and not force:
             lt = time.localtime()                    # 0924 五锚点制: 9/13/17/21/24 点档,
             hour = _anchor_hour(lt)                  # 午夜 tm_hour=0 必须映射 24, 否则 24 档永不触发
