@@ -4,6 +4,7 @@ After=network-online.target
 Wants=network-online.target
 
 [Service]
+User=ubuntu
 WorkingDirectory=@REPO@
 ExecStart=@REPO@/.venv/bin/python cli.py sources serve --host 127.0.0.1 --port 8787
 Restart=always

@@ -32,7 +32,6 @@ import os
 import time
 from pathlib import Path
 
-_DATA_DIR = Path(__file__).resolve().parents[1] / "data" / "health"
 _STATE = "feishu-alloc.json"
 
 DEFAULT_CFG = {
@@ -56,8 +55,12 @@ _MAIN_LAYERS = ("pass", "comp", "big", "tail")  # 接续(持续跟进)可用的�
 
 
 def _state_path() -> Path:
-    _DATA_DIR.mkdir(parents=True, exist_ok=True)
-    return _DATA_DIR / _STATE
+    """与 feishu 推送状态同层(仓库 data/health; AAG_ROOT/GNS_DATA_DIR 环境感知)。
+    v2 曾误用 global-news-sources/data/health(模块相对路径)——云端已迁移合并。"""
+    from . import data_dir
+    p = data_dir() / "health"
+    p.mkdir(parents=True, exist_ok=True)
+    return p / _STATE
 
 
 class StateError(RuntimeError):

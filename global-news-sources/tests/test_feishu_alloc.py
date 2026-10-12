@@ -14,7 +14,6 @@ from sources import feishu_alloc as A
 
 @pytest.fixture(autouse=True)
 def _isolate(tmp_path, monkeypatch):
-    monkeypatch.setattr(A, "_DATA_DIR", tmp_path)
     monkeypatch.setattr(A, "_state_path", lambda: tmp_path / "feishu-alloc.json")
     return tmp_path
 

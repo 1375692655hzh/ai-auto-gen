@@ -206,6 +206,99 @@ def create_app():
     # ── 唯一写端点: 源启停(2026-09-11)。数据站是源配置的所有者, 工作台本地/局域网/
     #    云端三接入形态统一经此启停(旧工作台 spawn 本机 cli 只对"数据站在本机"成立)。
     #    权限: key 定义含 "admin": true, 或本机(loopback)调用; 普通分发 key 403。──
+    @app.get("/v1/alloc")
+    def alloc_index(request: Request):
+        """限量分配结果索引: 各账号最新档位(外部平台对接入口, 快照保留 snap_keep 档)。"""
+        from . import feishu_alloc
+        try:
+            st = feishu_alloc._load_state()
+        except Exception as ex:
+            return JSONResponse({"error": f"alloc state unreadable: {ex}"}, status_code=500)
+        snaps = st.get("snapshots") or {}
+        accs: dict[str, dict] = {}
+        for k in sorted(snaps, reverse=True):
+            for name in ((snaps[k] or {}).get("per_account") or {}):
+                if name not in accs:
+                    accs[name] = {"latest_slot": k}
+        why = _check_quota(request.state.kdef, cost_items=len(accs))
+        if why:
+            return JSONResponse({"error": why}, status_code=429,
+                                headers={"Retry-After": "60"})
+        request.state.n_items = len(accs)
+        return {"accounts": accs, "slots_kept": len(snaps),
+                "note": "详情: GET /v1/alloc/{账号名}?slot={档位,缺省最新}"}
+
+    @app.get("/v1/alloc/{account}")
+    def alloc_account(request: Request, account: str, slot: str = ""):
+        """账号 × 档位的限量分配结果: 主推/备选 + 完整条目(items 按 rep_url 直查,
+        跨档接续事件不受时间窗限制; topics/FV 与推送同口径现算)。"""
+        import datetime as _dt
+        from . import feishu_alloc, feishu
+        try:
+            st = feishu_alloc._load_state()
+        except Exception as ex:
+            return JSONResponse({"error": f"alloc state unreadable: {ex}"}, status_code=500)
+        snaps = st.get("snapshots") or {}
+        snap = snaps.get(slot) if slot else None
+        if snap is None:
+            for k in sorted(snaps, reverse=True):
+                if account in ((snaps[k] or {}).get("per_account") or {}):
+                    snap, slot = snaps[k], k
+                    break
+        pa = ((snap or {}).get("per_account") or {}).get(account)
+        if not pa:
+            return JSONResponse({"error": f"no alloc for '{account}'"
+                                          f" (slot={slot or 'latest'})"}, status_code=404)
+        urls = [m.get("rep_url") for m in (pa.get("main") or []) + (pa.get("bench") or [])
+                if m.get("rep_url")]
+        by_url: dict[str, dict] = {}
+        cols = ("url", "time", "text", "text_zh", "author_handle", "sectors",
+                "markets", "item_type", "author_role", "tickers", "event_type",
+                "dup_count", "positioning")
+        if urls:
+            conn = _store._connect()
+            try:
+                q = ",".join("?" * len(urls))
+                rows = conn.execute(
+                    f"SELECT {', '.join(cols)} FROM items WHERE url IN ({q})",
+                    urls).fetchall()
+            finally:
+                conn.close()
+            for r in rows:
+                by_url[r[0]] = dict(zip(cols, r))
+        try:
+            a_topics = feishu._author_topics()
+        except Exception:
+            a_topics = {}
+        now = _dt.datetime.now()
+
+        def _row(m: dict) -> dict:
+            d = by_url.get(m.get("rep_url")) or {}
+            tp = feishu._item_topics(d.get("sectors"), d.get("markets"),
+                                     d.get("author_handle"), a_topics,
+                                     d.get("text") or "")
+            fv = feishu._fv_item_score(d, now) if d else ""
+            return {"key": m.get("key"), "note": m.get("note"),
+                    "rep_url": m.get("rep_url"), "topics": sorted(tp), "fv": fv,
+                    "time": d.get("time"), "author": d.get("author_handle"),
+                    "text": d.get("text"), "text_zh": d.get("text_zh"),
+                    "sectors": d.get("sectors"), "markets": d.get("markets"),
+                    "tickers": d.get("tickers"), "event_type": d.get("event_type"),
+                    "item_type": d.get("item_type"),
+                    "positioning": d.get("positioning")}
+
+        main = [_row(m) for m in (pa.get("main") or [])]
+        bench = [_row(m) for m in (pa.get("bench") or [])]
+        why = _check_quota(request.state.kdef, cost_items=len(main) + len(bench))
+        if why:
+            return JSONResponse({"error": why}, status_code=429,
+                                headers={"Retry-After": "60"})
+        request.state.n_items = len(main) + len(bench)
+        return {"account": account, "slot": slot, "day": snap.get("day"),
+                "quota": pa.get("quota"), "short": pa.get("short"),
+                "owner": pa.get("owner"), "main": main, "bench": bench,
+                "summary": snap.get("summary"), "metrics": snap.get("metrics")}
+
     @app.post("/v1/sources/{sid}/enabled")
     async def source_enabled(sid: str, request: Request):
         from sources import ctl
