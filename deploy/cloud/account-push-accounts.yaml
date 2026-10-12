@@ -51,15 +51,20 @@ accounts:
   - name: sojanna
     owner: 兰蓝
     mix: {美股: 50, 加密: 25, AI与科技: 10, 宏观与政策: 10}
-  # 0930 新增五号(用户口头人设定mix, owner待补省略=引擎按name兜底唯一owner; 群聊ID留档暂不接):
+  # 0930 新增五号(用户口头人设定mix; 负责人=谢成(0930补), 同owner六号共享事件独占规则; 群聊ID留档暂不接):
   #   验号: Rethan375 ✓(145粉,美股趋势技术分析吻合) / WCixot 404(handle不存在待用户核实) / Zachary与POLITICO记者撞名(应为显示名)
-  - name: Rethan375            # 群聊 oc_cc0c65e4d78cc2bb57f702fbf2c42724
+  - name: Rethan375
+    owner: 谢成            # 群聊 oc_cc0c65e4d78cc2bb57f702fbf2c42724
     mix: {美股: 70, 投教科普: 30}                       # 美股热门标的跟踪及技术面分析
-  - name: WCixot               # 群聊 oc_9edf321992f7fcdf62a9bc49662178de
+  - name: WCixot
+    owner: 谢成               # 群聊 oc_9edf321992f7fcdf62a9bc49662178de
     mix: {美股: 60, 投教科普: 40}                       # 技术面分析大师
-  - name: Alan炮轰美股          # 群聊 oc_bbea1a6854e5be9ee2902a6b7bb7c8c0
+  - name: Alan炮轰美股
+    owner: 谢成          # 群聊 oc_bbea1a6854e5be9ee2902a6b7bb7c8c0
     mix: {美股: 50, AI与科技: 20, 亚太股市: 10, A股: 10, 加密: 10}   # AI技术分析+港美A+加密萌新
-  - name: 我靠定投成神          # 群聊 oc_c82a8e13b60f5950d436d4f781d48019
+  - name: 我靠定投成神
+    owner: 谢成          # 群聊 oc_c82a8e13b60f5950d436d4f781d48019
     mix: {美股: 35, 投教科普: 30, AI与科技: 20, 亚太股市: 15}       # 定投长期修炼/美股港股AI财报估值
-  - name: Zachary              # 群聊 oc_2514188ce11fe73c0302ec3704f38e60
+  - name: Zachary
+    owner: 谢成              # 群聊 oc_2514188ce11fe73c0302ec3704f38e60
     mix: {美股: 70, 投教科普: 30}                       # 专注于美股趋势分析
