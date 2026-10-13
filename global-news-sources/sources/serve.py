@@ -206,6 +206,15 @@ def create_app():
     # ── 唯一写端点: 源启停(2026-09-11)。数据站是源配置的所有者, 工作台本地/局域网/
     #    云端三接入形态统一经此启停(旧工作台 spawn 本机 cli 只对"数据站在本机"成立)。
     #    权限: key 定义含 "admin": true, 或本机(loopback)调用; 普通分发 key 403。──
+    # ── 档位键 "YYYY-MM-DD-H" 的小时未补零, 字符串序会把 "-9" 排在 "-17"/"-24" 之后,
+    #    导致 9 点档全天被当作"最新"(2026-10-13 外部 bot 拉旧档推 0 条事故)。──
+    def _slot_order(k: str) -> tuple:
+        d, _, h = k.rpartition("-")
+        try:
+            return (d, int(h))
+        except ValueError:
+            return (k, -1)
+
     @app.get("/v1/alloc")
     def alloc_index(request: Request):
         """限量分配结果索引: 各账号最新档位(外部平台对接入口, 快照保留 snap_keep 档)。"""
@@ -216,7 +225,7 @@ def create_app():
             return JSONResponse({"error": f"alloc state unreadable: {ex}"}, status_code=500)
         snaps = st.get("snapshots") or {}
         accs: dict[str, dict] = {}
-        for k in sorted(snaps, reverse=True):
+        for k in sorted(snaps, key=_slot_order, reverse=True):
             for name in ((snaps[k] or {}).get("per_account") or {}):
                 if name not in accs:
                     accs[name] = {"latest_slot": k}
@@ -241,7 +250,7 @@ def create_app():
         snaps = st.get("snapshots") or {}
         snap = snaps.get(slot) if slot else None
         if snap is None:
-            for k in sorted(snaps, reverse=True):
+            for k in sorted(snaps, key=_slot_order, reverse=True):
                 if account in ((snaps[k] or {}).get("per_account") or {}):
                     snap, slot = snaps[k], k
                     break
