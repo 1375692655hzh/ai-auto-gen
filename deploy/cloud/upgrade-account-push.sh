@@ -46,7 +46,9 @@ fs = cfg.setdefault("sources", {}).setdefault("feishu", {})
 shutil.copy2(p, p.with_name(f"config.local.backup-{datetime.datetime.now():%Y%m%d-%H%M%S}.yaml"))
 ap = fs.setdefault("account_push", {}) or {}
 ap.update({"enabled": True, "interval_h": 2, "window_h": 2,
-           "chat_id": "oc_eb27ec292106627b466b4cd7b8500cbb", "top_total": 10})
+           "chat_id": "oc_eb27ec292106627b466b4cd7b8500cbb", "top_total": 10,
+           # 2026-10-13 用户裁决: 五锚点(9/13/17/21/24)改三披露(8/11/17)
+           "schedule": [8, 11, 17]})
 ap["doc"] = dict(ap.get("doc") or {})
 ap["doc"].update({"enabled": True})   # 飞书电子表格披露(缺云文档权限自动回退消息卡片)
 # 账号清单真源 = 仓内 deploy/cloud/account-push-accounts.yaml(腾讯文档2026-09-22录入13号),
