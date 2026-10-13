@@ -1,0 +1,11 @@
+# aag-zen-bridge-restart.service — 翻译桥每日低峰重启(2026-10-13)
+# 根因: opencode/V8 堆只涨不缩, 2026-10-04 上午推送档 jp 桶 RSS 膨胀至 1.1GB 被内核
+# OOM 杀死。重启=每日清零堆水位, OOM 根除。顺序重启+45s 间隔: 任一时刻至少一桶在
+# 服务, 链式 fallback 语义内建, 在途轮次最多少数请求落下一桶。
+# 新增桶实例时在 ExecStart 追加 "&& sleep 45 && systemctl restart aag-zen-bridge@<名>"。
+[Unit]
+Description=aag zen bridges nightly restart (V8 heap ratchet, sequential with 45s gap)
+
+[Service]
+Type=oneshot
+ExecStart=/bin/sh -c "systemctl restart aag-zen-bridge@hk.service && sleep 45 && systemctl restart aag-zen-bridge@hk2.service"

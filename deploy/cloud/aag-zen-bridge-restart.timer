@@ -1,0 +1,12 @@
+# aag-zen-bridge-restart.timer — 每日 04:20 触发桥重启
+# 04:20 = 全天最闲(refresh 轮 :00/:15/:30/:45 相位的间隙)且先于 04:30 每日备份。
+# Persistent=true: 停机错过则开机补跑一次(顺序重启设计保证低影响)。
+[Unit]
+Description=nightly zen bridge restart at 04:20
+
+[Timer]
+OnCalendar=*-*-* 04:20:00
+Persistent=true
+
+[Install]
+WantedBy=timers.target
