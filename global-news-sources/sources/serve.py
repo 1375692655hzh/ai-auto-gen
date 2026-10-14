@@ -11,6 +11,7 @@
 启动: python cli.py sources serve [--bind 0.0.0.0] [--port 8787]
 """
 
+import datetime as _dt
 import json
 import os
 import re
@@ -20,6 +21,52 @@ from pathlib import Path
 from sources import list_sources, IMPORT_ERRORS
 from sources import health as _health
 from sources import store as _store
+
+
+# ── 档位/窗口辅助(/v1/alloc 全量清单用, 模块级供单测) ────────────────────────
+
+def _norm_hours(schedule: list) -> list:
+    """锚点小时归一: 0 归 24(午夜锚点, 同推送 _anchor_hour 语义), 升序去重。"""
+    return sorted({24 if int(h) == 0 else int(h) for h in schedule})
+
+
+def _anchor_dt(d, h: int):
+    """锚点时刻: h=24 → 次日零点。"""
+    return _dt.datetime(d.year, d.month, d.day) + _dt.timedelta(hours=h)
+
+
+def _latest_anchor(hours: list, now):
+    """最近一个已到来的锚点 → (date, hour); 无 schedule/全天未到 → None。"""
+    best = None                                  # (锚点时刻, date, hour)
+    for back in (0, 1):
+        d = (now - _dt.timedelta(days=back)).date()
+        for h in sorted(hours, reverse=True):
+            dt = _anchor_dt(d, h)
+            if dt <= now and (best is None or dt > best[0]):
+                best = (dt, d, h)
+    return (best[1], best[2]) if best else None
+
+
+def _parse_slot(slot: str):
+    """'YYYY-M-D-H'(小时可补零; 0 归 24) → (date, hour); 非法值抛 ValueError。"""
+    m = re.match(r"^(\d{4})-(\d{1,2})-(\d{1,2})-(\d{1,2})$", slot.strip())
+    if not m:
+        raise ValueError("档位格式应为 YYYY-MM-DD-H, 如 2026-10-14-8")
+    y, mo, dy, h = (int(x) for x in m.groups())
+    if h == 0:
+        h = 24                                    # 锚点语义: 午夜归 24(同推送侧)
+    return _dt.date(y, mo, dy), h
+
+
+def _slot_window(d, h: int, hours: list):
+    """档位窗口 = [上一锚点, 本锚点)。当天最早档 ← 昨日最末锚点(覆盖 overnight)。"""
+    until = _anchor_dt(d, h)
+    prevs = [a for a in hours if a < h]
+    if prevs:
+        pd, ph = d, max(prevs)
+    else:
+        pd, ph = d - _dt.timedelta(days=1), hours[-1]
+    return _anchor_dt(pd, ph), until
 
 
 # ── 鉴权与配额 ──────────────────────────────────────────────────────────────
@@ -206,107 +253,153 @@ def create_app():
     # ── 唯一写端点: 源启停(2026-09-11)。数据站是源配置的所有者, 工作台本地/局域网/
     #    云端三接入形态统一经此启停(旧工作台 spawn 本机 cli 只对"数据站在本机"成立)。
     #    权限: key 定义含 "admin": true, 或本机(loopback)调用; 普通分发 key 403。──
-    # ── 档位键 "YYYY-MM-DD-H" 的小时未补零, 字符串序会把 "-9" 排在 "-17"/"-24" 之后,
-    #    导致 9 点档全天被当作"最新"(2026-10-13 外部 bot 拉旧档推 0 条事故)。──
-    def _slot_order(k: str) -> tuple:
-        d, _, h = k.rpartition("-")
-        try:
-            return (d, int(h))
-        except ValueError:
-            return (k, -1)
+    # ── 账号选题全量清单(2026-10-14 用户裁决: alloc 不做限量分配, 直接回全量命中,
+    #    与飞书表格子页同口径)。档=推送锚点; 档位键 "YYYY-M-D-H" 小时不补零(与推送侧
+    #    f"{date}-{hour}" 一致), 午夜锚点=24; 查询侧兼容补零输入, 未知档位显式 404
+    #    不静默回落(修 1014 "查 08 档静默回最新档"坑, 与 28b849c 同族)。
+    #    档位/窗口辅助函数在模块级(_norm_hours/_parse_slot/_slot_window/...)供单测。──
 
     @app.get("/v1/alloc")
     def alloc_index(request: Request):
-        """限量分配结果索引: 各账号最新档位(外部平台对接入口, 快照保留 snap_keep 档)。"""
-        from . import feishu_alloc
-        try:
-            st = feishu_alloc._load_state()
-        except Exception as ex:
-            return JSONResponse({"error": f"alloc state unreadable: {ex}"}, status_code=500)
-        snaps = st.get("snapshots") or {}
-        accs: dict[str, dict] = {}
-        for k in sorted(snaps, key=_slot_order, reverse=True):
-            for name in ((snaps[k] or {}).get("per_account") or {}):
-                if name not in accs:
-                    accs[name] = {"latest_slot": k}
+        """全量清单索引: 账号列表 + 各自最新档位(档=推送锚点, 详情与飞书表格同口径)。"""
+        from . import feishu
+        ap = feishu._push_conf(feishu._conf())
+        hours = _norm_hours(ap["schedule"])
+        latest = ""
+        la = _latest_anchor(hours, _dt.datetime.now()) if hours else None
+        if la:
+            latest = f"{la[0]:%Y-%m-%d}-{la[1]}"
+        accs = {str(a.get("name") or "?"):
+                {"latest_slot": latest, "owner": str(a.get("owner") or "?")}
+                for a in ap["accounts"]}
         why = _check_quota(request.state.kdef, cost_items=len(accs))
         if why:
             return JSONResponse({"error": why}, status_code=429,
                                 headers={"Retry-After": "60"})
         request.state.n_items = len(accs)
-        return {"accounts": accs, "slots_kept": len(snaps),
-                "note": "详情: GET /v1/alloc/{账号名}?slot={档位,缺省最新}"}
+        return {"accounts": accs, "schedule": hours,
+                "note": "详情: GET /v1/alloc/{账号名}?slot={档位,缺省最新;"
+                        " 返回该账号窗口内全量命中清单(与飞书表格同口径, 无限量分配)}"}
 
     @app.get("/v1/alloc/{account}")
     def alloc_account(request: Request, account: str, slot: str = ""):
-        """账号 × 档位的限量分配结果: 主推/备选 + 完整条目(items 按 rep_url 直查,
-        跨档接续事件不受时间窗限制; topics/FV 与推送同口径现算)。"""
-        import datetime as _dt
-        from . import feishu_alloc, feishu
-        try:
-            st = feishu_alloc._load_state()
-        except Exception as ex:
-            return JSONResponse({"error": f"alloc state unreadable: {ex}"}, status_code=500)
-        snaps = st.get("snapshots") or {}
-        snap = snaps.get(slot) if slot else None
-        if snap is None:
-            for k in sorted(snaps, key=_slot_order, reverse=True):
-                if account in ((snaps[k] or {}).get("per_account") or {}):
-                    snap, slot = snaps[k], k
-                    break
-        pa = ((snap or {}).get("per_account") or {}).get(account)
-        if not pa:
-            return JSONResponse({"error": f"no alloc for '{account}'"
-                                          f" (slot={slot or 'latest'})"}, status_code=404)
-        urls = [m.get("rep_url") for m in (pa.get("main") or []) + (pa.get("bench") or [])
-                if m.get("rep_url")]
-        by_url: dict[str, dict] = {}
-        cols = ("url", "time", "text", "text_zh", "author_handle", "sectors",
-                "markets", "item_type", "author_role", "tickers", "event_type",
-                "dup_count", "positioning")
-        if urls:
-            conn = _store._connect()
+        """账号 × 档位的全量命中清单: 窗口内该账号主题命中的全部 X 帖(与飞书表格
+        子页同口径, 2026-10-14 起不做限量分配)。查询=推送同款(fetched_at 窗口 +
+        '%twitter%' 源 + LIMIT 400 + URL 去重 + 剥 @作者: 前缀); 排序=主题(mix 降序)
+        →观点在前→时间降序; 一帖一行(表格中多主题帖会在多个主题段重复, 此处不重复,
+        themes 列出全部命中主题)。"""
+        from . import feishu
+        ap = feishu._push_conf(feishu._conf())
+        acc = next((a for a in ap["accounts"]
+                    if str(a.get("name") or "") == account), None)
+        if acc is None:
+            return JSONResponse(
+                {"error": f"unknown account '{account}'",
+                 "accounts": [str(a.get("name")) for a in ap["accounts"]]},
+                status_code=404)
+        hours = _norm_hours(ap["schedule"])
+        if not hours:
+            return JSONResponse(
+                {"error": "account_push.schedule 未配置, 无法定位档位窗口"},
+                status_code=400)
+        now = _dt.datetime.now()
+        if slot:
             try:
-                q = ",".join("?" * len(urls))
-                rows = conn.execute(
-                    f"SELECT {', '.join(cols)} FROM items WHERE url IN ({q})",
-                    urls).fetchall()
-            finally:
-                conn.close()
-            for r in rows:
-                by_url[r[0]] = dict(zip(cols, r))
+                d, h = _parse_slot(slot)
+            except ValueError as ex:
+                return JSONResponse({"error": str(ex)}, status_code=400)
+        else:
+            la = _latest_anchor(hours, now)
+            if la is None:
+                return JSONResponse({"error": "今日锚点尚未到来"}, status_code=404)
+            d, h = la
+        if h not in hours:
+            return JSONResponse(
+                {"error": f"档位 {h} 不在 schedule 中",
+                 "schedule": hours,
+                 "valid_slots_of_day": [f"{d:%Y-%m-%d}-{a}" for a in hours]},
+                status_code=404)
+        since, until = _slot_window(d, h, hours)
+        if until > now:
+            return JSONResponse({"error": f"档位 {d:%Y-%m-%d}-{h} 尚未到来"
+                                          f"(锚点时刻 {until:%Y-%m-%d %H:%M})"},
+                                status_code=404)
+        mix = {str(k): float(v) for k, v in (acc.get("mix") or {}).items()
+               if str(k) in feishu.TOPICS and float(v) > 0}
+        if not mix:
+            return JSONResponse({"error": f"账号 '{account}' mix 无效"}, status_code=400)
+        rows = []
+        conn = _store._connect()
+        try:
+            rows = conn.execute(
+                "SELECT time, text, text_zh, url, author_handle, sectors, markets, "
+                "item_type, author_role, tickers, event_type, dup_count, positioning "
+                "FROM items WHERE fetched_at>=? AND fetched_at<? "
+                "AND source_id LIKE '%twitter%' ORDER BY time DESC LIMIT 400",
+                (since.strftime("%Y-%m-%d %H:%M:%S"),
+                 until.strftime("%Y-%m-%d %H:%M:%S"))).fetchall()
+        finally:
+            conn.close()
+        seen, items = set(), []
+        for r in rows:
+            u = str(r[3] or "")
+            if u:
+                if u in seen:                        # flash/views 双源同帖去重(同推送)
+                    continue
+                seen.add(u)
+            items.append({"text": re.sub(r"^@\w+:\s*", "", str(r[1] or "")),
+                          "text_zh": r[2], "url": u, "time": r[0],
+                          "author_handle": r[4], "sectors": r[5], "markets": r[6],
+                          "item_type": r[7], "author_role": r[8], "tickers": r[9],
+                          "event_type": r[10], "dup_count": r[11],
+                          "positioning": r[12]})
         try:
             a_topics = feishu._author_topics()
         except Exception:
             a_topics = {}
-        now = _dt.datetime.now()
-
-        def _row(m: dict) -> dict:
-            d = by_url.get(m.get("rep_url")) or {}
-            tp = feishu._item_topics(d.get("sectors"), d.get("markets"),
-                                     d.get("author_handle"), a_topics,
-                                     d.get("text") or "")
-            fv = feishu._fv_item_score(d, now) if d else ""
-            return {"key": m.get("key"), "note": m.get("note"),
-                    "rep_url": m.get("rep_url"), "topics": sorted(tp), "fv": fv,
-                    "time": d.get("time"), "author": d.get("author_handle"),
-                    "text": d.get("text"), "text_zh": d.get("text_zh"),
-                    "sectors": d.get("sectors"), "markets": d.get("markets"),
-                    "tickers": d.get("tickers"), "event_type": d.get("event_type"),
-                    "item_type": d.get("item_type"),
-                    "positioning": d.get("positioning")}
-
-        main = [_row(m) for m in (pa.get("main") or [])]
-        bench = [_row(m) for m in (pa.get("bench") or [])]
-        why = _check_quota(request.state.kdef, cost_items=len(main) + len(bench))
+        theme_order = sorted(mix, key=lambda t: -mix[t])
+        buckets: dict[str, list] = {t: [] for t in theme_order}
+        for it in items:
+            tp = feishu._item_topics(it["sectors"], it["markets"],
+                                     it["author_handle"], a_topics, it["text"])
+            hit = [t for t in theme_order if t in tp]
+            if not hit:
+                continue
+            it["_themes"] = sorted(hit)
+            buckets[hit[0]].append(it)               # 归属 mix 最高的命中主题
+        out = []
+        for t in theme_order:
+            its = sorted(buckets[t], key=lambda x: str(x.get("time") or ""),
+                         reverse=True)
+            its = sorted(its, key=lambda x: 0 if feishu._is_opinion(x) else 1)
+            for it in its:
+                out.append({"theme": t, "themes": it["_themes"],
+                            "type": "观点" if feishu._is_opinion(it) else "资讯",
+                            "fv": feishu._fv_item_score(it, now),
+                            "url": it["url"], "time": it["time"],
+                            "author": it["author_handle"],
+                            "text": it["text"], "text_zh": it["text_zh"],
+                            "sectors": it["sectors"], "markets": it["markets"],
+                            "tickers": it["tickers"],
+                            "event_type": it["event_type"],
+                            "item_type": it["item_type"],
+                            "positioning": it["positioning"],
+                            "dup_count": it["dup_count"]})
+        why = _check_quota(request.state.kdef, cost_items=len(out))
         if why:
             return JSONResponse({"error": why}, status_code=429,
                                 headers={"Retry-After": "60"})
-        request.state.n_items = len(main) + len(bench)
-        return {"account": account, "slot": slot, "day": snap.get("day"),
-                "quota": pa.get("quota"), "short": pa.get("short"),
-                "owner": pa.get("owner"), "main": main, "bench": bench,
-                "summary": snap.get("summary"), "metrics": snap.get("metrics")}
+        request.state.n_items = len(out)
+        return {"account": account, "owner": str(acc.get("owner") or "?"),
+                "mix": mix, "slot": f"{d:%Y-%m-%d}-{h}",
+                "window": {"since": since.strftime("%Y-%m-%d %H:%M"),
+                           "until": until.strftime("%Y-%m-%d %H:%M")},
+                "total": len(out),
+                "themes": [{"theme": t, "count": len(buckets[t])}
+                           for t in theme_order if buckets[t]],
+                "items": out,
+                "note": "全量命中清单, 与飞书表格同口径(一帖一行; 表格中多主题帖"
+                        "会在多个主题段重复, 此处归入 mix 最高主题, themes 列全量)"}
 
     @app.post("/v1/sources/{sid}/enabled")
     async def source_enabled(sid: str, request: Request):
