@@ -179,9 +179,9 @@ curl -H "Authorization: Bearer <key>" \
 
 ## 五、相关
 
-- 端点实现：`global-news-sources/sources/serve.py`（`/v1/alloc` 两端点 + 档位/窗口辅助函数）
+- 端点实现：`global-news-sources/sources/serve.py`（`/v1/alloc` 两端点 + 档位/窗口/增量游标辅助函数）
 - 档位/窗口单测：`global-news-sources/tests/test_alloc_slots.py`
-- 已废弃的限量分配引擎（仍在推送侧影子运行，与本 API 不再相关）：
-  `global-news-sources/sources/feishu_alloc.py` 模块 docstring；
-  方案定案过程 `data/tmp/moa_dedup_answers.md` / `moa_alloc_reviews.md`
+- 已废弃并**整体移除**（2026-10-14）的限量分配引擎：`sources/feishu_alloc.py` 及推送侧
+  shadow/draft 接线已删（用户裁决"旧的没人在用"）；如需回溯方案定案过程见 git 历史
+  （`data/tmp/moa_dedup_answers.md` / `moa_alloc_reviews.md` 为当时评审底稿）
 - 数据站其他接口：`python cli.py sources serve --help`、`docs/云端部署方案.md`

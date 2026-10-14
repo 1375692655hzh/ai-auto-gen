@@ -469,7 +469,6 @@ def _push_conf(conf: dict) -> dict:
             "chat_id": str(ap.get("chat_id") or conf.get("chat_id") or ""),
             "top_total": int(ap.get("top_total") or 10),
             "doc": dict(ap.get("doc") or {}),
-            "alloc": dict(ap.get("alloc") or {}),   # 0925 限量分配(off|shadow|draft)
             "accounts": [a for a in (ap.get("accounts") or []) if isinstance(a, dict)]}
 
 
@@ -877,9 +876,6 @@ def _doc_rows(acc: dict, mix: dict, ordered: list, bj: str, cand_n: int,
             zh = (it.get("text_zh") or "").strip()
             native = (not zh) and _looks_zh(txt)   # 原文即中文(全站翻译skip类, 无译文)
             typ = "观点" if _is_opinion(it) else "资讯"
-            note = str(it.get("_alloc_note") or "")  # draft 限量分配说明(模板拼出)
-            dup = int(it.get("_dup_n") or 0)
-            typ = typ + (f"·{note}" if note else "") + (f"·同源{dup}条" if dup else "")
             rows.append([
                 t, typ,
                 str(it.get("author_handle") or ""), int(it.get("views") or 0),
@@ -935,89 +931,6 @@ def _pick_for_account(items: list, acc: dict, top_total: int, now=None) -> dict:
                 per[t].append(it)
                 break
     return {t: per[t] for t in order if per[t]}
-
-
-def _alloc_doc_structure(cand: list, plan: dict, acc_name: str, mix: dict,
-                         now=None) -> tuple:
-    """draft 模式 doc 结构: plan 主推事件 → (ordered, bench_items, 表头备注)。
-    事件行 = 代表帖(限量制一行一事件, 同源条数进说明)。"""
-    import datetime as _dt
-    now = now or _dt.datetime.now()
-    pa = (plan.get("per_account") or {}).get(acc_name) or {}
-    main_rows = _alloc_events_of(cand, plan, acc_name)   # [(ev, note, item)] 已按计划选帖
-    main_rows.sort(key=lambda r: (0 if _is_opinion(r[2]) else 1, -_rate(r[2], now)))
-    order = sorted(mix, key=lambda t: -mix[t])
-    per = {t: [] for t in order}
-    used: set = set()
-    for e, note, item in main_rows:
-        if e["key"] in used:
-            continue
-        n_dup = len(e["items"])
-        it = dict(item)                                  # 附说明不污染原条目
-        it["_alloc_note"] = note
-        it["_dup_n"] = n_dup if n_dup > 1 else 0
-        for t in sorted(e["topics"] & set(mix), key=lambda t: -mix[t]):
-            per[t].append(it)                            # 归入 mix 最高的命中主题
-            used.add(e["key"])
-            break
-    ordered = [(t, its) for t in order if per[t]]
-    bench = _alloc_bench_items(cand, plan, acc_name)
-    short = bool(pa.get("short"))
-    hdr = (f"主推{len(used)}行(限量分配, 全天名额制)·备选{len(bench)}行(可自选, 或与同类号重复)")
-    if short:
-        hdr += f"·⚠供给不足(命中{pa.get('quota', 0)}上限内只凑出{len(used)}行)"
-    return ordered, bench, hdr
-
-
-def _alloc_events_of(cand: list, plan: dict, acc_name: str) -> list:
-    """该号主推 → [(ev, note, item)]。渲染契约(v2): item 按计划的 rep_url 取帖
-    (大事件每号不同帖真正送达), 找不到退代表帖; 不再重建代表帖当唯一答案。"""
-    from sources import feishu_alloc
-    events = {e["key"]: e for e in feishu_alloc.cluster_events(cand)}
-    out = []
-    for m in ((plan.get("per_account") or {}).get(acc_name) or {}).get("main") or []:
-        e = events.get(m["key"])
-        if not e:
-            continue
-        item = next((x for x in e["items"] if x.get("url") == m.get("rep_url")), e["rep"])
-        out.append((e, m.get("note") or "", item))
-    return out
-
-
-def _alloc_bench_items(cand: list, plan: dict, acc_name: str) -> list:
-    from sources import feishu_alloc
-    events = {e["key"]: e for e in feishu_alloc.cluster_events(cand)}
-    out = []
-    for b in ((plan.get("per_account") or {}).get(acc_name) or {}).get("bench") or []:
-        e = events.get(b["key"])
-        if e:
-            it = dict(e["rep"])
-            it["_alloc_note"] = b.get("note") or ""
-            out.append(it)
-    return out
-
-
-def _alloc_card_per(cand: list, plan: dict, acc: dict, top_total: int,
-                    now=None) -> dict:
-    """draft 模式卡片路径: 主推事件按主题组织(与 _pick_for_account 同形输出);
-    取帖按计划 rep_url(渲染契约), 与 doc 路径同源不漂移。"""
-    mix = {str(k): float(v) for k, v in (acc.get("mix") or {}).items()
-           if str(k) in TOPICS and float(v) > 0}
-    if not mix:
-        return {}
-    rows = _alloc_events_of(cand, plan, str(acc.get("name") or "?"))  # [(ev,note,item)]
-    if not rows:
-        return {}
-    rows.sort(key=lambda r: (0 if _is_opinion(r[2]) else 1, -r[0]["fv"]))
-    order = sorted(mix, key=lambda t: -mix[t])
-    quota = _split_quota(mix, max(1, min(top_total, len(rows))))
-    per = {t: [] for t in order}
-    for e, _note, item in rows:
-        for t in sorted(e["topics"] & set(mix), key=lambda t: -mix[t]):
-            if len(per[t]) < quota.get(t, 0):
-                per[t].append(item)
-                break
-    return {t: v for t, v in per.items() if v}
 
 
 def _fmt_rate(r: float) -> str:
@@ -1339,29 +1252,10 @@ def run_account_push(dry_run: bool = False, force: bool = False,
     cand = [it for it in items if it["topics"]]
     rep["classified"] = len(cand)
     _enrich_stats(cand, max_handles=40)              # 热度: FxTwitter 现拉浏览量
-    # ── 限量分配(0925 MoA 定案): shadow=只算指标不改推送行为; draft=主推+备选替换全量 ──
     _now = _dt.datetime.now()
-    for it in cand:                                  # 分配引擎要的评分字段(FV+增速)
+    for it in cand:                                  # doc 行内的评分字段(FV+增速)
         it["_rate"] = _rate(it, _now)
         it["fv_s"], it["fv_tier"] = _fv_item_score(it, _now).split("·")
-    alloc_plan = None
-    alloc_mode = str((ap.get("alloc") or {}).get("mode") or "off")
-    if alloc_mode in ("shadow", "draft") and cand:
-        try:
-            from sources import feishu_alloc
-            # 无锚点档(手动/干跑)按补零时间名——分钟级快照键+字典序淘汰的坑一并防
-            slot_key = slot or time.strftime("%Y-%m-%d-%H:%M")
-            alloc_plan = feishu_alloc.allocate(
-                cand, ap["accounts"], slot_key,
-                cfg=dict((ap.get("alloc") or {})), persist=not dry_run, now=time.time())
-            rep["alloc"] = alloc_plan["summary"]
-            rep["alloc_mode"] = alloc_mode
-        except Exception as ex:
-            # fail-closed(K3 M1/grok#4/astra): draft 下 alloc 失败绝不静默回退全量
-            rep["errors"].append(f"alloc({type(ex).__name__}: {str(ex)[:80]})")
-            if alloc_mode == "draft":
-                rep["errors"].append("draft 模式 alloc 失败, 本档全部账号推送中止(不回退全量)")
-                rep["alloc_aborted"] = True
     if win_h is None:                                   # schedule 模式: 窗口起点=上次推送时刻
         bj = time.strftime("%m-%d %H:%M", time.strptime(since, "%Y-%m-%d %H:%M:%S")) \
             + "~" + time.strftime("%H:%M")
@@ -1377,21 +1271,13 @@ def run_account_push(dry_run: bool = False, force: bool = False,
     st = _load_state(_PUSH_STATE)
     docs_dirty = False
     for acc in ap["accounts"]:
-        if alloc_mode == "draft" and not alloc_plan:
-            rep["errors"].append(f"{acc.get('name') or '?'}: alloc 失败本档中止(fail-closed)")
-            continue
         mix = {str(k): float(v) for k, v in (acc.get("mix") or {}).items()
                if str(k) in TOPICS and float(v) > 0}
         if not mix:
             rep["errors"].append(f"{acc.get('name') or '?'}: mix 无效")
             continue
         if _doc_enabled(ap):
-            bench_items, alloc_hdr = [], ""
-            if alloc_mode == "draft" and alloc_plan:
-                ordered, bench_items, alloc_hdr = _alloc_doc_structure(
-                    cand, alloc_plan, str(acc.get("name") or "?"), mix)
-            else:
-                ordered = _doc_order_all(cand, mix)
+            ordered = _doc_order_all(cand, mix)
             rows_items = [it for _, its in ordered for it in its]
             if not rows_items:
                 rep["errors"].append(f"{acc.get('name') or '?'}: 窗口内无命中素材")
@@ -1401,23 +1287,9 @@ def run_account_push(dry_run: bool = False, force: bool = False,
                 rep["translated"] += _translate_missing(conf, rows_items, cap=200,
                                                         deadline=deadline)
             rows = _doc_rows(acc, mix, ordered, bj, len(cand))
-            if alloc_hdr:                              # short 表头进正式文档(astra #5)
-                rows[0][4] = f"{rows[0][4]} · {alloc_hdr}"
-            if bench_items:                          # draft 备选区(grok: 计入K·按人分列)
-                rows.append(["── 备选区(可自选, 可能与同类号重复) ──"] + [""] * (len(_DOC_COLS) - 1))
-                for it in bench_items:
-                    txt = str(it.get("text") or "").strip()
-                    zh = (it.get("text_zh") or "").strip()
-                    rows.append([
-                        "备选", "观点" if _is_opinion(it) else "资讯",
-                        str(it.get("author_handle") or ""), int(it.get("views") or 0),
-                        int(_rate(it, _now)), _fv_item_score(it, _now),
-                        _persona_score(zh or txt, mix),
-                        zh or txt, "" if (not zh) and _looks_zh(txt) else txt,
-                        str(it.get("url") or ""), str(it.get("time") or "")])
             if dry_run:
                 preview.append(f"[doc] {acc.get('name')} {title} 子表 {len(rows)} 行"
-                               f"(首行 {rows[0]}{'; ' + alloc_hdr if alloc_hdr else ''})")
+                               f"(首行 {rows[0]})")
                 continue
             token, url_or_err = _ensure_doc(conf, acc, ap, st)
             if not token:
@@ -1442,10 +1314,7 @@ def run_account_push(dry_run: bool = False, force: bool = False,
                     continue
                 rep["errors"].append(f"{acc.get('name') or '?'} doc回退消息: {werr or aerr}")
         # 消息卡片路径(doc 关闭或 doc 失败回退)
-        if alloc_mode == "draft" and alloc_plan:
-            per = _alloc_card_per(cand, alloc_plan, acc, ap["top_total"])
-        else:
-            per = _pick_for_account(cand, acc, ap["top_total"])
+        per = _pick_for_account(cand, acc, ap["top_total"])
         if not per:
             rep["errors"].append(f"{acc.get('name') or '?'}: 窗口内无命中素材")
             continue
