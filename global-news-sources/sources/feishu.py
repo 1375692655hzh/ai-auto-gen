@@ -457,18 +457,22 @@ def _is_opinion(it: dict) -> bool:
 
 _URL_RE = re.compile(r"https?://\S+")
 _PROMO_PAT = re.compile("需要的请扣|请扣1|免费工具|注册领取|订阅领取|bstocks"
-                        r"|free\s+webinar|webinar")
+                        r"|free\s+tool|free\s+webinar|webinar")
 
 
 def _quality_ok(it: dict) -> bool:
     """分发前公共质量闸(2026-10-14 用户裁决: 差内容在账号分配之前滤, 不留给消费端
     各自筛)——doc 表格推送与 /v1/alloc(档位/增量)共用本闸, 两侧口径保持一致:
-    ①剥 URL 后正文 <8 字 = 纯链接帖/晚安类空帖; ②推广口令帖(订阅导流/免费工具/
-    网络研讨会/bStocks 合约推广)。主题打标精度(A股帖漏进美股号)不归本闸, 属上游。"""
+    ①剥 URL 后原文 <8 字 = 纯链接/空帖; ②纯 ASCII 且单词帖 = 英文水帖(Goodnight:,
+    2 词短讯如 "NVDA earnings" 是 X 常见真格式不杀); ③推广口令帖(中英词表, 原文+
+    译文一起匹配——"免费工具"常只在译文里)。主题打标精度(A股帖漏进美股号)不归本闸, 属上游。"""
     body = re.sub(r"\s+", " ", _URL_RE.sub(" ", str(it.get("text") or ""))).strip()
+    zh = re.sub(r"\s+", " ", _URL_RE.sub(" ", str(it.get("text_zh") or ""))).strip()
     if len(body) < 8:
         return False
-    return not _PROMO_PAT.search(body.lower())
+    if not _CJK_RE.search(body) and len(body.split()) < 2:
+        return False
+    return not _PROMO_PAT.search((body + " " + zh).lower())
 
 
 _APAC_MKTS = ("香港", "台湾", "日本", "韩国")

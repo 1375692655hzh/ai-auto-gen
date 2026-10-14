@@ -101,7 +101,8 @@ def test_split_quota_largest_remainder_direction():
 def _mk(handle, topics, views, url, *, age_h=1.0, role="", itype="", text=None, zh=""):
     t = (_dt.datetime.now() - _dt.timedelta(hours=age_h)).strftime("%Y-%m-%d %H:%M")
     return {"author_handle": handle, "topics": set(topics), "views": views,
-            "likes": 0, "text": text or f"post-{handle}-{views}", "text_zh": zh,
+            "likes": 0, "text": text or f"market note {handle} views {views}",
+            "text_zh": zh,
             "url": url, "time": t, "author_role": role, "item_type": itype}
 
 
@@ -475,7 +476,7 @@ def test_quality_gate():
     from sources import feishu
     ok = lambda t: feishu._quality_ok({"text": t})
     assert ok("美联储威廉姆斯刚刚表示，他认为2027年不需要任何加息")
-    assert ok("post-h1-100")                       # 测试夹具长度不误伤
+    assert ok("market note h1 views 100")          # 多词英文夹具不误伤(单词水帖才滤)
     assert not ok("https://t.co/ELMgqGJK9L")       # 纯链接帖
     assert not ok("大家晚安：")                     # 空帖
     assert not ok("")                              # 空串
@@ -484,3 +485,15 @@ def test_quality_gate():
     assert not ok("用这款免费工具像专业人士一样分析持仓 https://t.co/wJrRPWc9mi")
     assert not ok("买了bStocks，想开合约，还得卖吗？一份资产，双重获利 https://t.co/x")
     assert ok("CPI 数据将于美国东部时间 08:30 发布 https://t.co/abc")  # 带链接的正文帖不误伤
+
+
+def test_quality_gate_bilingual():
+    """质量闸二轮: 英文水帖(词数)与'口令只在译文里'的英文推广帖。"""
+    from sources import feishu
+    ok = lambda t, zh="": feishu._quality_ok({"text": t, "text_zh": zh})
+    assert not ok("Goodnight:")                                  # 1 词英文水帖
+    assert not ok("Do you hold stocks? Analyze them like a pro with this free tool: https://t.co/x")
+    assert not ok("Check out this amazing tool https://t.co/x",
+                  "快用这款免费工具分析你的持仓 https://t.co/x")     # 口令只在译文
+    assert ok("Fed officials signal no rate hike in October, futures pricing shows")
+    assert ok("BREAKING: CPI rises 3% year over year")
