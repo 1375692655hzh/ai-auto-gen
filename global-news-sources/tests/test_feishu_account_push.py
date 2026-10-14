@@ -497,3 +497,12 @@ def test_quality_gate_bilingual():
                   "快用这款免费工具分析你的持仓 https://t.co/x")     # 口令只在译文
     assert ok("Fed officials signal no rate hike in October, futures pricing shows")
     assert ok("BREAKING: CPI rises 3% year over year")
+
+
+def test_quality_gate_signoff():
+    """质量闸三轮: 多词英文晚安帖(Good night to everyone)中英双形都拦。"""
+    from sources import feishu
+    ok = lambda t, zh="": feishu._quality_ok({"text": t, "text_zh": zh})
+    assert not ok("Good night to everyone:", "@unusual_whales: 大家晚安：")
+    assert not ok("大家晚安，明天见：")
+    assert ok("That was a good night for Asia-Pacific futures markets")  # 正文提及不误杀
