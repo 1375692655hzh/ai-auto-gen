@@ -475,7 +475,7 @@ def _quality_ok(it: dict) -> bool:
         return False
     if not _CJK_RE.search(body) and len(body.split()) < 2:
         return False
-    if _SIGNOFF_RE.match(body):
+    if _SIGNOFF_RE.match(body) or "大家晚安" in body or "大家晚安" in zh:
         return False
     return not _PROMO_PAT.search((body + " " + zh).lower())
 
