@@ -40,9 +40,10 @@ GET /v1/alloc
 ```
 GET /v1/alloc/{账号名}                     → 该账号最新一档
 GET /v1/alloc/{账号名}?slot=2026-10-14-8   → 指定档位
+GET /v1/alloc/{账号名}?since=2026-10-14 18:00:00   → 增量模式(定时轮询拉新帖)
 ```
 
-返回结构（节选，实机实测）：
+档位模式与增量模式**二选一**（同时传 `slot` 与 `since` 返回 400）。返回结构（节选，实机实测）：
 
 ```json
 {
@@ -61,6 +62,7 @@ GET /v1/alloc/{账号名}?slot=2026-10-14-8   → 指定档位
       "fv": "70·P1",             // 金融价值分·档位(P0≥75/P1≥60/P2≥40/P3)
       "url": "https://x.com/StockMKTNewz/status/...",
       "time": "2026-10-14 02:20",
+      "fetched_at": "2026-10-14 07:59:00",  // 入库时间(数据站抓到它的时刻)
       "author": "StockMKTNewz",
       "text": "BREAKING: Williams says ...",
       "text_zh": "美联储威廉姆斯刚刚表示…",   // 译文缺失时为空串, 自行回退 text
@@ -82,10 +84,26 @@ GET /v1/alloc/{账号名}?slot=2026-10-14-8   → 指定档位
 | 字段 | 说明 |
 |---|---|
 | items | 全量命中帖数组，顺序即推荐阅读序（主题段→观点→时间） |
-| window | 档位窗口 `[上一锚点, 本锚点)`；8 点档覆盖昨日最末锚点以来的 overnight |
+| window | 取数窗口；档位模式=`[上一锚点, 本锚点)`（8 点档覆盖 overnight），增量模式=`[since, now)` |
+| fetched_at | **入库时间**（数据站抓到该帖的时刻）；`time`=发帖时间。**增量/批次归属按 fetched_at 判，判重用 url**（相邻批次按发帖时间看会有少量交叠） |
 | fv | 金融价值分·档位，排序/筛选建议直接用 P 档 |
 | text_zh | 中文译文；空串=未翻译，展示时回退 text（与飞书表规则一致） |
 | dup_count | 同源多帖已在库侧合并，>1 表示同源还有 N-1 条 |
+
+### 3. 增量模式（定时轮询拉新帖）
+
+```
+GET /v1/alloc/{账号名}?since=<上次响应的 cursor>
+```
+
+- 窗口 = `[since, now)` 按 **fetched_at（入库时刻）** 切——"上次拉取之后新入库的帖"；
+- 响应带 `mode: "incremental"` 和 `cursor`（= 本次窗口上界，服务器时钟）；
+  **下次调用 `?since=<cursor>` 接续**；空结果 cursor 照样前进，不会卡住；
+- `since` 接受 `YYYY-MM-DD HH:MM:SS` / `YYYY-MM-DD HH:MM` / `YYYY-MM-DD`（T 分隔亦可）；
+  传未来时间返回 400（提示以响应 cursor 为准，别用客户端本地钟推算）；
+- 轮询节奏随意（典型 15~30 分钟一次，对齐数据站 15min 抓取节奏最省）；
+- 单窗口护栏 `LIMIT 400`（按发帖时间取最新 400 条），拉取间隔别超过一天；首启冷启动
+  建议先用档位模式拿一档做基线，再切增量模式从该档锚点时刻起拉。
 
 ## 三、怎么配（鉴权与配额）
 
@@ -130,6 +148,10 @@ curl -H "Authorization: Bearer <key>" https://<数据站地址>/v1/alloc/WCixot
 # 指定档位(小时可不补零; 补零 "08" 也能识别, 返回会归一为 "-8")
 curl -H "Authorization: Bearer <key>" \
   "https://<数据站地址>/v1/alloc/WCixot?slot=2026-10-14-8"
+
+# 增量模式(定时轮询; since 用上次响应的 cursor, 空格需 URL 编码为 %20)
+curl -H "Authorization: Bearer <key>" \
+  "https://<数据站地址>/v1/alloc/WCixot?since=2026-10-14%2018:53:20"
 
 # 中文账号名需 URL 编码(如 "花街 S 姐" → %E8%8A%B1%E8%A1%97%20S%20%E5%A7%90)
 curl -H "Authorization: Bearer <key>" \

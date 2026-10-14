@@ -8,7 +8,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from sources.serve import (_norm_hours, _parse_slot, _slot_window,
-                           _latest_anchor, _anchor_dt)
+                           _latest_anchor, _anchor_dt, _parse_since)
 
 SCH = [8, 11, 17]
 D = dt.date(2026, 10, 14)
@@ -60,3 +60,18 @@ def test_latest_anchor():
 def test_anchor_dt_midnight():
     assert _anchor_dt(D, 24) == dt.datetime(2026, 10, 15, 0)
     assert _anchor_dt(D, 8) == dt.datetime(2026, 10, 14, 8)
+
+
+def test_parse_since_formats():
+    want = dt.datetime(2026, 10, 14, 18, 0, 0)
+    assert _parse_since("2026-10-14 18:00:00") == want
+    assert _parse_since("2026-10-14 18:00") == want
+    assert _parse_since("2026-10-14T18:00:00") == want          # ISO T 分隔
+    assert _parse_since(" 2026-10-14 18:00:00 ") == want
+    assert _parse_since("2026-10-14") == dt.datetime(2026, 10, 14)
+    for bad in ("", "abc", "2026-10-14 25:00", "14/10/2026"):
+        try:
+            _parse_since(bad)
+            raise AssertionError(f"应拒绝: {bad!r}")
+        except ValueError:
+            pass

@@ -69,6 +69,17 @@ def _slot_window(d, h: int, hours: list):
     return _anchor_dt(pd, ph), until
 
 
+def _parse_since(s: str):
+    """增量游标 'YYYY-MM-DD[ HH:MM[:SS]]'(T 分隔亦可) → datetime; 非法抛 ValueError。"""
+    v = s.strip().replace("T", " ")
+    for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M", "%Y-%m-%d"):
+        try:
+            return _dt.datetime.strptime(v, fmt)
+        except ValueError:
+            continue
+    raise ValueError("since 格式应为 YYYY-MM-DD HH:MM:SS, 如 2026-10-14 18:00:00")
+
+
 # ── 鉴权与配额 ──────────────────────────────────────────────────────────────
 
 def _keys_path() -> Path:
@@ -282,12 +293,14 @@ def create_app():
                         " 返回该账号窗口内全量命中清单(与飞书表格同口径, 无限量分配)}"}
 
     @app.get("/v1/alloc/{account}")
-    def alloc_account(request: Request, account: str, slot: str = ""):
-        """账号 × 档位的全量命中清单: 窗口内该账号主题命中的全部 X 帖(与飞书表格
-        子页同口径, 2026-10-14 起不做限量分配)。查询=推送同款(fetched_at 窗口 +
-        '%twitter%' 源 + LIMIT 400 + URL 去重 + 剥 @作者: 前缀); 排序=主题(mix 降序)
-        →观点在前→时间降序; 一帖一行(表格中多主题帖会在多个主题段重复, 此处不重复,
-        themes 列出全部命中主题)。"""
+    def alloc_account(request: Request, account: str, slot: str = "",
+                      since: str = ""):
+        """账号选题全量清单(与飞书表格同口径, 2026-10-14 起不做限量分配)。
+        两种取数模式(二选一):
+        - 档位模式: ?slot=YYYY-M-D-H(或缺省=最新锚点档), 窗口=[上一锚点,本锚点);
+        - 增量模式: ?since=<时间>(入库时刻起), 窗口=[since, now), 定时轮询拉新帖用,
+          响应 cursor=本次窗口上界, 下次 ?since=<cursor> 接续, 空结果 cursor 照样前进。
+        条目带 fetched_at(入库时间); 排序=主题(mix 降序)→观点→时间降序; 一帖一行。"""
         from . import feishu
         ap = feishu._push_conf(feishu._conf())
         acc = next((a for a in ap["accounts"]
@@ -297,33 +310,49 @@ def create_app():
                 {"error": f"unknown account '{account}'",
                  "accounts": [str(a.get("name")) for a in ap["accounts"]]},
                 status_code=404)
-        hours = _norm_hours(ap["schedule"])
-        if not hours:
-            return JSONResponse(
-                {"error": "account_push.schedule 未配置, 无法定位档位窗口"},
-                status_code=400)
         now = _dt.datetime.now()
-        if slot:
+        incremental = bool(since)
+        if incremental and slot:
+            return JSONResponse({"error": "slot 与 since 二选一"}, status_code=400)
+        hours = _norm_hours(ap["schedule"])
+        if incremental:
             try:
-                d, h = _parse_slot(slot)
+                since_dt = _parse_since(since)
             except ValueError as ex:
                 return JSONResponse({"error": str(ex)}, status_code=400)
+            if since_dt > now:
+                return JSONResponse(
+                    {"error": f"since 在未来({since_dt:%Y-%m-%d %H:%M:%S} > 服务器现在"
+                              f" {now:%Y-%m-%d %H:%M:%S}); 游标应取上次响应的 cursor"},
+                    status_code=400)
+            since, until = since_dt, now
         else:
-            la = _latest_anchor(hours, now)
-            if la is None:
-                return JSONResponse({"error": "今日锚点尚未到来"}, status_code=404)
-            d, h = la
-        if h not in hours:
-            return JSONResponse(
-                {"error": f"档位 {h} 不在 schedule 中",
-                 "schedule": hours,
-                 "valid_slots_of_day": [f"{d:%Y-%m-%d}-{a}" for a in hours]},
-                status_code=404)
-        since, until = _slot_window(d, h, hours)
-        if until > now:
-            return JSONResponse({"error": f"档位 {d:%Y-%m-%d}-{h} 尚未到来"
-                                          f"(锚点时刻 {until:%Y-%m-%d %H:%M})"},
-                                status_code=404)
+            if not hours:
+                return JSONResponse(
+                    {"error": "account_push.schedule 未配置, 无法定位档位窗口"
+                              "(增量拉取请用 ?since= 参数)"},
+                    status_code=400)
+            if slot:
+                try:
+                    d, h = _parse_slot(slot)
+                except ValueError as ex:
+                    return JSONResponse({"error": str(ex)}, status_code=400)
+            else:
+                la = _latest_anchor(hours, now)
+                if la is None:
+                    return JSONResponse({"error": "今日锚点尚未到来"}, status_code=404)
+                d, h = la
+            if h not in hours:
+                return JSONResponse(
+                    {"error": f"档位 {h} 不在 schedule 中",
+                     "schedule": hours,
+                     "valid_slots_of_day": [f"{d:%Y-%m-%d}-{a}" for a in hours]},
+                    status_code=404)
+            since, until = _slot_window(d, h, hours)
+            if until > now:
+                return JSONResponse({"error": f"档位 {d:%Y-%m-%d}-{h} 尚未到来"
+                                              f"(锚点时刻 {until:%Y-%m-%d %H:%M})"},
+                                    status_code=404)
         mix = {str(k): float(v) for k, v in (acc.get("mix") or {}).items()
                if str(k) in feishu.TOPICS and float(v) > 0}
         if not mix:
@@ -333,8 +362,8 @@ def create_app():
         try:
             rows = conn.execute(
                 "SELECT time, text, text_zh, url, author_handle, sectors, markets, "
-                "item_type, author_role, tickers, event_type, dup_count, positioning "
-                "FROM items WHERE fetched_at>=? AND fetched_at<? "
+                "item_type, author_role, tickers, event_type, dup_count, positioning, "
+                "fetched_at FROM items WHERE fetched_at>=? AND fetched_at<? "
                 "AND source_id LIKE '%twitter%' ORDER BY time DESC LIMIT 400",
                 (since.strftime("%Y-%m-%d %H:%M:%S"),
                  until.strftime("%Y-%m-%d %H:%M:%S"))).fetchall()
@@ -352,7 +381,7 @@ def create_app():
                           "author_handle": r[4], "sectors": r[5], "markets": r[6],
                           "item_type": r[7], "author_role": r[8], "tickers": r[9],
                           "event_type": r[10], "dup_count": r[11],
-                          "positioning": r[12]})
+                          "positioning": r[12], "fetched_at": r[13]})
         try:
             a_topics = feishu._author_topics()
         except Exception:
@@ -377,6 +406,7 @@ def create_app():
                             "type": "观点" if feishu._is_opinion(it) else "资讯",
                             "fv": feishu._fv_item_score(it, now),
                             "url": it["url"], "time": it["time"],
+                            "fetched_at": it["fetched_at"],
                             "author": it["author_handle"],
                             "text": it["text"], "text_zh": it["text_zh"],
                             "sectors": it["sectors"], "markets": it["markets"],
@@ -390,8 +420,8 @@ def create_app():
             return JSONResponse({"error": why}, status_code=429,
                                 headers={"Retry-After": "60"})
         request.state.n_items = len(out)
-        return {"account": account, "owner": str(acc.get("owner") or "?"),
-                "mix": mix, "slot": f"{d:%Y-%m-%d}-{h}",
+        resp = {"account": account, "owner": str(acc.get("owner") or "?"),
+                "mix": mix,
                 "window": {"since": since.strftime("%Y-%m-%d %H:%M"),
                            "until": until.strftime("%Y-%m-%d %H:%M")},
                 "total": len(out),
@@ -400,6 +430,15 @@ def create_app():
                 "items": out,
                 "note": "全量命中清单, 与飞书表格同口径(一帖一行; 表格中多主题帖"
                         "会在多个主题段重复, 此处归入 mix 最高主题, themes 列全量)"}
+        if incremental:
+            resp["mode"] = "incremental"
+            resp["cursor"] = until.strftime("%Y-%m-%d %H:%M:%S")
+            resp["note"] = ("增量模式: 窗口=[since, now) 按 fetched_at(入库时刻)切, "
+                            "空结果 cursor 照样前进; 下次调用 ?since=<cursor>。"
+                            "条目 time=发帖时间, fetched_at=入库时间, 相邻拉取按 url 判重")
+        else:
+            resp["slot"] = f"{d:%Y-%m-%d}-{h}"
+        return resp
 
     @app.post("/v1/sources/{sid}/enabled")
     async def source_enabled(sid: str, request: Request):
