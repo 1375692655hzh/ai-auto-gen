@@ -382,6 +382,7 @@ def create_app():
                           "item_type": r[7], "author_role": r[8], "tickers": r[9],
                           "event_type": r[10], "dup_count": r[11],
                           "positioning": r[12], "fetched_at": r[13]})
+        items = [it for it in items if feishu._quality_ok(it)]  # 分发前公共质量闸(与doc同闸)
         try:
             a_topics = feishu._author_topics()
         except Exception:

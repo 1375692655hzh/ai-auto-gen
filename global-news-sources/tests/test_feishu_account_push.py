@@ -468,3 +468,19 @@ def test_push_conf_schedule_passthrough():
     ap = feishu._push_conf(conf)
     assert ap["schedule"] == [9, 13, 17, 21, 24]
     assert feishu._push_conf({"account_push": {}})["schedule"] == []        # 缺省回落 interval_h 制
+
+
+def test_quality_gate():
+    """分发前公共质量闸(doc 表格与 /v1/alloc 同闸): 纯链接/空帖/推广口令不入清单。"""
+    from sources import feishu
+    ok = lambda t: feishu._quality_ok({"text": t})
+    assert ok("美联储威廉姆斯刚刚表示，他认为2027年不需要任何加息")
+    assert ok("post-h1-100")                       # 测试夹具长度不误伤
+    assert not ok("https://t.co/ELMgqGJK9L")       # 纯链接帖
+    assert not ok("大家晚安：")                     # 空帖
+    assert not ok("")                              # 空串
+    assert not ok("我们的量化选股将来会开通推特订阅，需要的请扣1 https://t.co/x")
+    assert not ok("I'm giving a free webinar about Quality Investing https://t.co/x")
+    assert not ok("用这款免费工具像专业人士一样分析持仓 https://t.co/wJrRPWc9mi")
+    assert not ok("买了bStocks，想开合约，还得卖吗？一份资产，双重获利 https://t.co/x")
+    assert ok("CPI 数据将于美国东部时间 08:30 发布 https://t.co/abc")  # 带链接的正文帖不误伤

@@ -453,6 +453,24 @@ def _is_opinion(it: dict) -> bool:
     if str(it.get("item_type") or "") == "分析":
         return True
     return bool(_OPINION_PAT.search(it.get("text") or ""))
+
+
+_URL_RE = re.compile(r"https?://\S+")
+_PROMO_PAT = re.compile("需要的请扣|请扣1|免费工具|注册领取|订阅领取|bstocks"
+                        r"|free\s+webinar|webinar")
+
+
+def _quality_ok(it: dict) -> bool:
+    """分发前公共质量闸(2026-10-14 用户裁决: 差内容在账号分配之前滤, 不留给消费端
+    各自筛)——doc 表格推送与 /v1/alloc(档位/增量)共用本闸, 两侧口径保持一致:
+    ①剥 URL 后正文 <8 字 = 纯链接帖/晚安类空帖; ②推广口令帖(订阅导流/免费工具/
+    网络研讨会/bStocks 合约推广)。主题打标精度(A股帖漏进美股号)不归本闸, 属上游。"""
+    body = re.sub(r"\s+", " ", _URL_RE.sub(" ", str(it.get("text") or ""))).strip()
+    if len(body) < 8:
+        return False
+    return not _PROMO_PAT.search(body.lower())
+
+
 _APAC_MKTS = ("香港", "台湾", "日本", "韩国")
 _EDU_PAT = re.compile("教学|课程|科普|入门|教程|教育|方法论|怎么读|一文读懂|估值课")
 _TAG_TOPIC = {"美股": "美股", "加密": "加密", "AI": "AI与科技", "科技": "AI与科技",
@@ -1250,7 +1268,10 @@ def run_account_push(dry_run: bool = False, force: bool = False,
         it["topics"] = _item_topics(it["sectors"], it["markets"],
                                      it["author_handle"], a_topics, it["text"])
     cand = [it for it in items if it["topics"]]
+    n0 = len(cand)
+    cand = [it for it in cand if _quality_ok(it)]     # 分发前公共质量闸(doc/API同闸)
     rep["classified"] = len(cand)
+    rep["junk_filtered"] = n0 - len(cand)
     _enrich_stats(cand, max_handles=40)              # 热度: FxTwitter 现拉浏览量
     _now = _dt.datetime.now()
     for it in cand:                                  # doc 行内的评分字段(FV+增速)
