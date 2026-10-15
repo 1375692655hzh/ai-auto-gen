@@ -28,6 +28,7 @@ def _load(alias: str, path: Path):
 
 gs = _load("gen_sources", _FETCHERS / "basic.py")          # fetchers/basic.py
 ges = _load("gen_extra_sources", _FETCHERS / "extra.py")   # fetchers/extra.py
+fa = _load("gen_finance_all", _FETCHERS / "finance_all.py")  # fetchers/finance_all.py
 
 from sources.base import source            # noqa: E402
 
@@ -385,6 +386,63 @@ def _wscn_live(conf):
         ttl_min=15, default_enabled=True)
 def _longbridge(conf):
     return gs.fetch_longbridge_topics(int(conf.get("page_size", 10)))
+
+
+# ---------- finance-all 接入(2026-10-15, 原型 E:\finance-all 实测通道移植) ----------
+
+@source("futu_columns", "peer_article", "富途市场栏目五件套", ttl_min=120, default_enabled=True)
+def _futu_cols(conf):
+    return fa.fetch_futu_columns(int(conf.get("pages", 4)))
+
+
+@source("futu_newsflow", "flash", "富途资讯流", ttl_min=30, default_enabled=True)
+def _futu_flow(conf):
+    return fa.fetch_futu_newsflow(int(conf.get("page_size", 24)))
+
+
+@source("cls_morning_hk", "peer_article", "财联社港股早报", ttl_min=120, default_enabled=True)
+def _cls_hk(conf):
+    return fa.fetch_cls_morning_series("8705")
+
+
+@source("cls_morning_star", "peer_article", "财联社科创板早报", ttl_min=120, default_enabled=True)
+def _cls_star(conf):
+    return fa.fetch_cls_morning_series("2012")
+
+
+@source("cls_hot_rank", "peer_article", "财联社热门文章榜", ttl_min=60, default_enabled=True)
+def _cls_hot(conf):
+    return fa.fetch_cls_hot(int(conf.get("page_size", 12)))
+
+
+@source("wscn_hot_rank", "peer_article", "华尔街见闻最热文章日榜", ttl_min=60, default_enabled=True)
+def _wscn_hot(conf):
+    return fa.fetch_wscn_hot(int(conf.get("page_size", 10)))
+
+
+@source("lb_dolphin", "peer_article", "长桥海豚投研", ttl_min=120, default_enabled=True)
+def _lb_dolphin(conf):
+    return fa.fetch_lb_dolphin(int(conf.get("page_size", 10)))
+
+
+@source("lb_news", "peer_article", "长桥资讯(海外翻译源)", ttl_min=60, default_enabled=True)
+def _lb_news(conf):
+    return fa.fetch_lb_news(int(conf.get("page_size", 15)))
+
+
+@source("zhitong_us", "peer_article", "智通财经美股频道", ttl_min=30, default_enabled=True)
+def _zhitong(conf):
+    return fa.fetch_zhitong_us(int(conf.get("pages", 2)), int(conf.get("page_size", 30)))
+
+
+@source("jin10_market", "peer_article", "金十·市场参考", ttl_min=60, default_enabled=True)
+def _jin10_mkt(conf):
+    return fa.fetch_jin10_market(int(conf.get("page_size", 20)))
+
+
+@source("laohu_news", "flash", "老虎证券资讯流", ttl_min=30, default_enabled=True)
+def _laohu(conf):
+    return fa.fetch_laohu_news(int(conf.get("pages", 2)), int(conf.get("page_size", 30)))
 
 
 @source("jin10_calendar", "market", "金十财经日历",
