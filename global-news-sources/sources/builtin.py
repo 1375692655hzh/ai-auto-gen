@@ -445,6 +445,11 @@ def _laohu(conf):
     return fa.fetch_laohu_news(int(conf.get("pages", 2)), int(conf.get("page_size", 30)))
 
 
+@source("lb_kol", "peer_article", "长桥社区大V帖", ttl_min=60, default_enabled=True)
+def _lb_kol(conf):
+    return fa.fetch_lb_kol(int(conf.get("page_size", 10)))
+
+
 @source("jin10_calendar", "market", "金十财经日历",
         ttl_min=360, default_enabled=False)
 def _jin10_cal(conf):

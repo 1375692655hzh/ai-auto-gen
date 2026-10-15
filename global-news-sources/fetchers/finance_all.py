@@ -39,7 +39,7 @@ FUTU_COLUMNS = {              # 早报除外——既有源 futu_morning 已覆�
     "美股收盘": "富途美股收盘",
 }
 LB_CHANNEL = "WHAB0001"
-LB_OP_FILTER = re.compile(r"交易展示会|抽奖|任务币|每日市场热议|活动|CLI 上新")
+LB_OP_FILTER = re.compile(r"交易展示会|抽奖|任务币|每日市场热议|活动|CLI 上新|MARKET TALK")
 
 
 def _get(url, referer=None, timeout=20):
@@ -315,6 +315,25 @@ def fetch_lb_dolphin(page_size: int = 10) -> list:
 
 def fetch_lb_news(page_size: int = 15) -> list:
     return _lb_list("news", "长桥资讯", "news", page_size)
+
+
+def fetch_lb_kol(page_size: int = 10) -> list:
+    """长桥社区大V帖(大V文)。运营帖过滤沿袭上游 LB_OP_FILTER。"""
+    html_text = _get(f"https://longbridge.com/zh-CN/topics?channel={LB_CHANNEL}")
+    out = []
+    for pid, title in _lb_pair(html_text, r'href="/zh-CN/topics/(\d+)')[:int(page_size)]:
+        if LB_OP_FILTER.search(title):
+            continue
+        url = f"https://longbridge.com/zh-CN/topics/{pid}?channel={LB_CHANNEL}"
+        eid = "topic_" + pid
+        text = ""
+        if _is_new(eid):
+            text = _detail_safe(lambda: "\n\n".join(_paragraphs_from_html(_get(url))))
+            if text:
+                _mark_seen(eid)
+        if text:
+            out.append(_item(title.strip(), text, url, None, "长桥社区"))
+    return out
 
 
 # ---------- 8. 智通财经美股频道(全文) ----------
