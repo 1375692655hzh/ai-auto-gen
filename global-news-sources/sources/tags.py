@@ -179,7 +179,7 @@ NOTES = {
     "zhitong_us": "finance-all移植; 列表无时间戳靠store去重, 详情SSR全文",
     "jin10_market": "finance-all移植; NUXT表达式需node求值(云端有node), 与jin10_flash不同通道",
     "laohu_news": "finance-all移植; 必须lang=zh_CN, 91000000=临时风控重试",
-    "gangtise_daily": "OpenAPI积分源: 列表0.1/条+正文10/篇, seen防重复下载; active_hours=05:30-09:30省积分; AK/SK在config.local.yaml; 旧gangtise/yuanbao_gangtise通道零产出",
+    "gangtise_daily": "OpenAPI积分源: 列表0.1/条+正文10/篇, seen防重复下载; **每天只拉两跳=06:45+07:00(用户1019定案, active_hours双窗+ttl10必须小于跳间隔)**; AK/SK在config.local.yaml; 旧gangtise/yuanbao_gangtise通道零产出",
     "cimi_wx": "余额计费源: 列表4/次+正文1/篇; **AppID=0933535266带前导零, YAML必须引号, 报4102先数位数**; 账号级window/daily_stop/title_match; 无账号=零成本空转",
     "cimi_premium": "精品文章双号(invest wallstreet日更多篇+半导体行业观察); 计费主闸interval_min=180(空结果不受TTL保护全靠它); 本地config应enabled:false防与云端双扣费",
     "lb_kol": "finance-all移植; topics SSR; 运营帖过滤(交易展示会/抽奖/任务币等)",

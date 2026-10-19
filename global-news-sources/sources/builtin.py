@@ -452,10 +452,12 @@ def _lb_kol(conf):
     return fa.fetch_lb_kol(int(conf.get("page_size", 10)))
 
 
-# ---------- Gangtise OpenAPI(2026-10-19): 积分计费源, 活动窗口 05:30-09:30 ----------
+# ---------- Gangtise OpenAPI(2026-10-19): 积分计费源; 用户定案每天只拉 06:45/07:00 两跳 ----------
+# 15min 刷新栅格下, "06:40-06:55"只含 06:45 一跳、"07:00-07:15"只含 07:00 一跳(07:15 被 cur<b 排除);
+# ttl 必须小于两跳间隔(15min), 否则第二跳吃缓存不真拉。
 
-@source("gangtise_daily", "peer_article", "Gangtise投研日报", ttl_min=30,
-        default_enabled=True, active_hours="05:30-09:30")
+@source("gangtise_daily", "peer_article", "Gangtise投研日报", ttl_min=10,
+        default_enabled=True, active_hours="06:40-06:55,07:00-07:15")
 def _gts_daily(conf):
     return gts.fetch_gangtise_daily(conf.get("access_key", ""),
                                     conf.get("secret_key", ""),
