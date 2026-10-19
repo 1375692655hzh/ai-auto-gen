@@ -472,6 +472,15 @@ def _cimi_wx(conf):
     return cmi.fetch_cimi_wx(conf or {})
 
 
+# 精品文章专用通道(2026-10-19 用户定案): invest wallstreet + 半导体行业观察,
+# form=精品文章; 账号在 config cimi_premium 段, 计费主闸 interval_min=180。
+
+@source("cimi_premium", "peer_article", "公众号精品文·次幂数据", ttl_min=60,
+        default_enabled=True, active_hours="07:00-22:00")
+def _cimi_premium(conf):
+    return cmi.fetch_cimi_wx(conf or {})
+
+
 @source("jin10_calendar", "market", "金十财经日历",
         ttl_min=360, default_enabled=False)
 def _jin10_cal(conf):
