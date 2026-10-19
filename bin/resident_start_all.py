@@ -67,9 +67,9 @@ def start_omniroute() -> None:
 
 
 def main() -> int:
+    # 2026-10-20 本地退役数据站双跑: 生产站在云端(haiwai.ltd), 本地 8787 站+8786 台拆除,
+    # 只自愈工作台与翻译桥。要临时恢复本地站, 把 sources serve/console 两行加回。
     steps = [("workbench serve", lambda: start_cli("workbench", "serve")),
-             ("sources serve", lambda: start_cli("sources", "serve")),
-             ("sources console", lambda: start_cli("sources", "console")),
              ("omniroute", start_omniroute)]
     for name, fn in steps:
         try:
