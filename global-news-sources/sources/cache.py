@@ -27,14 +27,15 @@ def _key(source_id: str, conf: dict) -> Path:
     return _cache_dir() / f"{source_id}__{h}.json"
 
 
-def load(source_id: str, conf: dict, ttl_min: int) -> list | None:
-    """TTL 内命中返回 items; 未命中/过期/损坏返回 None。"""
+def load(source_id: str, conf: dict, ttl_min: int, ignore_ttl: bool = False) -> list | None:
+    """TTL 内命中返回 items; 未命中/过期/损坏返回 None。
+    ignore_ttl=True 返回任意年龄的缓存(活动窗口外取最近一次, 不触发外网)。"""
     f = _key(source_id, conf)
     if not f.exists():
         return None
     try:
         d = json.loads(f.read_text(encoding="utf-8"))
-        if time.time() - d.get("ts", 0) < ttl_min * 60:
+        if ignore_ttl or time.time() - d.get("ts", 0) < ttl_min * 60:
             return d.get("items")
     except Exception:
         pass

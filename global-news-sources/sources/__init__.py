@@ -15,7 +15,10 @@
 
 import os
 import re
+import time
+from datetime import datetime
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 IMPORT_ERRORS = []          # 防炸库: 注册期异常记这里, 已注册条目继续可用
 try:
@@ -112,13 +115,39 @@ def list_sources(markets: list | None = None, channels: list | None = None,
     return sorted(out, key=lambda m: (m["kind"], m["id"]))
 
 
+def _in_active_window(spec: str) -> bool:
+    """活动窗口判定(北京时间, 与服务器时区无关): spec="HH:MM-HH:MM[,HH:MM-HH:MM...]"。
+    支持跨午夜(22:00-02:00); 缺省/解析失败返回 True(不设限, 行为同旧版)。"""
+    if not spec:
+        return True
+    now = datetime.now(ZoneInfo("Asia/Shanghai"))
+    cur = now.hour * 60 + now.minute
+    for win in str(spec).split(","):
+        m = re.match(r"^\s*(\d{1,2}):(\d{2})\s*-\s*(\d{1,2}):(\d{2})\s*$", win)
+        if not m:
+            continue
+        a = int(m.group(1)) * 60 + int(m.group(2))
+        b = int(m.group(3)) * 60 + int(m.group(4))
+        if a <= b:
+            if a <= cur < b:
+                return True
+        elif cur >= a or cur < b:          # 跨午夜窗口
+            return True
+    return False
+
+
 def fetch_one(source_id: str, conf: dict | None = None, fresh: bool = False):
-    """单源抓取(带 TTL 缓存与健康记录)。返回 (items, error); error="" 即成功。"""
+    """单源抓取(带 TTL 缓存与健康记录)。返回 (items, error); error="" 即成功。
+    meta.active_hours(如 "06:00-10:30")配置后, 窗口外不碰外网——返回最近一次缓存。"""
     if source_id not in REGISTRY:
         return [], f"未知来源: {source_id} (已注册: {sorted(REGISTRY)})"
     e = REGISTRY[source_id]
     conf = conf or _cfg_section().get(source_id) or {}
     if not fresh:
+        ah = e["meta"].get("active_hours") or ""
+        if ah and not _in_active_window(ah):
+            # 活动窗口外: 按日发布的源此时段永无新内容, 取最近缓存(可能为空), 不记健康
+            return _cache.load(source_id, conf, e["meta"]["ttl_min"], ignore_ttl=True) or [], ""
         hit = _cache.load(source_id, conf, e["meta"]["ttl_min"])
         if hit is not None:
             return hit, ""

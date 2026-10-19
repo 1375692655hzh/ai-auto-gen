@@ -23,10 +23,13 @@ KIND_TO_FORM = {"flash": "flash", "peer_article": "morning", "announcement": "an
 def source(id: str, kind: str, title: str = "", risk: str = "low",
            auth: str = "none", ttl_min: int = 30, default_enabled: bool = False,
            markets: list | None = None, channel: str = "", form: str = "",
-           lang: str = "", conf_schema: dict | None = None):
+           lang: str = "", conf_schema: dict | None = None,
+           active_hours: str = ""):
     """注册一个来源。run(conf: dict) -> list[dict]; 失败抛异常(由上层记录健康)。
 
     markets/channel/form/lang/conf_schema 缺省时由 sources/tags.py 回填表兜底。
+    active_hours: "HH:MM-HH:MM[,..]"(北京时间)——窗口外刷新环跳过该源外网请求,
+    供按日定时发布的源(早报类)砍掉全天无效探查; 付费源同时省积分。
     """
     def deco(fn):
         REGISTRY[id] = {
@@ -36,7 +39,8 @@ def source(id: str, kind: str, title: str = "", risk: str = "low",
                      "default_enabled": default_enabled,
                      "markets": markets or [], "channel": channel,
                      "form": form or KIND_TO_FORM.get(kind, "flash"),
-                     "lang": lang, "conf_schema": conf_schema or {}},
+                     "lang": lang, "conf_schema": conf_schema or {},
+                     "active_hours": active_hours},
         }
         return fn
     return deco

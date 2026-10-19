@@ -29,6 +29,7 @@ def _load(alias: str, path: Path):
 gs = _load("gen_sources", _FETCHERS / "basic.py")          # fetchers/basic.py
 ges = _load("gen_extra_sources", _FETCHERS / "extra.py")   # fetchers/extra.py
 fa = _load("gen_finance_all", _FETCHERS / "finance_all.py")  # fetchers/finance_all.py
+gts = _load("gen_gangtise", _FETCHERS / "gangtise.py")      # fetchers/gangtise.py
 
 from sources.base import source            # noqa: E402
 
@@ -65,23 +66,23 @@ def _ilive(conf):
 # ---------- 同行早报文章(gather_refs) ----------
 
 @source("eastmoney_zaozhidao", "peer_article", "东财搜索《早知道》系列", ttl_min=30,
-        default_enabled=True)
+        default_enabled=True, active_hours="06:00-10:30")
 def _zaozhidao(conf):
     return gs.fetch_eastmoney_zaozhidao(conf.get("keywords"))
 
 
-@source("wscn_breakfast", "peer_article", "华尔街见闻早餐", ttl_min=30, default_enabled=True)
+@source("wscn_breakfast", "peer_article", "华尔街见闻早餐", ttl_min=30, default_enabled=True, active_hours="06:00-10:30")
 def _wscn(conf):
     return gs.fetch_wscn_breakfast(int(conf.get("count", 2)))
 
 
-@source("futu_morning", "peer_article", "富途《港美早报》", risk="medium", ttl_min=30)
+@source("futu_morning", "peer_article", "富途《港美早报》", risk="medium", ttl_min=30, active_hours="06:00-10:30")
 def _futu(conf):
     r = ges.fetch_futu_morning()
     return [r] if r else []
 
 
-@source("cls_morning", "peer_article", "财联社有声早报", ttl_min=30)
+@source("cls_morning", "peer_article", "财联社有声早报", ttl_min=30, active_hours="06:00-10:30")
 def _cls(conf):
     r = ges.fetch_cls_morning()
     return [r] if r else []
@@ -99,7 +100,7 @@ def _turkey(conf):
     return [r] if r else []
 
 
-@source("cnbc_morning", "peer_article", "CNBC Daily Open美股晨报", ttl_min=30)
+@source("cnbc_morning", "peer_article", "CNBC Daily Open美股晨报", ttl_min=30, active_hours="06:00-10:30")
 def _cnbc(conf):
     r = ges.fetch_cnbc_morning()
     return [r] if r else []
@@ -390,7 +391,7 @@ def _longbridge(conf):
 
 # ---------- finance-all 接入(2026-10-15, 原型 E:\finance-all 实测通道移植) ----------
 
-@source("futu_columns", "peer_article", "富途市场栏目五件套", ttl_min=30, default_enabled=True)
+@source("futu_columns", "peer_article", "富途市场栏目五件套", ttl_min=30, default_enabled=True, active_hours="06:00-09:00,11:45-13:30,15:45-17:45,19:45-21:30")
 def _futu_cols(conf):
     return fa.fetch_futu_columns(int(conf.get("pages", 4)))
 
@@ -400,12 +401,12 @@ def _futu_flow(conf):
     return fa.fetch_futu_newsflow(int(conf.get("page_size", 24)))
 
 
-@source("cls_morning_hk", "peer_article", "财联社港股早报", ttl_min=30, default_enabled=True)
+@source("cls_morning_hk", "peer_article", "财联社港股早报", ttl_min=30, default_enabled=True, active_hours="06:00-10:30")
 def _cls_hk(conf):
     return fa.fetch_cls_morning_series("8705")
 
 
-@source("cls_morning_star", "peer_article", "财联社科创板早报", ttl_min=30, default_enabled=True)
+@source("cls_morning_star", "peer_article", "财联社科创板早报", ttl_min=30, default_enabled=True, active_hours="06:00-10:30")
 def _cls_star(conf):
     return fa.fetch_cls_morning_series("2012")
 
@@ -446,6 +447,16 @@ def _laohu(conf):
 
 
 @source("lb_kol", "peer_article", "长桥社区大V帖", ttl_min=60, default_enabled=True)
+
+
+# ---------- Gangtise OpenAPI(2026-10-19): 积分计费源, 活动窗口 05:30-09:30 ----------
+
+@source("gangtise_daily", "peer_article", "Gangtise投研日报", ttl_min=30,
+        default_enabled=True, active_hours="05:30-09:30")
+def _gts_daily(conf):
+    return gts.fetch_gangtise_daily(conf.get("access_key", ""),
+                                    conf.get("secret_key", ""),
+                                    int(conf.get("size", 3)))
 def _lb_kol(conf):
     return fa.fetch_lb_kol(int(conf.get("page_size", 10)))
 
