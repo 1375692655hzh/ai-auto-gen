@@ -106,15 +106,26 @@ def _call(path: str, body: dict, app_id: str, app_secret: str) -> dict:
     return j
 
 
+def _strip_html(html: str) -> str:
+    """html 转纯文本: 块级标签转换行保留段落, 其余剥掉, 实体还原。"""
+    from html import unescape
+    h = re.sub(r"(?i)</(p|section|div|h[1-6]|li|blockquote|pre)>", "\n", html)
+    h = re.sub(r"(?i)<br\s*/?>", "\n", h)
+    h = re.sub(r"<[^>]+>", "", h)
+    h = unescape(h)
+    h = re.sub(r"[ \t\u00a0]+", " ", h)
+    return re.sub(r"\n\s*\n+", "\n", h).strip()
+
+
 def _detail_plain(url: str, app_id: str, app_secret: str) -> str:
     j = _call("/api/v3/articles/detail", {"url": url, "need_text": True}, app_id, app_secret)
     d = j.get("data") or {}
-    pt = (d.get("plain_text") or "").strip()
-    if pt:
-        return pt
-    # 刚发布的文章 plain_text 可能暂空(供应商侧未处理完), html 剥标签兜底
-    strip = re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", d.get("html") or "")).strip()
-    return strip if len(strip) > 500 else ""
+    # 供应商 plain_text 会丢全部数字(1019实测: 同文 plain 0 个数字 vs html剥标签 271 个,
+    # "净流入亿美元"→"净流入644亿美元"), 故 html 剥标签为主, plain 只做兜底。
+    strip = _strip_html(d.get("html") or "")
+    if len(strip) >= 200:
+        return strip
+    return (d.get("plain_text") or "").strip()
 
 
 def fetch_cimi_wx(conf: dict) -> list:
