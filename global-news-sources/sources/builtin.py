@@ -30,6 +30,7 @@ gs = _load("gen_sources", _FETCHERS / "basic.py")          # fetchers/basic.py
 ges = _load("gen_extra_sources", _FETCHERS / "extra.py")   # fetchers/extra.py
 fa = _load("gen_finance_all", _FETCHERS / "finance_all.py")  # fetchers/finance_all.py
 gts = _load("gen_gangtise", _FETCHERS / "gangtise.py")      # fetchers/gangtise.py
+cmi = _load("gen_cimi", _FETCHERS / "cimi.py")              # fetchers/cimi.py
 
 from sources.base import source            # noqa: E402
 
@@ -447,6 +448,8 @@ def _laohu(conf):
 
 
 @source("lb_kol", "peer_article", "长桥社区大V帖", ttl_min=60, default_enabled=True)
+def _lb_kol(conf):
+    return fa.fetch_lb_kol(int(conf.get("page_size", 10)))
 
 
 # ---------- Gangtise OpenAPI(2026-10-19): 积分计费源, 活动窗口 05:30-09:30 ----------
@@ -457,8 +460,16 @@ def _gts_daily(conf):
     return gts.fetch_gangtise_daily(conf.get("access_key", ""),
                                     conf.get("secret_key", ""),
                                     int(conf.get("size", 3)))
-def _lb_kol(conf):
-    return fa.fetch_lb_kol(int(conf.get("page_size", 10)))
+
+
+# ---------- 次幂数据(2026-10-19): 公众号通用拉取, 余额计费 ----------
+# 账号清单在 config.local.yaml sources.cimi_wx.accounts(每项 wxid/nickname/daily_stop/
+# window/title_match); 源级 active_hours 应设为各账号 window 的并集, 缺省 06:00-08:30。
+
+@source("cimi_wx", "peer_article", "公众号·次幂数据", ttl_min=30,
+        default_enabled=True, active_hours="06:00-08:30")
+def _cimi_wx(conf):
+    return cmi.fetch_cimi_wx(conf or {})
 
 
 @source("jin10_calendar", "market", "金十财经日历",
