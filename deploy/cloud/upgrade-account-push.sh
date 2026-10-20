@@ -2,7 +2,7 @@
 # 账号成分推送一键升级(2026-09-21; 0923 二修) — 在云端数据站仓库根执行
 # (bash deploy/cloud/upgrade-account-push.sh)
 # 做: git pull → 幂等合并 config.local.yaml 的 feishu 段(现有凭证/watch 不动, 改前备份)
-#   → 可选注入 MiniMax-M3 翻译链头(需先 export AAG_MINIMAX_KEY=sk-.., key 不进仓)
+#   → 可选注入 MiniMax-M3.1-Flash 翻译链尾(需先 export AAG_MINIMAX_KEY=sk-.., key 不进仓)
 #   → 打印机器人凭证 → dry-run 自检。
 # 0923 修复: 配置路径双探测——云端 sparse checkout 无 ai-workflow/ 目录, 真正生效的
 #   覆盖文件是 global-news-sources/config.local.yaml(0917 飞书凭证所在); 本机则是
@@ -61,7 +61,7 @@ if repo_accs_f.is_file():
 elif not (ap.get("accounts") or []):
     ap["accounts"] = [{"name": "Owenwin888", "owner": "黄正汉",
                        "mix": {"美股": 60, "亚太股市": 10, "AI与科技": 30}}]
-# MiniMax-M3 翻译链注入(0923 二修): 注入点=translate.models 链尾——推送兜底翻译
+# MiniMax 翻译链注入(0923 二修; 1020 换号 M3.1-Flash): 注入点=translate.models 链尾——推送兜底翻译
 # 缺省复用 translate.models(免费zen优先+MiniMax终极兜底); 不写 feishu.digest_models,
 # 否则 digest_models 非空会遮蔽 zen 免费链, 推送兜底全烧 MiniMax 付费。key 走 env 防泄密。
 mm_key = os.environ.get("AAG_MINIMAX_KEY", "").strip()
@@ -70,10 +70,10 @@ lst = [m for m in (tr.get("models") or []) if isinstance(m, dict)]
 has_mm = any("minimaxi" in str(m.get("base_url") or "") for m in lst)
 if mm_key and not has_mm:
     lst.append({"base_url": "https://api.minimaxi.com/v1", "api_key": mm_key,
-                "model": "MiniMax-M3",
-                "extra": {"thinking": {"type": "disabled"}, "max_tokens": 16384}})
+                "model": "MiniMax-M3.1-Flash"})
+    # 1020换号: M3.1-Flash 强制 adaptive thinking, thinking 参数(disabled/null)一律 400, 干脆不传
     tr["models"] = lst
-    print("翻译链: MiniMax-M3 已注 translate.models 链尾(终极兜底, 思考关闭)")
+    print("翻译链: MiniMax-M3.1-Flash 已注 translate.models 链尾(终极兜底, thinking 不传=官方默认)")
 elif has_mm:
     print("翻译链: 已含 MiniMax(幂等跳过)")
 else:
