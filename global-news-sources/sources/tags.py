@@ -180,6 +180,8 @@ NOTES = {
     "jin10_market": "finance-all移植; NUXT表达式需node求值(云端有node), 与jin10_flash不同通道",
     "laohu_news": "finance-all移植; 必须lang=zh_CN, 91000000=临时风控重试",
     "gangtise_daily": "OpenAPI积分源: 列表0.1/条+正文10/篇, seen防重复下载; **每天只拉两跳=06:45+07:00(用户1019定案, active_hours双窗+ttl10必须小于跳间隔)**; AK/SK在config.local.yaml; 旧gangtise/yuanbao_gangtise通道零产出",
+    "futu_morning": "1020修复: 标题正则扩'港美股早报'变体(10-19整天缺席根因)+WAF破盾三重试(偶发拦停曾致迟到41min); 若仍稳定09:00后入库=富途新闻流本身延迟推送早报, 非站侧问题",
+    "cls_morning_star": "**上游停更**: 财联社subject/2012专题页最新一条停在10-16 08:05(10-20实锤), 同代码的8705港股早报正常; 源保留零成本空转, 上游恢复自动接上; 需科创板晨报可走cimi公众号通道找替代号",
     "cimi_wx": "余额计费源: 列表4/次+正文1/篇; **AppID=0933535266带前导零, YAML必须引号, 报4102先数位数**; 账号级window/daily_stop/title_match; 无账号=零成本空转",
     "cimi_premium": "精品文章双号(invest wallstreet日更多篇+半导体行业观察); 计费主闸interval_min=180(空结果不受TTL保护全靠它); 本地config应enabled:false防与云端双扣费",
     "lb_kol": "finance-all移植; topics SSR; 运营帖过滤(交易展示会/抽奖/任务币等)",

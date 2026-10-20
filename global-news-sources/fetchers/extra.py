@@ -29,6 +29,9 @@ def _get(url, referer, **kw):
 
 
 # ---------- 富途早报(列表 API + WAF 破盾) ----------
+# 标题变体: 常见 富途早报/港美早报, 10-19 出现过"港美股早报"(多一个股字, 旧正则漏→整天缺席)
+_MORNING_RE = re.compile(r"港美[股]?早报|富途早报")
+
 
 def _waf_hash(jwt: str) -> str:
     MOD = 2 ** 25
@@ -74,12 +77,12 @@ def fetch_futu_morning() -> dict | None:
                      "https://news.futunn.com/", params=params).json()
             lst = (r.get("data") or {}).get("list") or []
         arts.extend(lst)
-        if any(re.search(r"港美早报|富途早报", a.get("title", "")) for a in arts):
+        if any(_MORNING_RE.search(a.get("title", "")) for a in arts):
             break                                   # 命中即停(倒序, 最新的在前)
         if not data.get("hasMore") or not data.get("seqMark") or not lst:
             break
         seq_mark = data["seqMark"]
-    hits = [a for a in arts if re.search(r"港美早报|富途早报", a.get("title", ""))]
+    hits = [a for a in arts if _MORNING_RE.search(a.get("title", ""))]
     if not hits:
         return None
     art = max(hits, key=lambda a: int(a.get("timestamp") or 0))
@@ -87,13 +90,18 @@ def fetch_futu_morning() -> dict | None:
 
     s = requests.Session()
     s.headers.update({**UA, "Referer": "https://news.futunn.com/"})
-    h = s.get(url, timeout=20).text
-    if "wafToken" in h and "origin_content" not in h:
-        m = re.search(r"eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+", h)
-        if m:
-            jwt = m.group(0)
-            s.cookies.set("wafToken", f"{jwt}@{_waf_hash(jwt)}@{_waf_suffix()}")
-            h = s.get(url, timeout=20).text
+    h = ""
+    for _try in range(3):                # WAF 盾偶发拦停曾致整源空手(1020 复盘: 迟到41min), 三次重试
+        h = s.get(url, timeout=20).text
+        if "wafToken" in h and "origin_content" not in h:
+            m = re.search(r"eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+", h)
+            if m:
+                jwt = m.group(0)
+                s.cookies.set("wafToken", f"{jwt}@{_waf_hash(jwt)}@{_waf_suffix()}")
+                h = s.get(url, timeout=20).text
+        if "origin_content" in h:
+            break
+        _time.sleep(2)
     i = h.find("origin_content")
     if i < 0:
         return None
