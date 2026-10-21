@@ -169,22 +169,63 @@ def fetch_futu_columns(pages: int = 4) -> list:
             detail = _futu_detail(eid, url=i.get("url") or "", fallback=text)
             if detail:
                 text = detail
-                _mark_seen(eid)        # 只有拿到正文才标记, 失败下轮重试
+                if len(text) >= 600:     # 只有全文才标 seen; 摘要条目保URL发现力, 窗口内下轮升全文
+                    _mark_seen(eid)
         if not text:
             continue
         out.append(_item(title, text, i.get("url"), ts, "富途资讯"))
     return out
 
 
+def _futu_post_full(url: str) -> str:
+    """futu post 页 SSR 全文(带 WAF 破盾+三重试, 移植自 extra.py 富途早报链, 1021)。
+
+    背景: futu_columns 曾出现约 3 成条目只有 ~100 字摘要——SSR 被盾/限流时旧实现
+    直接落 API 摘要并标 seen, 该条永不升级全文。"""
+    import random
+    s = requests.Session()
+    s.headers.update({"User-Agent": UA, "Referer": "https://news.futunn.com/"})
+    h = ""
+    for _try in range(3):
+        h = s.get(url, timeout=20).text
+        if "wafToken" in h and "origin_content" not in h:
+            m = re.search(r"eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+", h)
+            if m:
+                jwt = m.group(0)
+                hv = 0x811C9DC5                      # 与 extra.py _waf_hash 同式
+                for ch in jwt:
+                    hv = (0x83 * hv + hv + ord(ch)) % (2 ** 25)
+                while True:
+                    n = str(random.randint(10 ** 8, 10 ** 10))
+                    if n[-7] == "1" and n[-3] == "1":
+                        break
+                s.cookies.set("wafToken",
+                              f"{jwt}@{format(abs(hv) % 2 ** 25, 'x')}@{n}")
+                h = s.get(url, timeout=20).text
+        i = h.find("origin_content")
+        if i >= 0:
+            seg = h[i:i + 120000]
+            gt = seg.find(">")
+            if 0 <= gt < 60:
+                seg = seg[gt + 1:]
+            for end in ('class="origin_', "免责声明", "相关阅读"):
+                j = seg[6000:].find(end)
+                if j > 0:
+                    seg = seg[:6000 + j]
+            return "\n\n".join(_p_texts(seg))
+        time.sleep(2)
+    return ""
+
+
 def _futu_detail(eid, url, fallback=""):
-    """富途详情: post 页 SSR 全文优先(有限流), 降级 API 摘要。"""
+    """富途详情: post 页 WAF 破盾全文优先, 降级 API 摘要(调用侧仅全文标 seen, 下轮升全文)。"""
     text = ""
     try:
         time.sleep(0.8)
-        text = "\n\n".join(_paragraphs_from_html(_get(url)))
+        text = _futu_post_full(url)
     except Exception:
         pass
-    if len(text) < 200:
+    if len(text) < 600:
         try:
             d = _get_json("https://news.futunn.com/news-site-api/detail/get-post-info?id=" + eid)
             ab = ((d.get("data") or {}).get("info") or {}).get("abstract") or ""

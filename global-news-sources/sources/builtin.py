@@ -66,24 +66,24 @@ def _ilive(conf):
 
 # ---------- 同行早报文章(gather_refs) ----------
 
-@source("eastmoney_zaozhidao", "peer_article", "东财搜索《早知道》系列", ttl_min=30,
+@source("eastmoney_zaozhidao", "peer_article", "东财搜索《早知道》系列", ttl_min=10,
         default_enabled=True, active_hours="06:00-10:30")
 def _zaozhidao(conf):
     return gs.fetch_eastmoney_zaozhidao(conf.get("keywords"))
 
 
-@source("wscn_breakfast", "peer_article", "华尔街见闻早餐", ttl_min=30, default_enabled=True, active_hours="06:00-10:30")
+@source("wscn_breakfast", "peer_article", "华尔街见闻早餐", ttl_min=10, default_enabled=True, active_hours="06:00-10:30")
 def _wscn(conf):
     return gs.fetch_wscn_breakfast(int(conf.get("count", 2)))
 
 
-@source("futu_morning", "peer_article", "富途《港美早报》", risk="medium", ttl_min=30, active_hours="06:00-10:30")
+@source("futu_morning", "peer_article", "富途《港美早报》", risk="medium", ttl_min=10, active_hours="06:00-10:30")
 def _futu(conf):
     r = ges.fetch_futu_morning()
     return [r] if r else []
 
 
-@source("cls_morning", "peer_article", "财联社有声早报", ttl_min=30, active_hours="06:00-10:30")
+@source("cls_morning", "peer_article", "财联社有声早报", ttl_min=10, default_enabled=True, active_hours="06:00-10:30")  # 1021启用: 下游实测每日07:00准点, 晨间链主源
 def _cls(conf):
     r = ges.fetch_cls_morning()
     return [r] if r else []
@@ -392,7 +392,7 @@ def _longbridge(conf):
 
 # ---------- finance-all 接入(2026-10-15, 原型 E:\finance-all 实测通道移植) ----------
 
-@source("futu_columns", "peer_article", "富途市场栏目五件套", ttl_min=30, default_enabled=True, active_hours="06:00-09:00,11:45-13:30,15:45-17:45,19:45-21:30")
+@source("futu_columns", "peer_article", "富途市场栏目五件套", ttl_min=10, default_enabled=True, active_hours="06:00-09:00,11:45-13:30,15:45-17:45,19:45-21:30")
 def _futu_cols(conf):
     return fa.fetch_futu_columns(int(conf.get("pages", 4)))
 
@@ -402,12 +402,12 @@ def _futu_flow(conf):
     return fa.fetch_futu_newsflow(int(conf.get("page_size", 24)))
 
 
-@source("cls_morning_hk", "peer_article", "财联社港股早报", ttl_min=30, default_enabled=True, active_hours="06:00-10:30")
+@source("cls_morning_hk", "peer_article", "财联社港股早报", ttl_min=10, default_enabled=True, active_hours="06:00-10:30")
 def _cls_hk(conf):
     return fa.fetch_cls_morning_series("8705")
 
 
-@source("cls_morning_star", "peer_article", "财联社科创板早报", ttl_min=30, default_enabled=True, active_hours="06:00-10:30")
+@source("cls_morning_star", "peer_article", "财联社科创板早报", ttl_min=10, default_enabled=True, active_hours="06:00-10:30")
 def _cls_star(conf):
     return fa.fetch_cls_morning_series("2012")
 
