@@ -57,11 +57,14 @@ def _save(p: Path, d) -> None:
     os.replace(tmp, p)
 
 
-def _station_key() -> str:
-    d = _load(WB_SETTINGS, {})
-    key = ((d.get("source") or {}).get("api_key") or "").strip()
+def _station_key(cfg: dict) -> str:
+    # 取用顺序: config station_key(云端用) > workbench settings(本机用)
+    key = str(cfg.get("station_key") or "").strip()
     if not key:
-        raise SystemExit("没有数据站 key: data/workbench/settings.json source.api_key 为空")
+        d = _load(WB_SETTINGS, {})
+        key = ((d.get("source") or {}).get("api_key") or "").strip()
+    if not key:
+        raise SystemExit("没有数据站 key: config station_key 或 workbench settings source.api_key")
     return key
 
 
@@ -159,7 +162,7 @@ def main() -> int:
     done = state["done"]
 
     since = (datetime.now() - timedelta(days=7)).strftime("%Y-%m-%d")
-    items = _pull_items(cfg["station_base_url"], _station_key(), since)
+    items = _pull_items(cfg["station_base_url"], _station_key(cfg), since)
     fresh = [it for it in items if str(it.get("id")) not in done]
     if a.limit:
         fresh = fresh[: a.limit]
