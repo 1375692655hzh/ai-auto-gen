@@ -474,11 +474,12 @@ def _cimi_wx(conf):
     return cmi.fetch_cimi_wx(conf or {})
 
 
-# 精品文章专用通道(2026-10-19 用户定案): invest wallstreet + 半导体行业观察,
-# form=精品文章; 账号在 config cimi_premium 段, 计费主闸 interval_min=180。
+# 精品文章专用通道(2026-10-19): invest wallstreet + 半导体行业观察,
+# form=精品文章; 2026-10-21 用户定案三跳制: 每天 08:00/13:00/18:00 各一跳(15min栅格上
+# 三个微窗各含唯一tick), 其余时间零成本; 新文章最迟5h入站, 18点后发的次日08:00接。
 
 @source("cimi_premium", "peer_article", "公众号精品文·次幂数据", ttl_min=60,
-        default_enabled=True, active_hours="07:00-22:00")
+        default_enabled=True, active_hours="08:00-08:15,13:00-13:15,18:00-18:15")
 def _cimi_premium(conf):
     return cmi.fetch_cimi_wx(conf or {})
 
