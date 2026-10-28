@@ -38,7 +38,7 @@ from pathlib import Path
 _log = logging.getLogger(__name__)   # 锁/账本事故必须有声, 沉默=停摆数小时无人知
 
 _LOCK = threading.Lock()                # 进程内线程锁(还有一道文件锁兜底)
-_ZEN_PORT_NODE = {"20133": "jp", "20134": "hk", "20135": "hk2"}
+_ZEN_PORT_NODE = {"20133": "jp", "20134": "hk", "20135": "hk2", "20136": "hk3"}
 _ZEN_NODES = tuple(_ZEN_PORT_NODE.values())
 _SEQ = itertools.count(1)               # 事件序号: eid 同毫秒去重排序用
 _SEEN_CAP = 4000                        # seen_eids 上限(防 state 膨胀, 去重窗口)
@@ -703,7 +703,7 @@ def usage_report(days: int = 1) -> str:
     out.append("-- 熔断现状 --")
     ib = st.get("ip_break") or {}
     any_br = False
-    for node in ("jp", "hk", "hk2", "minimax"):
+    for node in ("jp", "hk", "hk2", "hk3", "minimax"):
         r = _broken(ib, node, now)
         if r:
             any_br = True
