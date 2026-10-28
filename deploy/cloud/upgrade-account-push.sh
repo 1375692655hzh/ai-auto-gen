@@ -61,23 +61,16 @@ if repo_accs_f.is_file():
 elif not (ap.get("accounts") or []):
     ap["accounts"] = [{"name": "Owenwin888", "owner": "黄正汉",
                        "mix": {"美股": 60, "亚太股市": 10, "AI与科技": 30}}]
-# MiniMax 翻译链注入(0923 二修; 1020 试换 M3.1-Flash 当日回退——思考关不掉): 注入点=translate.models 链尾——推送兜底翻译
-# 缺省复用 translate.models(免费zen优先+MiniMax终极兜底); 不写 feishu.digest_models,
-# 否则 digest_models 非空会遮蔽 zen 免费链, 推送兜底全烧 MiniMax 付费。key 走 env 防泄密。
-mm_key = os.environ.get("AAG_MINIMAX_KEY", "").strip()
+# 2026-10-29 用户裁决: MiniMax 付费兜底位整体废弃(云端 translate.models 已删, 纯 zen 免费四条)。
+# 本块由"注入"改为"检测到即清除"——防旧配置或人为误加复活; 要恢复付费兜底去 git 历史找注入模板。
 tr = cfg.setdefault("sources", {}).setdefault("translate", {})
 lst = [m for m in (tr.get("models") or []) if isinstance(m, dict)]
 has_mm = any("minimaxi" in str(m.get("base_url") or "") for m in lst)
-if mm_key and not has_mm:
-    lst.append({"base_url": "https://api.minimaxi.com/v1", "api_key": mm_key,
-                "model": "MiniMax-M3", "extra": {"thinking": None}})
-    # 1020试换M3.1-Flash当日回退: 该模型强制adaptive thinking关不掉, 用户裁决留M3(null→白名单剥成省略=官方默认关)
-    tr["models"] = lst
-    print("翻译链: MiniMax-M3 已注 translate.models 链尾(终极兜底, thinking=null→省略=默认关)")
-elif has_mm:
-    print("翻译链: 已含 MiniMax(幂等跳过)")
+if has_mm:
+    tr["models"] = [m for m in lst if "minimaxi" not in str(m.get("base_url") or "")]
+    print("翻译链: 检测到 MiniMax 残留, 已按 1029 废弃决议移除")
 else:
-    print("翻译链: 未设 AAG_MINIMAX_KEY, 跳过 MiniMax 注入(translate.models 现有免费链继续用)")
+    print("翻译链: MiniMax 已废弃(1029), 纯 zen 免费链")
 fs["account_push"] = ap
 p.write_text(yaml.safe_dump(cfg, allow_unicode=True, sort_keys=False), encoding="utf-8")
 print(f"配置已合并 → {p} (备份: config.local.backup-*.yaml; 账号 {len(ap['accounts'])} 个)")
