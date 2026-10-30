@@ -161,14 +161,17 @@ def fetch_cimi_wx(conf: dict) -> list:
         if time.time() - lastlist.get(wxid, 0) < int(acc.get("interval_min", iv_default)) * 60:
             continue                                    # 计费主闸: 空结果不受TTL保护, 靠它防烧穿
         try:
-            j = _call("/api/v2/articles/current", {"wxid": wxid}, app_id, app_secret)
+            # 1030改: 发现层用 history(最近10篇+翻页)而非 current——current 是供应商侧
+            # 懒惰缓存, 实测连 3.5h 前的当日新文章都不返回(1030 事故: 10-29 08:25 起的
+            # 文章在 13:01/16:00 两跳全漏); history 稳定返回真实最近发帖, seen 去重兜底。
+            j = _call("/api/v2/articles/history", {"wxid": wxid}, app_id, app_secret)
         except Exception as ex:
             errors.append(f"{nick}: {ex}")
             continue
         lastlist[wxid] = int(time.time())
         match = str(acc.get("title_match") or "").strip()
         exc = str(acc.get("title_exclude") or "").strip()
-        for a in j.get("data") or []:
+        for a in (j.get("data") or {}).get("items") or []:
             url, title = a.get("content_url") or "", (a.get("title") or "").strip()
             if (not url or url in seen or (match and match not in title)
                     or (exc and exc in title)):
