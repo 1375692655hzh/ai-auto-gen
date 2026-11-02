@@ -3499,6 +3499,214 @@ accounts:
   positioning: 宏观时事评论
   tags: []
 
+  # ── 1101 二批西语池(用户补充清单; FxTwitter验号12/12全过, 无重名) ──
+  # 优先补充6号启用: 股息/质量/价值流派, 长期分享少喊单;
+  # 观察6号入库停用(基本面估值参差/聚合推荐类/动量视角), 需要时再开。
+- handle: LocodlDividendo
+  enabled: true
+  uid: '1132579535961100288'
+  name: El Loco del Dividendo
+  homepage: https://x.com/LocodlDividendo
+  markets: [美国]
+  role: analyst
+  lang: es
+  tier: core
+  rank: 1
+  priority: medium
+  risk: medium
+  replies: false
+  note: 纯股息策略, 长期公开自己的股息组合, 逻辑清晰; 社区有争议但内容真实
+  followers: 56204
+  positioning: 股息组合实盘分享
+  tags: [美股]
+- handle: iparatx
+  enabled: true
+  uid: '3110939787'
+  name: Ipar
+  homepage: https://x.com/iparatx
+  markets: [美国]
+  role: analyst
+  lang: es
+  tier: core
+  rank: 2
+  priority: medium
+  risk: low
+  replies: false
+  note: 长期股息+现金流, 社区公认受尊重的长期投资者, 分享真实持仓与策略
+  followers: 30118
+  positioning: 长期股息投资者
+  tags: [美股]
+- handle: GaliciaInvestor
+  enabled: true
+  uid: '1148899683508654081'
+  name: Galician Investor Quality Research
+  homepage: https://x.com/GaliciaInvestor
+  markets: [美国]
+  role: analyst
+  lang: es
+  tier: core
+  rank: 3
+  priority: high
+  risk: low
+  replies: false
+  note: 质量投资/Buffett风格, 深度个股分析月更, 价值与质量取向
+  followers: 65898
+  positioning: 质量投资深度研究
+  tags: [美股]
+- handle: ProfesorDiv
+  enabled: true
+  uid: '1351219428969607172'
+  name: El Profesor del Dividendo
+  homepage: https://x.com/ProfesorDiv
+  markets: [美国]
+  role: analyst
+  lang: es
+  tier: core
+  rank: 4
+  priority: medium
+  risk: low
+  replies: false
+  note: 经济教师背景, 股息投资教育, 内容理性解释清晰; 教育向内容
+  followers: 34305
+  positioning: 股息投资教育
+  tags: [美股]
+- handle: WorldStockss
+  enabled: true
+  uid: '1343698566045446145'
+  name: WorldStocks
+  homepage: https://x.com/WorldStockss
+  markets: [美国]
+  role: analyst
+  lang: es
+  tier: core
+  rank: 5
+  priority: medium
+  risk: low
+  replies: false
+  note: 质量公司长期投资, 偏长期质量股
+  followers: 32807
+  positioning: 质量公司长期投资
+  tags: [美股]
+- handle: themoatfreak
+  enabled: true
+  uid: '1435598944873103360'
+  name: Carlos - The Moat Freak
+  homepage: https://x.com/themoatfreak
+  markets: [美国]
+  role: analyst
+  lang: es
+  tier: core
+  rank: 6
+  priority: medium
+  risk: low
+  replies: false
+  note: 价值投资/护城河分析, 体量小但分析深度好, 补充参考
+  followers: 3586
+  positioning: 护城河价值投资
+  tags: [美股]
+- handle: MDBBolsa
+  enabled: false
+  uid: '1350470003087257601'
+  name: Miguel Dabán Baines-MDBbolsa
+  homepage: https://x.com/MDBBolsa
+  markets: [美国]
+  role: analyst
+  lang: es
+  tier: edge
+  rank: 7
+  priority: low
+  risk: medium
+  replies: false
+  note: 基本面分析, 体量中小内容质量参差——观察号默认停用
+  followers: 18821
+  positioning: 基本面分析
+  tags: [美股]
+- handle: InvEnCalidad
+  enabled: false
+  uid: '1703684783224549376'
+  name: Invirtiendo en Calidad
+  homepage: https://x.com/InvEnCalidad
+  markets: [美国]
+  role: analyst
+  lang: es
+  tier: edge
+  rank: 8
+  priority: low
+  risk: medium
+  replies: false
+  note: 质量投资, 体量中小内容质量参差——观察号默认停用
+  followers: 5380
+  positioning: 质量投资
+  tags: [美股]
+- handle: ValuationValue
+  enabled: false
+  uid: '1571751006148464640'
+  name: Valuation Matters
+  homepage: https://x.com/ValuationValue
+  markets: [美国]
+  role: analyst
+  lang: es
+  tier: edge
+  rank: 9
+  priority: low
+  risk: medium
+  replies: false
+  note: 估值分析, 体量中小内容质量参差——观察号默认停用
+  followers: 6226
+  positioning: 估值分析
+  tags: [美股]
+- handle: Caesar__Capital
+  enabled: false
+  uid: '1423415609371643907'
+  name: CAESAR CAPITAL
+  homepage: https://x.com/Caesar__Capital
+  markets: [美国]
+  role: analyst
+  lang: es
+  tier: edge
+  rank: 10
+  priority: low
+  risk: medium
+  replies: false
+  note: 基本面与估值, 体量中小内容质量参差——观察号默认停用
+  followers: 8801
+  positioning: 基本面与估值
+  tags: [美股]
+- handle: espabilaeinv
+  enabled: false
+  uid: '1482076538841579522'
+  name: Espabila e Invierte
+  homepage: https://x.com/espabilaeinv
+  markets: [全球]
+  role: kol
+  lang: es
+  tier: edge
+  rank: 11
+  priority: low
+  risk: medium
+  replies: false
+  note: 教育向, 发过FinTwit推荐列表的聚合类账号——观察号默认停用
+  followers: 23750
+  positioning: 投资教育聚合
+  tags: []
+- handle: capestrategico
+  enabled: false
+  uid: '1744277989993418752'
+  name: Capital Estratégico | Adrián Serra
+  homepage: https://x.com/capestrategico
+  markets: [西班牙]
+  role: trader
+  lang: es
+  tier: edge
+  rank: 12
+  priority: low
+  risk: medium
+  replies: false
+  note: 动量与交易视角, 分享西语市场内容账号列表——观察号默认停用
+  followers: 4178
+  positioning: 动量交易视角
+  tags: []
+
 filters:
   include_keywords:
   - piyasa
