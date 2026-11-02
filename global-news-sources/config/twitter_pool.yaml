@@ -3387,6 +3387,118 @@ accounts:
   positioning: 谷歌与Alphabet CEO
   tags:
   - 科技
+  # ── 1022 新增西班牙语池(用户提供西语FinTwit资讯质量评估; FxTwitter验号6/6全过) ──
+  # 评估结论分两档: 靠谱4号启用(carpatos/jluiscava/InvertirDesde0/FinanzasArgy,
+  # 当"信息雷达"用), 争议2号入库停用(PabloGilTrader长期偏空+卖课利益冲突,
+  # wallstwolverine政治评论为主+Newtral指出过事实错误), 需要时再开。
+- handle: carpatos
+  enabled: true
+  uid: '16566387'
+  name: José Luis Cárpatos
+  homepage: https://x.com/carpatos
+  markets: [全球]
+  role: analyst
+  lang: es
+  tier: core
+  rank: 1
+  priority: high
+  risk: medium
+  replies: false
+  note: 1985年起从业, 机构顾问/对冲基金相关, CISI会员; 独立分析(技术+基本面+市场微观结构),
+    YouTube日更开盘收盘; 近年偏评论, track record不透明
+  followers: 77570
+  positioning: 独立市场分析师
+  tags: [美股]
+- handle: jluiscava
+  enabled: true
+  uid: '883106360'
+  name: Jose Luis Cava
+  homepage: https://x.com/jluiscava
+  markets: [全球]
+  role: analyst
+  lang: es
+  tier: core
+  rank: 2
+  priority: high
+  risk: medium
+  replies: false
+  note: 银行出身独立分析师, 合作《Estrategias de Inversión》, 有著作; 宏观+技术+流动性视角,
+    媒体曝光多, 独立可验证业绩少
+  followers: 160371
+  positioning: 独立分析师
+  tags: [美股]
+- handle: InvertirDesde0
+  enabled: true
+  uid: '1210210940085526531'
+  name: InvertirDesdeCero
+  homepage: https://x.com/InvertirDesde0
+  markets: [美国]
+  role: analyst
+  lang: es
+  tier: core
+  rank: 3
+  priority: high
+  risk: low
+  replies: false
+  note: 银行分析经验Fernando Sánchez创立, 长期价值/成长投资教育, 美股个股基本面拆解
+    (META/TSM/ASML等), 有免费长课程; 教育属性强需区分教学内容与荐股
+  followers: 66751
+  positioning: 美股基本面投教
+  tags: [美股]
+- handle: FinanzasArgy
+  enabled: true
+  uid: '1251127925195378690'
+  name: Finanzas Argy
+  homepage: https://x.com/FinanzasArgy
+  markets: [阿根廷]
+  role: media
+  lang: es
+  tier: core
+  rank: 4
+  priority: medium
+  replies: false
+  note: 阿根廷匿名大号, 事实+数据为主, 被部分主流媒体引用, 自称不做投资建议;
+    阿根廷宏观时事为主, 美股深度有限; 大类无对应桶, 依赖L1打标决定是否入分发
+  followers: 304878
+  positioning: 阿根廷宏观资讯
+  tags: []
+- handle: PabloGilTrader
+  enabled: false
+  uid: '825075204619649024'
+  name: Pablo Gil
+  homepage: https://x.com/PabloGilTrader
+  markets: [西班牙]
+  role: trader
+  lang: es
+  tier: edge
+  rank: 5
+  priority: low
+  risk: high
+  replies: false
+  note: 前Santander技术分析负责人/做过基金; 表达清晰宏观技术结合, 但长期偏空多次预警
+    未兑现+卖课/券商合作利益冲突+可验证业绩不足——争议号默认停用
+  followers: 163066
+  positioning: 技术分析与宏观交易
+  tags: [美股]
+- handle: wallstwolverine
+  enabled: false
+  uid: '351491321'
+  name: Wall Street Wolverine
+  homepage: https://x.com/wallstwolverine
+  markets: [全球]
+  role: kol
+  lang: es
+  tier: edge
+  rank: 6
+  priority: low
+  risk: high
+  replies: false
+  note: 内容创作者(Víctor Domínguez), 传播力极强覆盖宏观时事, 但偏观点与政治评论
+    非专业投资分析, Newtral指出过事实性错误——争议号默认停用
+  followers: 885970
+  positioning: 宏观时事评论
+  tags: []
+
 filters:
   include_keywords:
   - piyasa
