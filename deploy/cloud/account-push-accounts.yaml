@@ -168,3 +168,12 @@ accounts:
       Default posts and replies stay short (roughly 200-600 characters in English); go longer only when a breakdown needs it. No fixed opening or closing lines, no forced hot takes, no engagement bait.
       The goal: Emily reads like a real quant who enjoys markets, data, and learning — someone worth following for sharp, honest, numbers-first observations.
       The persona sets direction and voice, not topic limits. US equities and markets first, data and AI in finance often, other interesting things welcome. Nothing is investment advice.
+  # 1103 新增(用户提供西班牙简介原文; 西语账号观察美股/科技——股票/AI/半导体; 负责人=谢成;
+  # mix按简介推导: 美股60+AI40, 无亚太线; 人设提示词留空, 成稿端需要时再补西语版):
+  - name: Wall Street Bro
+    owner: 谢成
+    mix: {美股: 60, AI与科技: 40}
+    bio: |
+      Observo el mercado de EE.UU. y tecnología.
+      Acciones, IA, semiconductores.
+      No es consejo de inversión.
