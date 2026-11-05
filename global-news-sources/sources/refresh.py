@@ -236,6 +236,18 @@ def run(dry_run: bool = False, export: bool = True) -> dict:
         rep["dedup"] = _st.link_dups()
     except Exception as ex:
         rep["failures"].append(f"link_dups({type(ex).__name__}: {str(ex)[:60]})")
+    # (2026-11-05) 账号成分推送提到 translate 之前: push 有硬锚点档(8/11/17)且是对用户的
+    # 交付物, translate/llm_tag 是可"下轮补"的幂等追平工作。1105 事故: zen 翻译链单轮跑
+    # ~10min 吃光 3min 尾预算, push 的静默 if 守卫连续饿死 8/11 两个锚点档, 表停更一天。
+    # push 自带 _translate_missing 兜底翻译选中条目, 不依赖 translate.run 先跑。
+    if time.time() < tail_deadline:
+        try:
+            from sources import feishu
+            rep["feishu_push"] = feishu.run_account_push(deadline=tail_deadline)  # M3: 尾预算透传
+        except Exception as ex:
+            rep["failures"].append(f"feishu_push({type(ex).__name__}: {str(ex)[:60]})")
+    else:
+        rep["failures"].append("轮末预算耗尽, feishu_push 跳过(锚点时段内下轮补)")
     if time.time() < tail_deadline:
         try:
             from sources import translate
@@ -250,13 +262,6 @@ def run(dry_run: bool = False, export: bool = True) -> dict:
             rep["feishu"] = feishu.run_digest(rep["started_at"])
         except Exception as ex:
             rep["failures"].append(f"feishu({type(ex).__name__}: {str(ex)[:60]})")
-    # (2026-09-21) 账号成分推送(2h节流在函数内部, 到点才真推), 与旧摘要共用轮末预算。
-    if time.time() < tail_deadline:
-        try:
-            from sources import feishu
-            rep["feishu_push"] = feishu.run_account_push(deadline=tail_deadline)  # M3: 尾预算透传
-        except Exception as ex:
-            rep["failures"].append(f"feishu_push({type(ex).__name__}: {str(ex)[:60]})")
     # 顺序裁决(2026-09-16): translate 先于 llm_tag——用户对翻译有 15min 时效承诺,
     # 标签无时效承诺且有规则打标兜底; 免费池经代理后单批变慢, 后者会吃光轮末预算。
     # (2026-09-17) feishu 摘要插在 translate 后(译文就绪) llm_tag 前(标签可等)。
